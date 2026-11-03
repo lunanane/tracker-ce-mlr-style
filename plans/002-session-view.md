@@ -1,6 +1,7 @@
 # Plan 002 — Session view (MLR-style track retrigger)
 
-Status: IDEA (2026-11-04). Investigation only; builds on plan 001's Play mode (same Pattern-tap toggle family).
+Status: APPROVED (owner 2026-11-04: "lets definitely implement that"). Builds on plan 001's Play mode (same
+Pattern-tap toggle family).
 
 ## Can tracks run separately? (firmware findings)
 - **One transport, one clock**: Play/Stop, tempo and the 48-µstep clock are global (`Sequencer::tick_uStep`,
@@ -25,9 +26,41 @@ MLR-style:
 - Press a pad → that track's playhead jumps there (quantised to the next step, or 1/16 / beat — setting).
 - Hold two pads in a row → loop that range; release → back to the full track.
 - Row controls (if 8 position columns): stop/start track, reverse, rate ½ / 2×, re-sync to global.
-- Plays the pattern data (and plan 001 sequencers). Recording a jump performance into the pattern: later.
+- Plays the pattern data (and plan 001 sequencers). Playhead recording: see below.
+
+## Playhead recording (owner 2026-11-04)
+- After jamming position jumps on a row, **hold Rec while jamming**: the jumps are recorded (quantised, per
+  step). **Releasing Rec** closes the loop: the track keeps playing that recorded playhead sequence, over and over.
+- It keeps running when you switch to another group, and while you are on other pages. A new press on that row
+  overrides it live; [provisional: a two-pad loop gesture or "resync" clears the recorded sequence].
+- Storage: per track a table "position for each step of the recorded loop" (≤ 256 steps × 1 byte), ~4 KB for 16
+  tracks; saved in the project sidecar with plan 001's state. Pattern data is never touched.
+
+## What a jump does (works for drum patterns and for long loops)
+A jump to position X re-plays the track **as if its playhead had been at X**:
+1. the pattern playhead of that track is set to X (`actual_pos`, `uStep = 1`, quantised);
+2. the last note at or before X on that track is re-triggered with a **sample offset** = time from that note's step
+   to X (same mechanism as the Position FX). So a single long loop sample on step 1 is cut MLR-style, and a drum
+   pattern simply jumps.
+
+## Long samples / SD streaming (CE changelog item 6, `VoiceStreamManager`)
+- CE streams samples ≥ 256 KB from the SD card; only the first 32,768 frames (~743 ms) are pre-cached in SDRAM.
+- A jump **past the pre-cache** starts with an empty ring buffer that the main loop refills
+  (`VoiceStreamManager.cpp` ~893); on the original Tracker the main loop can be busy 20–35 ms per step with
+  redraws → audible late start / gap.
+- Plan: a **cut cache** — when a track is in Session view, pre-fetch a short window (e.g. 4,096 frames) at every
+  column's start point into SDRAM, like the slice pre-cache on Tracker+ (`refreshInstrumentSliceCache`). 8 or 12
+  windows × 4 tracks × 8 KB ≈ 256–384 KB of the ~1.1 MB free SDRAM. Samples that fit in RAM (7.5 MB mono pool on
+  the original) need nothing.
 
 ## Open questions
 - 8 columns + 4 control columns, or 12 position columns with controls on the screen buttons?
 - Quantise default (next step / next beat).
 - Does a retriggered track return to sync at pattern end, or stay offset until re-synced?
+
+## Phases
+- **S1 library** (`seqgen/playhead.*`, host tests, no hardware): quantised jumps, two-pad loop ranges, playhead
+  recording + looping, the "as if at X" note/offset lookup, rate ½/2×, reverse.
+- **S2 firmware glue**: Session view page, per-track playhead override in `inc_uStep`/`switchRowStep`, retrigger
+  with offset, sidecar save. Needs `make original` (owner OK).
+- **S3 cut cache** for streamed samples on the original Tracker.
