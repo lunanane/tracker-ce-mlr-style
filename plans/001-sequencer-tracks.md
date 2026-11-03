@@ -109,6 +109,24 @@ r4    degree window +0       | WIN−  —     —     —
     track". [provisional]
 - Live mode has no such limit: it sends all chord notes.
 
+## Script sequencers (Lua from the SD card, owner 2026-11-03)
+- Scripts live on the SD card in `/Scripts/*.lua`. A track's **sequencer type list** shows the built-ins (Chord/Arp,
+  Mono, Steps, Euclid) and every script found there; picking a script loads it **for that track** (each script track
+  has its own Lua state, so the same script can run on several tracks).
+- **Tracker script API v1** (iii-like, so iii scripts port easily): callbacks `init()`, `pad(x, y, z)` (12 × 4),
+  `pulse()` (24 PPQN), `start()` / `stop()`, `param(i, v)`; calls `note_on(note, vel, gate)`, `note_off(note)`,
+  `led(x, y, level)`, `grid_size()`, `scale()` / `vgv()` (the shared SeqContext), `save()` / `load(str)` for the
+  per-track state stored in the project sidecar.
+- Live / Record work exactly as for the built-ins: the glue takes the script's notes.
+- **Timing**: Lua never runs in the audio callback (garbage collection pauses). Scripts run in the main loop one
+  pulse ahead; their notes are queued with a timestamp and played by the audio-side sequencer on time.
+- Limits: a heap cap per script in external RAM, a time budget per pulse (a script that overruns is stopped with a
+  screen message, the track falls back to its pattern), a cap on script tracks (e.g. 4) on the original Tracker.
+- **Spike first (P-S0)**: compile a minimal Lua 5.4 (core + table/math/string, no io/os) for the MK66 and measure
+  flash (≈ 100–130 KB estimated vs ~153 KB free) and the time per pulse of a c34-sized script. If it does not fit
+  the original Tracker: a smaller Lua build, or scripts on Tracker+ only. Needs the owner's OK to download the Lua
+  sources.
+
 ## Phases
 - **P0 Build check**: `make original` builds on this PC (needs the owner's OK: it runs downloaded code); note free
   flash/RAM (MK66 has ~153 KB flash left). Owner flashes the unchanged CE build once to confirm the toolchain.
@@ -117,6 +135,8 @@ r4    degree window +0       | WIN−  —     —     —
 - **P3 Record** into the pattern + undo + sidecar save/load.
 - **P4** Steps and Euclid; pad velocity.
 - **P5** Tracker+ check; kit grouping across tracks.
+- **P6 Script sequencers**: spike P-S0, then the Lua host, the API, the script list per track, an example script
+  and a short guide for community scripts.
 
 Each phase: build for `original` (and `plus` to keep it compiling), host tests green, a short on-device test list
 for the owner (what to press, what should happen), and a `.ptf` in `build/`.
