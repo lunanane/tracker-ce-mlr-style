@@ -23,3 +23,7 @@ Order is sequential (one implementation agent at a time, lead reviews + builds b
 - No work in the audio callback beyond O(µs); no SD from audio context; no heap.
 - `make original` and `make plus` must build with zero new warnings in touched files; seqgen `make test` green.
 - Recovery documented: reset pinhole + known-good `.ptf` in /Firmware/.
+
+## License (owner 2026-11-04)
+Our add-in (seqgen/ and new glue files, each with a short header naming CC BY-NC 4.0) is CC BY-NC 4.0; edits
+inside Polyend files stay PolyForm NC 1.0.0. The release README states both.

@@ -80,7 +80,7 @@ r4    degree window +0       | WIN−  —     —     —
 ## Engine design
 1. **`seqgen/` — pure C++ library, the owner's code.** No Polyend includes, no heap, fixed arrays. Each sequencer:
    `pad(col, row, down)`, `pulse()` at 24 PPQN, `start()/stop()`, events `{note, velocity, gateTicks, offset}`,
-   `leds(buf[48])`, `param(i, v)`, `serialize/deserialize`. Shared `SeqContext {scale, vgv}`. Own license chosen by
+   `leds(buf[48])`, `param(i, v)`, `serialize/deserialize`. Shared `SeqContext {scale, vgv}`. Own license (CC BY-NC 4.0, owner 2026-11-04) chosen by
    the owner (reusable in the groovebox); only the glue inside Polyend files is PolyForm Noncommercial.
    A **host test harness** (desktop g++) replays pad gestures and MIDI-clock pulses and compares the note events
    with the c31 Lua behaviour, because the Tracker has no simulator.
@@ -181,4 +181,4 @@ for the owner (what to press, what should happen), and a `.ptf` in `build/`.
 - Record: replace or overdub? Decided (owner 2026-11-04): replace the steps it passes; Shift + Rec = one exact loop.
 - When does a takeover end ("stop playing")? [Chord/Arp: pads released and not locked; Mono: cleared or stopped]
 - Chord LCK gesture. [decide on hardware]
-- License for `seqgen/`. [owner decides; MIT would allow reuse everywhere]
+- License for `seqgen/` and the add-in files: decided (owner 2026-11-04) — CC BY-NC 4.0; edits inside Polyend files stay PolyForm NC.

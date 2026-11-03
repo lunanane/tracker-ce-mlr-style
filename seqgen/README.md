@@ -6,7 +6,7 @@ arranger, page 4 Mono). The first port (c31) is in git history; c34 supersedes i
 no heap, no exceptions/RTTI, no STL, no iostream, integer maths only (no `double`, no `float`).
 Compiles with desktop g++ (C++11) and with `arm-none-eabi-g++` 10.3 for Cortex-M4F (`-std=gnu++17`).
 
-License: **to be chosen by the owner** (placeholder, no license is granted by this directory yet).
+License: **CC BY-NC 4.0** (owner 2026-11-04), see `LICENSE.md`.
 
 ## Files
 
