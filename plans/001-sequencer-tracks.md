@@ -109,6 +109,34 @@ r4    degree window +0       | WIN−  —     —     —
     track". [provisional]
 - Live mode has no such limit: it sends all chord notes.
 
+## Workflow: picking and swapping sequencers per track (proposal 2026-11-03)
+- **Open / close**: on the Pattern page, **Shift + Pattern** opens the Seq page for the track under the cursor;
+  **Pattern** goes back to the same track. The cursor track is shared, so both pages always show the same track.
+- **Change track**: ← / → on the Seq page (as on the Pattern page). The pads switch to that track's sequencer at once
+  ("take control"); all other tracks keep running in the background.
+- **Screen**: a strip of the 16 tracks, each with its type letter (C = Chord/Arp, M = Mono, S = Steps,
+  E = Euclid, – = Off) and mode (L = Live, R = Rec); below it the current track's sequencer and its parameters.
+  The Pattern page track headers show the same letter + L/R, so you see at a glance which tracks are sequenced.
+- **Screen buttons** (the 8 under the screen): TYPE · MODE (Off/Live/Rec) · 4 parameter slots (jog wheel or the
+  matching buttons change the value) · PAGE (next parameter page) · BACK.
+- **Pick a type**: TYPE opens the list Off / Chord-Arp / Mono / Steps / Euclid; the jog wheel moves, TYPE again
+  confirms.
+- **Swapping keeps the settings**: every track keeps one state per sequencer type (Chord/Arp 304 B, Mono 216 B, …,
+  ~1 KB per track, ~16 KB for all tracks). Switching a track from Mono to Chord/Arp and back restores the Mono
+  sequence exactly. All of it is saved with the project.
+- **Swap while playing**: a type change on a Live track takes effect on the **next bar** (like c31's queued
+  settings), so the groove never breaks mid-bar; the screen shows the queued type until then.
+- **Copy / Paste** on the Seq page copy the current track's sequencer (type + its state) to another track: copy,
+  move with →, paste.
+- **Rec**: Rec on the Seq page arms Record for the current track (mode R); with the transport running, the
+  sequencer writes into the pattern; Rec again (or stopping) ends the pass = one undo step, the track returns to
+  Live.
+- No new letter hotkeys, only combinations of existing buttons.
+
+## Script sequencers — parked (owner 2026-11-03)
+The owner decided against an embedded script engine on the original Tracker (flash too tight): all sequencers are
+built in (C++). The notes below stay for a possible Tracker+ version.
+
 ## Script sequencers (Lua from the SD card, owner 2026-11-03)
 - Scripts live on the SD card in `/Scripts/*.lua`. A track's **sequencer type list** shows the built-ins (Chord/Arp,
   Mono, Steps, Euclid) and every script found there; picking a script loads it **for that track** (each script track
@@ -135,8 +163,7 @@ r4    degree window +0       | WIN−  —     —     —
 - **P3 Record** into the pattern + undo + sidecar save/load.
 - **P4** Steps and Euclid; pad velocity.
 - **P5** Tracker+ check; kit grouping across tracks.
-- **P6 Script sequencers**: spike P-S0, then the Lua host, the API, the script list per track, an example script
-  and a short guide for community scripts.
+- ~~P6 Script sequencers~~ — parked (owner 2026-11-03: built in only).
 
 Each phase: build for `original` (and `plus` to keep it compiling), host tests green, a short on-device test list
 for the owner (what to press, what should happen), and a `.ptf` in `build/`.
