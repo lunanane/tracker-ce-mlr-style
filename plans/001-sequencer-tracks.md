@@ -13,11 +13,11 @@ A track's sequencer is used in two ways:
   micromove, roll). The result is plain tracker data: editable on the pattern page, saved in the normal `.mtp`,
   playable on stock firmware.
 - **Live**: the sequencer drives the track in real time without writing the pattern ("take control live").
-  Leaving Live returns the track to its pattern.
+  Always on while you play it; when you stop, the track's pattern comes back instantly.
 
-You perform a sequencer on the **Seq page**: it always shows the track the pattern-editor cursor is on, so moving to
-another track takes over that track's sequencer. **The pads belong entirely to the sequencer**; track, type and
-Off/Live/Rec are on the screen, the encoders and the existing buttons (owner 2026-11-03: the Tracker is the tracker,
+You perform a sequencer in **Play mode** (tap Pattern again on the Pattern page, see Workflow): the screen buttons
+jump to a track, its sequencer takes over the track while you play it, Rec punches in. **The pads belong entirely
+to the sequencer**; track and type are on the screen buttons, Instr + jog wheel and the existing buttons (owner 2026-11-03: the Tracker is the tracker,
 so the grid-composer arranger/tracker part is dropped).
 
 ## Sequencer types
@@ -85,11 +85,12 @@ r4    degree window +0       | WIN−  —     —     —
    A **host test harness** (desktop g++) replays pad gestures and MIDI-clock pulses and compares the note events
    with the c31 Lua behaviour, because the Tracker has no simulator.
 2. **Glue in the firmware (Polyend files, kept small):**
-   - per-track `SeqTrackState { type, mode, generator state }` (16 tracks), saved in a project sidecar
+   - per-track `SeqTrackState { type, takenOver, one generator state per type }` (16 tracks), saved in a project sidecar
      `seqtracks.bin` with a version byte; the pattern struct and `.mtp` stay untouched (ABI-locked).
    - clock: the sequencer µstep (48 per step, 192 PPQN) calls `pulse()` every 8 µsteps (24 PPQN).
-   - **Live**: in `play_microStep` (`core/source/mtSequencer.cpp` ~280) a Live track ignores its pattern step and
-     plays the generator's events through the normal note path (instrument of the track).
+   - **Live / takeover**: in `play_microStep` (`core/source/mtSequencer.cpp` ~280) a taken-over track ignores its
+     pattern step and plays the generator's events through the normal note path (instrument of the track); when
+     the takeover ends, the pattern plays again from the current step.
    - **Record**: the same events are also written into `currentPattern` at the quantised step
      (`getDestRecordingStep` rules), velocity → `volume`, off-grid timing → `micromove`; one undo step per pass;
      saved by the main loop (never SD from audio context).
@@ -109,28 +110,34 @@ r4    degree window +0       | WIN−  —     —     —
     track". [provisional]
 - Live mode has no such limit: it sends all chord notes.
 
-## Workflow: picking and swapping sequencers per track (proposal 2026-11-03)
-- **Open / close**: on the Pattern page, **Shift + Pattern** opens the Seq page for the track under the cursor;
-  **Pattern** goes back to the same track. The cursor track is shared, so both pages always show the same track.
-- **Change track**: ← / → on the Seq page (as on the Pattern page). The pads switch to that track's sequencer at once
-  ("take control"); all other tracks keep running in the background.
-- **Screen**: a strip of the 16 tracks, each with its type letter (C = Chord/Arp, M = Mono, S = Steps,
-  E = Euclid, – = Off) and mode (L = Live, R = Rec); below it the current track's sequencer and its parameters.
-  The Pattern page track headers show the same letter + L/R, so you see at a glance which tracks are sequenced.
-- **Screen buttons** (the 8 under the screen): TYPE · MODE (Off/Live/Rec) · 4 parameter slots (jog wheel or the
-  matching buttons change the value) · PAGE (next parameter page) · BACK.
-- **Pick a type**: TYPE opens the list Off / Chord-Arp / Mono / Steps / Euclid; the jog wheel moves, TYPE again
-  confirms.
-- **Swapping keeps the settings**: every track keeps one state per sequencer type (Chord/Arp 304 B, Mono 216 B, …,
-  ~1 KB per track, ~16 KB for all tracks). Switching a track from Mono to Chord/Arp and back restores the Mono
-  sequence exactly. All of it is saved with the project.
-- **Swap while playing**: a type change on a Live track takes effect on the **next bar** (like c31's queued
-  settings), so the groove never breaks mid-bar; the screen shows the queued type until then.
-- **Copy / Paste** on the Seq page copy the current track's sequencer (type + its state) to another track: copy,
-  move with →, paste.
-- **Rec**: Rec on the Seq page arms Record for the current track (mode R); with the transport running, the
-  sequencer writes into the pattern; Rec again (or stopping) ends the pass = one undo step, the track returns to
-  Live.
+## Workflow: Play mode (owner 2026-11-04, replaces the Seq-page proposal)
+Built around immediate playability; no separate Seq page, no Off/Live/Rec modes.
+
+- **Pattern** enters the Pattern page as now. **Pressing Pattern again** (a tap with no other button) toggles
+  between the normal pattern editor and **Play mode**; every further tap toggles again. Pattern held + arrows etc.
+  keep their current meaning (a tap is only a press + release with nothing else pressed in between —
+  `functPattern`, `fPatternEdit.cpp:2843`, today only resets the view mode on release).
+- **Jump to a track**: the 8 buttons under the screen jump straight to tracks 1–8, **Shift +** a screen button to
+  tracks 9–16. The pads become that track's sequencer at once; all other tracks keep running.
+- **Pick the sequencer type**: hold **Instr** and turn the **jog wheel**. A list (Off / Chord-Arp / Mono / Steps /
+  Euclid) opens on screen in that track's column, "slotting in" the selection; releasing Instr applies it. While
+  the transport runs, a change takes effect on the next bar. Every track keeps one state per type, so switching
+  away and back restores the previous sequence (~1 KB per track, saved with the project).
+- **Live is always on**: while you play a track's sequencer it **takes over** the track — the track's pattern
+  notes are muted and the sequencer plays through the track's instrument. When you stop playing, the pattern comes
+  back **instantly**. Nothing is written in Live.
+  [provisional "stop playing": Chord/Arp — all chord pads released (and not locked); Mono — sequence cleared or
+  stopped; to be tuned on hardware]
+- **Rec** (in Play mode): **instant punch-in** — recording starts immediately at the current position and the
+  sequencer's notes **replace** the steps it passes on that track (overdub over the pattern, not layered on top).
+  Rec again ends it. One undo step.
+- **Shift + Rec**: records **exactly one loop** — waits for the loop start, records until the loop end, stops by
+  itself. One undo step.
+- Both use whatever sequencer the track has selected. Chord recording follows "Recording chords" above.
+- Screen in Play mode: the track columns with their type letter (C/M/S/E/–) and a marker on the track that is
+  currently taken over; the 8 screen-button labels show the track numbers (1–8, or 9–16 while Shift is held);
+  below, the current sequencer's parameters (jog wheel / encoder).
+- Copy / Paste in Play mode copy a track's sequencer (type + state) to another track.
 - No new letter hotkeys, only combinations of existing buttons.
 
 ## Script sequencers — parked (owner 2026-11-03)
@@ -159,8 +166,9 @@ built in (C++). The notes below stay for a possible Tracker+ version.
 - **P0 Build check**: `make original` builds on this PC (needs the owner's OK: it runs downloaded code); note free
   flash/RAM (MK66 has ~153 KB flash left). Owner flashes the unchanged CE build once to confirm the toolchain.
 - **P1 seqgen + host tests**: Mono and Chord/Arp ported from c31, tests against the Lua behaviour. No hardware.
-- **P2 Live**: SeqTrackState, the µstep hook, Seq page with Mono and Chord/Arp; take over by moving the track cursor.
-- **P3 Record** into the pattern + undo + sidecar save/load.
+- **P2 Live**: SeqTrackState, the µstep hook, Play mode (Pattern tap toggle, screen buttons jump to tracks,
+  Instr + jog wheel type list) with Mono and Chord/Arp; takeover while playing.
+- **P3 Record**: Rec punch-in (replace) and Shift + Rec one-loop record + undo + sidecar save/load.
 - **P4** Steps and Euclid; pad velocity.
 - **P5** Tracker+ check; kit grouping across tracks.
 - ~~P6 Script sequencers~~ — parked (owner 2026-11-03: built in only).
@@ -170,6 +178,7 @@ for the owner (what to press, what should happen), and a `.ptf` in `build/`.
 
 ## Open questions (provisional defaults in brackets)
 - Per track or per pattern sequencer state? [per track, per project; pattern-chained later]
-- Record: replace or overdub? [replace the steps the sequencer plays over, during the pass]
-- Button combo to open the Seq page, LCK gesture. [decide on hardware]
+- Record: replace or overdub? Decided (owner 2026-11-04): replace the steps it passes; Shift + Rec = one exact loop.
+- When does a takeover end ("stop playing")? [Chord/Arp: pads released and not locked; Mono: cleared or stopped]
+- Chord LCK gesture. [decide on hardware]
 - License for `seqgen/`. [owner decides; MIT would allow reuse everywhere]
