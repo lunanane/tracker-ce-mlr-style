@@ -79,7 +79,8 @@ $(OBJ_DIR)/%.o: %.c
 	$(TOOLCHAIN)gcc $(DEFINES) $(INCLUDES) $(CC_OPTIONS) $(COMPILER_OPTIONS) -o "$@" "$<"
 
 $(TARGET): $(OBJS)
-	$(TOOLCHAIN)ar -r "$(BUILD_DIR)/$(TARGET)" $(OBJS_SORTED)
+	$(file >$(BUILD_DIR)/objs.rsp,$(OBJS_SORTED))
+	$(TOOLCHAIN)ar -r "$(BUILD_DIR)/$(TARGET)" @$(BUILD_DIR)/objs.rsp
 	$(MAKE) --no-print-directory post-build
 	
 # Main rules
