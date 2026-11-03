@@ -9,7 +9,7 @@ template <typename T> static inline T clampv(T v, T lo, T hi) { return v < lo ? 
 
 int Mono::speedPulses(int spPos) { return kSpd[clampv(spPos, 1, 12) - 1]; }
 
-Mono::Mono() : ctx_(0) { ch_ = 4; reset(); }
+Mono::Mono() : ctx_(0) { ch_ = 0; reset(); }  // no channel of its own: the host glue tags events with the track it belongs to
 
 void Mono::reset() {
   for (int i = 0; i < kMaxSteps; ++i) steps_[i] = (int8_t)kNoStep;

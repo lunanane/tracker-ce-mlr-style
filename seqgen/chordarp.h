@@ -78,7 +78,9 @@ class ChordArp : public SeqBase {
   bool gbit(int g, int i) const;
   int gstep(int sp) const;              // 1-based step due on this pulse, or 0
   int pulsesIntoBar() const { return meas_; }
-  int groovePulseLevel() const { return pulse_; }
+  int groovePulseLevel() const { return pulse_; }  // slow settings breath 8..15
+  int notePulseLevel() const { return pn_; }      // fast eased note pulse 5..15
+  bool blinkState() const { return blink_; }
   static const char* chordTypeName(int mod);
 
  private:

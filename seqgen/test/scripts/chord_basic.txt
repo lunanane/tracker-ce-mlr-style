@@ -1,0 +1,10 @@
+par 1 2
+start
+root 1 5 d
+pulse 30
+root 1 5 u
+set S 3
+pulse 100
+root 2 1 d
+pulse 100
+sync

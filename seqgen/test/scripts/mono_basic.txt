@@ -1,0 +1,21 @@
+# mono: two steps, loop, tie, pages, speed; then a chord root changes the scale under it
+par 1 2
+mwin 1 0
+mstep 1 1 0
+mstep 1 3 2
+mstep 1 5 3
+mnp 1 2
+mep 1 2
+mstep 1 1 1
+mep 1 1
+mspd 1 8
+mtie 1
+start
+pulse 120
+mloop 1 2 6
+pulse 120
+root 2 5 d
+pulse 100
+root 2 5 u
+pulse 50
+stop
