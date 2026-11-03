@@ -154,6 +154,7 @@ class LuaSide:
                 out.append("S %d %d %d" % (e[4], e[5], e[6])); continue
             kind, ch, note, vel = e[3], e[4], e[5], e[6]
             if ch is None or ch < 3 or ch > 6: continue
+            if note < 0 or note > 127: continue  # documented deviation 6: the port never emits out-of-range notes
             out.append("p%d t%d %s %d %d %d" % (e[1], e[2], "on" if kind == 1 else "off", ch, note, vel if vel is not None else -1))
         return out
 

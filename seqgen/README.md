@@ -58,7 +58,7 @@ col 10 = PAGE+/SPD+, col 11 row 0 = CLEAR. LOOP held + two step pads sets the lo
 ## Tests
 
 ```
-make test                    # 57 unit tests, 2581 checks, host g++ only
+make test                    # 58 unit tests, 2584 checks, host g++ only
 make lua-compare PYTHON=<python with lupa>   # differential test, see below
 make arm                     # arm-none-eabi-g++ compile + object sizes
 ```
@@ -70,8 +70,7 @@ it only through `event_grid` / `event_midi` / `framework_tick` (so also the real
 (semantic commands, mapped to c31 grid coordinates on the Lua side and to the 12x4 pads on the C++ side) is run through
 `test/lua_driver` and the two MIDI streams, stamped with the pulse and tick counters, are compared. Note-offs released
 together are sorted (Lua's `pairs()` order is unspecified). `sync` also compares the blink / LED pulse counters. A random
-generator (`--fuzz N --seed S`) produces long scripts mixing every gesture. Result at hand-over: seed 1 (10 scripts) and
-seed 2 (80 scripts) plus the two hand-written scripts all identical (about 20k events), 0 mismatches.
+generator (`--fuzz N --seed S`) produces long scripts mixing every gesture. Result at hand-over: seeds 1-5 x 100 random scripts + 2 hand-written scripts each (510 scripts, about 117k events) and the default `make lua-compare` (42 scripts, 8196 events) all identical, 0 mismatches. The harness drops Lua events with notes outside 0..127 (deviation 6). Like c31, `stop()`/mute leave a pending gate timer armed.
 Not covered by the Lua comparison: LED levels (layout differs), serialization, `lockButton` is covered, grid-edge cases listed
 below under deviations 12/13.
 

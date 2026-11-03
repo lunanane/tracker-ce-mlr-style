@@ -437,6 +437,20 @@ TEST(mono_leds_playhead_and_notes) {
   for (int i = 0; i < kPads; ++i) CHECK(l[i] <= 15);
 }
 
+TEST(mute_keeps_pending_gate_timer_like_c31) {
+  // c31 mute calls k_c/k_l only; a gate timer armed by the last arp step still fires and cuts a later note early.
+  Rig r; armRig(r, 1); r.pulses(24);
+  r.ca.setParam(ChordArp::P_GATE, 1);         // short: 2 ticks
+  r.pulses(1);                                // arp note at step 5 arms the timer
+  r.ca.setParam(ChordArp::P_MUTE, 1);
+  r.ca.setParam(ChordArp::P_PMODE, 3);        // grid mode, then a held grid note (not subject to mute)
+  r.ca.setParam(ChordArp::P_SEL_TYPE, 1); r.ca.setParam(ChordArp::P_SEL_SPEED, 1);
+  clearEv(); r.ca.pad(5, 0, true);            // sounds 60
+  CHECK_EQ(countOn(), 1); clearEv();
+  r.ticks(1); CHECK_EQ(countOff(), 0);
+  r.ticks(1); CHECK_EQ(countOff(), 1);        // the stale timer ended it after 2 ticks
+}
+
 int main() {
   for (int i = 0; i < g_nreg; ++i) {
     g_name = g_reg[i].name; g_failBefore = g_fail;

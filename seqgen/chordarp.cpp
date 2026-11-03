@@ -289,7 +289,7 @@ void ChordArp::pulse() {
 
 void ChordArp::start() { meas_ = 0; }  // arranger resets (bar_c, g_ptr, a_ptr, c_stage) have no counterpart here
 
-void ChordArp::stop() { killLive(); lgate_ = 0; }
+void ChordArp::stop() { killLive(); }  // c31 252 leaves a pending gate timer armed (it only calls k_l)
 
 void ChordArp::tick() {
   fc_ = (uint8_t)((fc_ + 1) % 48);
@@ -493,7 +493,7 @@ void ChordArp::setParam(int id, int v) {
     case P_PW0: case P_PW1: case P_PW2: PW_[id - P_PW0] = (uint8_t)clampv(v, 0, 3); pgen(); break;
     case P_PSEED: pseed_ = clampv(v, 0, 250); pgen(); break;
     case P_TPOSE: arpTpose_ = (int8_t)clampv(v, -24, 24); break;
-    case P_MUTE: amute_ = v != 0; if (amute_) { killLive(); lgate_ = 0; } break;
+    case P_MUTE: amute_ = v != 0; if (amute_) killLive(); break;  // c31 keeps a pending gate timer
     case P_PANEL: panel_ = (uint8_t)clampv(v, 0, 3); break;
   }
 }
