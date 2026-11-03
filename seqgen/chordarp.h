@@ -1,4 +1,4 @@
-// Chord/Arp sequencer: owner's grid-composer c31 page 3 (lines 237-708) without the arranger/tracker part.
+// Chord/Arp sequencer: owner's grid-composer c34 page 3 without the arranger/tracker part.
 #pragma once
 #include "seqgen.h"
 
@@ -6,15 +6,18 @@ namespace seqgen {
 
 class ChordArp;
 
-// Shared between sequencers: the scale and the velocity groove come from the Chord/Arp instance (if any).
-// Without one: C major and flat velocity.  gtpose = c31 pages[4].gtpose (global transpose, scale degrees).
+// Shared between sequencers: the scale comes from the Chord/Arp instance (if any), the bar counter that varies
+// velocity pattern 8 is shared. Without a Chord/Arp: C major.  gtpose = c34 pages[4].gtpose (global transpose,
+// scale degrees).  gb = bars played, modulo 9 (c34 `gb`); the ChordArp advances it, a host without one may call barTick().
 struct SeqContext {
   const ChordArp* chord;
   int8_t gtpose;
-  SeqContext() : chord(0), gtpose(0) {}
+  uint8_t gb;
+  SeqContext() : chord(0), gtpose(0), gb(0) {}
   void scale(int& root, bool& minor) const;  // folded tonic (54..65) and minor flag
   int scaleDeg(int d) const;                 // c31 scale_deg
-  int vgv(int i, int base) const;            // c31 vgv
+  int vgv(int g, int i, int base) const { return vgvCalc(g, i, base, gb); }  // c34 vgv(g,i,base)
+  void barTick() { gb = (uint8_t)((gb + 1) % 9); }
 };
 
 class ChordArp : public SeqBase {
@@ -25,11 +28,11 @@ class ChordArp : public SeqBase {
     P_PMODE = 0,   // 1 key, 2 locked, 3 grid (c31 pmode)
     P_LOCK_ROOT,   // midi note of the lock tonic (lock_r)
     P_LOCK_MINOR,  // 0/1
-    P_SWING,       // 0..2 pulses
+    P_SWING,       // 0..3 pulses (c34)
     P_GATE,        // 0 normal, 1 short, 2 legato
     P_SEL_TYPE,    // 1 chord, 2 arp, 3 arp+oct, 4 off
-    P_SEL_SPEED,   // 1 1/8, 2 1/8T, 3 1/16, 4 1/16T
-    P_SEL_DIR,     // 1 up, 2 down, 3 up-down, 4 pattern
+    P_SEL_SPEED,   // 1 1/8, 2 1/8T, 3 1/16, 4 1/16T, 5 1/4, 6 1/4T, 7 1/32, 8 1/32T, 9 1/2, 10 1/2T (5..10 = pad pairs)
+    P_SEL_DIR,     // 1 up, 2 down, 3 up-down, 4 pattern, 5 up-down (no repeat), 6 down-up, 7 random, 8 converge, 9 inside out, 10 root return
     P_SEL_SIZE,    // 5,4,3,2
     P_SEL_GROOVE,  // 1..16 (glib)
     P_SEL_MOD,     // chord type 1..15
@@ -45,9 +48,12 @@ class ChordArp : public SeqBase {
     P_Q_TYPE, P_Q_SPEED, P_Q_DIR, P_Q_SIZE, P_Q_GROOVE,  // queued values (0 = none), read-only
     P_Q_MOD,       // queued chord type (0 = none), read-only
     P_Q_ROOT,      // 1 when a root/chord waits for the next quarter, read-only
+    P_SEL_VG,      // velocity pattern 1..72 (a, or a + 8*b = blend of two patterns)
+    P_LANE,        // gate lane 0 (off), 1..4, or lo + 8*hi (two lanes)
+    P_ORANGE,      // arp octave range 1..4
     P_COUNT
   };
-  enum { kSerialVersion = 1, kSerialSize = 28 };
+  enum { kSerialVersion = 2, kSerialSize = 32 };
 
   ChordArp();
   void setContext(SeqContext* ctx) { ctx_ = ctx; if (ctx) ctx->chord = this; }
@@ -73,10 +79,10 @@ class ChordArp : public SeqBase {
   // Read-only helpers (also used by Mono through SeqContext and by tests).
   void scaleSet(int& root, bool& minor) const;
   int scaleDeg(int d) const;
-  int vgv(int i, int base) const;
+  int vgvSel(int i, int base) const { return vgvCalc(selVg_, i, base, ctx_ ? ctx_->gb : ownGb_); }  // live velocity
   int pool(int rootNote, int mod, bool minor, int16_t out[8]) const;  // c_pool
   bool gbit(int g, int i) const;
-  int gstep(int sp) const;              // 1-based step due on this pulse, or 0
+  int gstep(int sp) const;              // 1-based step due on this pulse, or 0 (also computes the step's gate, c34)
   int pulsesIntoBar() const { return meas_; }
   int groovePulseLevel() const { return pulse_; }  // slow settings breath 8..15
   int notePulseLevel() const { return pn_; }      // fast eased note pulse 5..15
@@ -91,10 +97,13 @@ class ChordArp : public SeqBase {
   void panelEvent(int pc, int pr, bool down);
   void controlEvent(int idx, bool down);
   void pgen();
+  void applyBar();
+  void setPair(uint8_t& cur, int row, int v);
   int lkd(int d) const;
   int dlk(int note) const;
   int rv(const RootRef& r) const;
-  int arp(const int16_t* p, int n, int d, int st, bool alt) const;
+  int arp(const int16_t* p, int n, int d, int st, bool alt);
+  uint32_t rnd(int l);
   void killLive();
   void fl(const int16_t* p, int n);
   int liveAt(int rv, bool mn, int16_t* out) const;
@@ -111,7 +120,6 @@ class ChordArp : public SeqBase {
   bool pon_;
   uint8_t PW_[3];
   uint16_t pmask_;
-  uint8_t pvt_[16];
   int32_t pseed_;
   uint8_t qT_, qS_, qD_, qSize_, qG_, qMod_;
   QRoot ql_;
@@ -131,6 +139,10 @@ class ChordArp : public SeqBase {
   uint8_t pulse_, pn_;
   bool held_[4];  // INV-, INV+, OCT-, OCT+
   uint32_t msAcc_;
+  bool gbPending_;
+  uint8_t selVg_, lane_, orng_, ownGb_, xh_[2];
+  mutable uint8_t gx_;  // this step's gate in ticks (c34 gx), 0 = none (legato)
+  uint32_t rng_;
 };
 
 }  // namespace seqgen

@@ -41,6 +41,10 @@ enum LedRole : uint8_t {
 
 inline int floordiv(int a, int b) { int q = a / b; if ((a % b != 0) && ((a < 0) != (b < 0))) --q; return q; }
 inline int floormod(int a, int b) { return a - floordiv(a, b) * b; }  // Lua % semantics (b > 0)
+// c34 vgv(g,i,base): velocity pattern g (1..8, or a + 8*b blend of two) at step i (1-based), base = loudest velocity.
+// Exact integer evaluation of the Lua float expression (checked against it for every g,i,base,gb).
+int vgvCalc(int g, int i, int base, int gb);
+
 inline int iabs(int a) { return a < 0 ? -a : a; }
 
 // Shared emit helper.

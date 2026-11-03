@@ -3,7 +3,7 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lua_compare as lc
-c31, drv = lc.DEFAULT_C31, os.path.join(lc.HERE, "..", "build", "lua_driver.exe")
+c31, drv = lc.DEFAULT_LUA, os.path.join(lc.HERE, "..", "build", "lua_driver.exe")
 def bad(lines):
     lua = lc.LuaSide(c31)
     try: lua.run(lines)

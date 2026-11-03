@@ -16,7 +16,7 @@ Script language (one command per line; shared by both sides):
 """
 import argparse, os, random, subprocess, sys, tempfile
 
-DEFAULT_C31 = r"D:\OneDrive\CodeLibraries\iii\monome_iii_c31.lua"
+DEFAULT_LUA = r"E:\claude\iii-grid-composer\monome_iii_c34.lua"  # the port follows c34; c31 can be given but will differ
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 PRELUDE = r"""
@@ -26,6 +26,8 @@ grid_refresh=function() end; grid_intensity=function() end
 midi_note_on=function(n,v,c) EV[#EV+1]={PC,TC,1,c,n,v} end
 midi_note_off=function(n,v,c) EV[#EV+1]={PC,TC,0,c,n,0} end
 midi_cc=function() end
+RS=2463534242  -- math.random stand-in, identical to ChordArp::rnd (xorshift32)
+math.random=function(l) local x=RS; x=x ~ ((x<<13)&0xFFFFFFFF); x=x ~ (x>>17); x=x ~ ((x<<5)&0xFFFFFFFF); RS=x; return 1+x%l end
 metro={init=function(fn) MFN=fn; return {start=function() end, stop=function() end} end}
 pset_init=function() end; pset_write=function() end; pset_read=function() return nil end; pset_delete=function() end
 dofile(CODE)
@@ -49,6 +51,7 @@ class LuaSide:
         self.menu = False
         self.sel = None
         self.sync_lines = []
+        self.crashed = None   # (pulse, tick, message) when the original Lua itself raised an error
         self.eval = self.rt.eval
 
     # --- page / menu navigation through the real (16,8) menu pad ---
@@ -70,7 +73,20 @@ class LuaSide:
     def msel(self, k):
         self.ensure_menu(4); self.tap(16, k)
 
+    def with_pon(self, want, fn):
+        cur = bool(self.eval("pages[3].pon"))
+        if cur != want: self.tap(15, 8)
+        fn()
+        if cur != want: self.tap(15, 8)
+
     def run(self, lines):
+        try:
+            self._run(lines)
+        except Exception as e:   # lupa.LuaError: c34 itself failed (e.g. c_arp with an empty octave range)
+            if type(e).__name__ != "LuaError": raise
+            self.crashed = (int(self.eval("PC")), int(self.eval("TC")), str(e).splitlines()[0])
+
+    def _run(self, lines):
         g = self.g
         for line in lines:
             t = line.split()
@@ -99,12 +115,37 @@ class LuaSide:
                     g.GR((m - 1) % 4 + 1, 7 + (m - 1) // 4, 0); g.GR(1, 7, 0)
             elif c == "set":
                 self.ensure_nomenu(3); y = "TSDZ".index(a[0]) + 1; self.tap(4 + int(a[1]), y)
-            elif c == "groove":
-                self.ensure_nomenu(3); n = ai(0); self.tap(5 + (n - 1) % 4, 5 + (n - 1) // 4)
-            elif c == "par": self.ensure_nomenu(3); self.tap(13 + ai(1), ai(0))
-            elif c == "arch": self.ensure_nomenu(3); self.tap(12 + ai(0), 4)
+            elif c == "groove":   # c34: the groove block is the glib picker only while PON is off
+                self.ensure_nomenu(3); n = ai(0); self.with_pon(False, lambda: self.tap(5 + (n - 1) % 4, 5 + (n - 1) // 4))
+            elif c == "par":      # c34: with PON on, rows y5..7 of the block are the tiers
+                self.ensure_nomenu(3); self.with_pon(True, lambda: self.tap(5 + ai(1), 4 + ai(0)))
+            elif c == "arch":
+                self.ensure_nomenu(3); self.with_pon(True, lambda: self.tap(4 + ai(0), 8))
+            elif c == "pair":     # two fingers on the speed (y2) or direction (y3) row
+                self.ensure_nomenu(3); y = 2 if a[0] == "S" else 3
+                g.GR(4 + ai(1), y, 1); g.GR(4 + ai(2), y, 1); g.GR(4 + ai(2), y, 0); g.GR(4 + ai(1), y, 0)
+            elif c == "vel":
+                self.ensure_nomenu(3)
+                k1 = ai(0); k2 = ai(1) if len(a) > 1 else None
+                pad = lambda k: (13 + (k - 1) % 4, 1 + (k - 1) // 4)
+                g.GR(*pad(k1), 1)
+                if k2: g.GR(*pad(k2), 1); g.GR(*pad(k2), 0)
+                g.GR(*pad(k1), 0)
+                want = k1 if (not k2 or k2 == k1) else min(k1, k2) + 8 * max(k1, k2)
+                assert int(self.eval("pages[3].sel_vg")) == want, "vel gesture"
+            elif c == "lane":
+                self.ensure_nomenu(3); k1 = ai(0); k2 = ai(1) if len(a) > 1 else None
+                g.GR(12 + k1, 4, 1)
+                if k2: g.GR(12 + k2, 4, 1); g.GR(12 + k2, 4, 0)
+                g.GR(12 + k1, 4, 0)
+            elif c == "orng":
+                self.ensure_nomenu(3); d = ai(0) - int(self.eval("pages[3].orng"))
+                if d:
+                    g.GR(16, 6, 1)
+                    for _ in range(abs(d)): self.tap(16, 5 if d > 0 else 7)
+                    g.GR(16, 6, 0)
             elif c == "pon": self.ensure_nomenu(3); self.tap(15, 8)
-            elif c == "sw": self.ensure_nomenu(3); self.tap(13, 5 + ai(0))
+            elif c == "sw": self.ensure_nomenu(3); self.tap(13 + ai(0), 3)
             elif c == "glen":
                 self.ensure_nomenu(3)
                 cur = int(self.eval("pages[3].glen"))
@@ -139,6 +180,7 @@ class LuaSide:
             elif c == "mloop":
                 k = ai(0); self.msel(k); self.tap(16, 8); self.menu = False
                 g.GR(ai(1), 8, 1); g.GR(ai(2), 8, 1); g.GR(ai(2), 8, 0); g.GR(ai(1), 8, 0)
+            elif c == "mvg": self.msel(ai(0)); self.tap(ai(1), 7)
             elif c == "mclear": self.msel(ai(0)); self.tap(14, 6)
             elif c == "mtie": self.msel(ai(0)); self.tap(9, 6)
             elif c == "mmute": self.rt.execute("pages[4].tk[%d].mute=%s" % (ai(0), "true" if ai(1) else "false"))
@@ -185,7 +227,16 @@ def normalise(ev):
 
 def compare(lua, cpp, lines, label):
     # the C++ driver prints 'S' lines only for sync; the Lua side records them in the same stream
-    a, b = normalise(lua.events()), normalise(cpp)
+    a, b = lua.events(), cpp
+    if lua.crashed:
+        # the original raised an error at (pulse, tick): compare only what happened strictly before that moment
+        def stamp(e):
+            if e.startswith("S"): return None
+            p, t = e.split()[:2]; return (int(p[1:]), int(t[1:]))
+        lim = lua.crashed[:2]
+        a = [e for e in a if stamp(e) is None or stamp(e) < lim]
+        b = [e for e in b if stamp(e) is None or stamp(e) < lim]
+    a, b = normalise(a), normalise(b)
     if a == b: return True, len(a)
     print("MISMATCH in", label)
     for i, (x, y) in enumerate(zip(a + [None] * len(b), b + [None] * len(a))):
@@ -204,6 +255,17 @@ def gen_script(rng, nlines=260):
     L.append("start")
     for _ in range(nlines):
         x = r()
+        if r() < 0.14:   # c34 additions
+            y = r()
+            if y < 0.25:
+                a_, b_ = rng.randint(1, 4), rng.randint(1, 4)
+                L.append("pair %s %d %d" % (rng.choice("SD"), a_, b_) if a_ != b_ else "set %s %d" % (rng.choice("SD"), a_))
+            elif y < 0.45: L.append("vel %d" % rng.randint(1, 8) if r() < 0.5 else "vel %d %d" % tuple(rng.sample(range(1, 9), 2)))
+            elif y < 0.60: L.append("lane %d" % rng.randint(1, 4) if r() < 0.5 else "lane %d %d" % tuple(rng.sample(range(1, 5), 2)))
+            elif y < 0.75: L.append("orng %d" % rng.randint(1, 4))
+            elif y < 0.85: L.append("mvg %d %d" % (rng.randint(1, 3), rng.randint(1, 16)))
+            else: L.append("pulse %d" % rng.choice([6, 12, 24, 96]))
+            continue
         if x < 0.22: L.append("pulse %d" % rng.choice([1, 1, 2, 3, 6, 12, 24, 30, 96]))
         elif x < 0.30: L.append("tick %d" % rng.choice([1, 2, 3, 5, 8]))
         elif x < 0.40:
@@ -218,7 +280,7 @@ def gen_script(rng, nlines=260):
         elif x < 0.61: L.append("par %d %d" % (rng.randint(1, 3), rng.randint(0, 3)))
         elif x < 0.63: L.append("arch %d" % rng.randint(1, 4))
         elif x < 0.645: L.append("pon")
-        elif x < 0.66: L.append("sw %d" % rng.randint(0, 2))
+        elif x < 0.66: L.append("sw %d" % rng.randint(0, 3))
         elif x < 0.675: L.append("glen %d" % rng.randint(1, 3))
         elif x < 0.69:
             held = []; L.append("pmode %d" % rng.randint(1, 3))
@@ -253,14 +315,14 @@ def gen_script(rng, nlines=260):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--c31", default=DEFAULT_C31)
+    ap.add_argument("--lua", "--c31", dest="c31", default=DEFAULT_LUA)
     ap.add_argument("--driver", default=os.path.join(HERE, "..", "build", "lua_driver.exe"))
     ap.add_argument("--fuzz", type=int, default=0)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--script", nargs="*", default=[])
     a = ap.parse_args()
     a.driver = os.path.abspath(a.driver)
-    total, bad, events = 0, 0, 0
+    total, bad, events, crashes = 0, 0, 0, 0
     jobs = []
     for s in a.script:
         jobs.append((s, [l.rstrip("\n") for l in open(s) if l.strip() and not l.startswith("#")]))
@@ -272,11 +334,14 @@ def main():
         lua.run(lines)
         cpp = run_cpp(a.driver, lines)
         ok, n = compare(lua, cpp, lines, label)
+        if lua.crashed:
+            crashes += 1; print("note: %s: c34 Lua raised at pulse %d tick %d: %s (compared up to there)" % ((label,) + lua.crashed))
         total += 1; events += n; bad += (not ok)
         if not ok:
             p = os.path.join(tempfile.gettempdir(), "seqgen_fail_%d.txt" % total)
             open(p, "w").write("\n".join(lines) + "\n"); print("  script saved to", p)
-    print("lua_compare: %d scripts, %d identical, %d mismatching, %d events compared" % (total, total - bad, bad, events))
+    print("lua_compare: %d scripts, %d identical, %d mismatching, %d events compared%s" % (total, total - bad, bad, events,
+          (" (%d scripts hit an error inside the original c34 Lua and were compared up to it)" % crashes) if crashes else ""))
     return 1 if bad else 0
 
 

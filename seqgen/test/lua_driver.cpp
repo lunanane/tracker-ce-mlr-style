@@ -69,7 +69,20 @@ int main(int argc, char** argv) {
     } else if (!strcmp(cmd, "inv")) {
       g_ca.pad(11, 2, true); g_ca.pad(10, 2, true); g_ca.pad(10, 2, false); g_ca.pad(11, 2, false);  // both = reset
       for (int i = 0; i < abs(n[0]); ++i) press(g_ca, n[0] > 0 ? 11 : 10, 2);
-    } else if (!strcmp(cmd, "tpose")) g_ca.setParam(ChordArp::P_TPOSE, n[0]);
+    } else if (!strcmp(cmd, "pair")) {  // pair S|D a b : two fingers on the speed/direction row
+      sscanf(line, "%*s %15s %d %d", a, &n[0], &n[1]);
+      int row = a[0] == 'S' ? 1 : 2;
+      gotoPanel(ChordArp::PANEL_SETTINGS);
+      g_ca.pad(6 + n[0] - 1, row, true); g_ca.pad(6 + n[1] - 1, row, true);
+      g_ca.pad(6 + n[1] - 1, row, false); g_ca.pad(6 + n[0] - 1, row, false);
+    } else if (!strcmp(cmd, "vel")) {  // vel A [B]: screen item; value = A, or lo + 8*hi when two patterns are held
+      int A = n[0], B = (cnt > 2) ? n[1] : 0;
+      g_ca.setParam(ChordArp::P_SEL_VG, (B && B != A) ? (A < B ? A + 8 * B : B + 8 * A) : A);
+    } else if (!strcmp(cmd, "lane")) {  // lane A [B]
+      int A = n[0], B = (cnt > 2) ? n[1] : 0, cur = g_ca.getParam(ChordArp::P_LANE);
+      g_ca.setParam(ChordArp::P_LANE, (B && B != A) ? (A < B ? A + 8 * B : B + 8 * A) : (cur == A ? 0 : A));
+    } else if (!strcmp(cmd, "orng")) g_ca.setParam(ChordArp::P_ORANGE, n[0]);
+    else if (!strcmp(cmd, "tpose")) g_ca.setParam(ChordArp::P_TPOSE, n[0]);
     else if (!strcmp(cmd, "gtpose")) g_ctx.gtpose = (int8_t)n[0];
     else if (!strcmp(cmd, "mute")) g_ca.setParam(ChordArp::P_MUTE, n[0]);
     else if (!strcmp(cmd, "sync"))
@@ -103,6 +116,7 @@ int main(int argc, char** argv) {
       else if (!strcmp(cmd, "mtie")) pressM(m, 8, 1);
       else if (!strcmp(cmd, "mmute")) m.setParam(Mono::P_MUTE, n[1]);
       else if (!strcmp(cmd, "mtpose")) m.setParam(Mono::P_TPOSE, n[1]);
+      else if (!strcmp(cmd, "mvg")) m.setParam(Mono::P_VG, n[1]);
     }
   }
   fclose(f);

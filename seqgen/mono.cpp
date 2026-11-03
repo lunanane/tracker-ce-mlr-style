@@ -1,4 +1,4 @@
-// Mono sequencer, port of c31 page 4 (lines 711-841). See README.md for the mapping.
+// Mono sequencer, port of c34 page 4. See README.md for the mapping.
 #include "mono.h"
 
 namespace seqgen {
@@ -15,7 +15,7 @@ void Mono::reset() {
   for (int i = 0; i < kMaxSteps; ++i) steps_[i] = (int8_t)kNoStep;
   lstart_ = 1; lend_ = 16; pos_ = 1; pc_ = 0; spPos_ = 8; div_ = kSpd[7];
   np_ = 1; ep_ = 1; pg_ = 1; win_ = 0; tpose_ = 0;
-  mute_ = false; ti_ = false; half_ = false; playing_ = -1; fc_ = 0; bl_ = false;
+  mute_ = false; ti_ = false; half_ = false; vg_ = 1; playing_ = -1; fc_ = 0; bl_ = false;
   loopHeld_ = false; lpS_ = lpE_ = 0;
   for (int r = 0; r < 4; ++r) for (int c = 0; c < 8; ++c) downX_[r][c] = 0;
 }
@@ -43,7 +43,7 @@ void Mono::fire() {
   }
   if (n >= 0 && ti_ && playing_ == n) return;
   killNote();
-  if (n >= 0) { emit(EV_NOTE_ON, n, c.vgv(pos_, 100)); playing_ = (int16_t)n; }
+  if (n >= 0) { emit(EV_NOTE_ON, n, c.vgv(vg_, pos_, 100)); playing_ = (int16_t)n; }
 }
 
 // One traversal of the loop window = one page; pages 1..np chain, then wrap. Landing on page 1 kills first.
@@ -116,6 +116,8 @@ void Mono::pad(int col, int row, bool down) {
     case 9 * 4 + 0: if (ep_ > 1) ep_--; break;                                // PAGE-
     case 10 * 4 + 0: if (ep_ < 8) { ep_++; if (ep_ > np_) np_ = ep_; } break;  // PAGE+ (extends the chain)
     case 9 * 4 + 1: if (spPos_ > 1) { spPos_--; div_ = kSpd[spPos_ - 1]; } break;   // SPD-
+    case 10 * 4 + 2: if (floormod(vg_ - 1, 8) > 0) vg_--; break;   // VEL- (previous velocity pattern, blend kept)
+    case 11 * 4 + 2: if (floormod(vg_ - 1, 8) < 7) vg_++; break;  // VEL+
     case 10 * 4 + 1: if (spPos_ < 12) { spPos_++; div_ = kSpd[spPos_ - 1]; } break; // SPD+
     case 11 * 4 + 0:  // CLEAR
       for (int i = 0; i < kMaxSteps; ++i) steps_[i] = (int8_t)kNoStep;
@@ -141,6 +143,7 @@ int Mono::getParam(int id) const {
     case P_HALF: return half_;
     case P_DIV: return div_;
     case P_PLAYING: return playing_;
+    case P_VG: return vg_;
   }
   return 0;
 }
@@ -160,6 +163,7 @@ void Mono::setParam(int id, int v) {
     case P_LEND: lend_ = (uint8_t)clampv(v, 1, 16); if (lstart_ > lend_) lstart_ = lend_; if (pos_ < lstart_ || pos_ > lend_) pos_ = lstart_; break;
     case P_TPOSE: tpose_ = (int8_t)clampv(v, -24, 24); break;
     case P_MUTE: mute_ = v != 0; break;
+    case P_VG: vg_ = (uint8_t)clampv(v, 1, 72); break;
     case P_HALF: half_ = v != 0; break;
   }
 }
@@ -168,7 +172,7 @@ size_t Mono::serialize(uint8_t* b, size_t cap) const {
   if (cap < (size_t)kSerialSize) return 0;
   for (int i = 0; i < kSerialSize; ++i) b[i] = 0;
   b[0] = kSerialVersion; b[1] = spPos_; b[2] = ti_; b[3] = (uint8_t)win_; b[4] = np_; b[5] = ep_;
-  b[6] = lstart_; b[7] = lend_; b[8] = (uint8_t)tpose_; b[9] = mute_; b[10] = half_;
+  b[6] = lstart_; b[7] = lend_; b[8] = (uint8_t)tpose_; b[9] = mute_; b[10] = half_; b[11] = vg_;
   for (int i = 0; i < kMaxSteps; ++i) b[12 + i] = (uint8_t)steps_[i];
   return kSerialSize;
 }
@@ -178,11 +182,11 @@ bool Mono::deserialize(const uint8_t* b, size_t len) {
   int sp = b[1], np = b[4], ep = b[5], ls = b[6], le = b[7];
   int8_t win = (int8_t)b[3];
   if (sp < 1 || sp > 12 || np < 1 || np > 8 || ep < 1 || ep > np || ls < 1 || ls > le || le > 16 ||
-      win < -kWinLimit || win > kWinLimit)
+      win < -kWinLimit || win > kWinLimit || b[11] < 1 || b[11] > 72)
     return false;
   killNote();
   spPos_ = (uint8_t)sp; div_ = kSpd[sp - 1]; ti_ = b[2] != 0; win_ = win; np_ = (uint8_t)np; ep_ = (uint8_t)ep;
-  lstart_ = (uint8_t)ls; lend_ = (uint8_t)le; tpose_ = (int8_t)b[8]; mute_ = b[9] != 0; half_ = b[10] != 0;
+  lstart_ = (uint8_t)ls; lend_ = (uint8_t)le; tpose_ = (int8_t)b[8]; mute_ = b[9] != 0; half_ = b[10] != 0; vg_ = b[11];
   for (int i = 0; i < kMaxSteps; ++i) steps_[i] = (int8_t)b[12 + i];
   pos_ = lstart_; pc_ = 0; pg_ = 1; loopHeld_ = false; lpS_ = lpE_ = 0;
   for (int r = 0; r < 4; ++r) for (int c = 0; c < 8; ++c) downX_[r][c] = 0;
@@ -200,7 +204,7 @@ void Mono::leds(uint8_t out[kPads], uint8_t* roles) const {
   for (int col = 0; col < 8; ++col) {
     int x = col + 1 + (half_ ? 8 : 0);
     bool inloop = (x >= lstart_ && x <= lend_);
-    int vb = 5 + floordiv(c.vgv(x, 100) - 76, 4);  // note brightness = the velocity it will fire at
+    int vb = 5 + floordiv(c.vgv(vg_, x, 100) - 45, 6);  // note brightness = the velocity it will fire at
     int sv = steps_[base + x - 1];
     bool pl = ph && x == pos_;
     for (int row = 0; row < 4; ++row) {
@@ -220,8 +224,9 @@ void Mono::leds(uint8_t out[kPads], uint8_t* roles) const {
   out[0 * 12 + 9] = (uint8_t)ctl[4]; out[1 * 12 + 9] = (uint8_t)ctl[5]; out[2 * 12 + 9] = (uint8_t)ctl[6];
   out[0 * 12 + 10] = (uint8_t)ctl[8]; out[1 * 12 + 10] = (uint8_t)ctl[9];
   out[0 * 12 + 11] = (uint8_t)(bl_ ? 12 : 5);
+  out[2 * 12 + 10] = (uint8_t)(3 + floormod(vg_ - 1, 8) / 2); out[2 * 12 + 11] = (uint8_t)(3 + floormod(vg_ - 1, 8) / 2 + 1);  // VEL- / VEL+ brighten with the pattern number
   ro[0 * 12 + 9] = ro[1 * 12 + 9] = ro[2 * 12 + 9] = ROLE_CONTROL;
-  ro[0 * 12 + 10] = ro[1 * 12 + 10] = ro[0 * 12 + 11] = ROLE_CONTROL;
+  ro[0 * 12 + 10] = ro[1 * 12 + 10] = ro[0 * 12 + 11] = ro[2 * 12 + 10] = ro[2 * 12 + 11] = ROLE_CONTROL;
 }
 
 }  // namespace seqgen

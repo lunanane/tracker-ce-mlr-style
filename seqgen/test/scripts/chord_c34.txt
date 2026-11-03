@@ -1,0 +1,32 @@
+# c34 features: velocity patterns/blends, swing 3, gate lanes, extra speeds/pairs, arp directions, octave range, transpose
+par 1 2
+start
+set T 2
+set S 3
+pulse 96
+root 2 5 d
+vel 2
+pulse 96
+vel 3 6
+pair D 1 3
+pulse 96
+pair D 2 4
+sw 3
+lane 1
+pulse 96
+lane 2 3
+orng 3
+pulse 192
+pair S 1 2
+pair D 3 4
+glen 3
+tpose 2
+pulse 192
+pair S 2 3
+vel 8
+pulse 96
+root 2 5 u
+mvg 1 2
+mstep 1 1 0
+mstep 1 3 2
+pulse 96

@@ -74,13 +74,12 @@ TEST(external_gate_option_arms_no_timer) {
 }
 TEST(parametric_groove_pon_and_reroll) {
   Rig r;
-  CHECK_EQ(r.ca.vgv(1, 100), 100);                // off: flat
+  CHECK_EQ(r.ca.getParam(ChordArp::P_PON), 0);
   r.panel(ChordArp::PANEL_PARAM);
   CHECK_EQ(r.ca.getParam(ChordArp::P_PON), 0);    // first tap only opens the panel
   r.press(11, 1);                                 // re-tap PARAM = PON
   CHECK_EQ(r.ca.getParam(ChordArp::P_PON), 1);
-  CHECK_EQ(r.ca.vgv(1, 100), 90); CHECK_EQ(r.ca.vgv(2, 100), 76); CHECK_EQ(r.ca.vgv(3, 100), 82);
-  CHECK_EQ(r.ca.vgv(17, 100), 90);                // wraps every 16
+  CHECK_EQ(r.ca.vgvSel(1, 100), 100);              // c34: PON no longer shapes velocity (pattern 1 = flat)
   static const int on[4] = {1, 5, 11, 13};
   for (int i = 1; i <= 16; ++i) {
     bool e = false; for (int k = 0; k < 4; ++k) if (on[k] == i) e = true;
@@ -95,18 +94,36 @@ TEST(parametric_groove_pon_and_reroll) {
   CHECK_EQ(r.ca.getParam(ChordArp::P_PW0), 3); CHECK_EQ(r.ca.getParam(ChordArp::P_PW1), 3); CHECK_EQ(r.ca.getParam(ChordArp::P_PW2), 1);
   r.press(6, 0);                                  // downbeat weight 0
   CHECK_EQ(r.ca.getParam(ChordArp::P_PW0), 0);
-  CHECK_EQ(r.ca.vgv(1, 100), 76);
   Rig q; q.ca.setParam(ChordArp::P_PON, 1);       // same seed + weights -> same mask (deterministic hash)
   q.ca.setParam(ChordArp::P_PARCH, 2);
   q.ca.setParam(ChordArp::P_PSEED, 30);
   q.ca.setParam(ChordArp::P_PW0, 0); q.ca.setParam(ChordArp::P_PW1, 3); q.ca.setParam(ChordArp::P_PW2, 1);
   for (int i = 1; i <= 16; ++i) CHECK_EQ(q.ca.gbit(1, i), r.ca.gbit(1, i));
 }
-TEST(pon_velocity_used_for_live_notes) {
-  Rig r; r.panel(ChordArp::PANEL_PARAM); r.press(11, 1);
-  r.ca.setParam(ChordArp::P_SEL_SPEED, 3); r.ca.setParam(ChordArp::P_SEL_MOD, 1);
+TEST(velocity_pattern_shapes_live_notes) {
+  Rig r;
+  r.ca.setParam(ChordArp::P_SEL_SPEED, 3); r.ca.setParam(ChordArp::P_SEL_MOD, 1); r.ca.setParam(ChordArp::P_SEL_VG, 2);
   r.ca.start(); r.rootDown(1, 5); r.pulses(24); clearEv(); r.pulses(1);
-  CHECK_EQ(g_ev[0].vel, r.ca.vgv(5, 105));  // step 5 of the 1/16 pattern
+  CHECK_EQ(g_ev[0].vel, vgvCalc(2, 5, 105, 0));  // step 5 of pattern 2
+  CHECK(g_ev[0].vel < 105);
+}
+TEST(vgv_patterns_match_c34_reference_values) {
+  static const int p2[16] = {100, 69, 86, 69, 93, 69, 86, 69, 93, 69, 86, 69, 93, 69, 86, 69};
+  for (int i = 1; i <= 16; ++i) { CHECK_EQ(vgvCalc(2, i, 100, 0), p2[i - 1]); CHECK_EQ(vgvCalc(1, i, 100, 0), 100); }
+  static const int bl[4] = {100, 85, 93, 85};          // blend: g = 1 + 8*2 averages patterns 1 and 2
+  for (int i = 1; i <= 4; ++i) CHECK_EQ(vgvCalc(17, i, 100, 0), bl[i - 1]);
+  static const int p8[9] = {100, 86, 97, 84, 95, 81, 92, 78, 89};   // pattern 8 varies with the bar counter
+  for (int gb = 0; gb < 9; ++gb) CHECK_EQ(vgvCalc(8, 1, 100, gb), p8[gb]);
+  static const int p6[16] = {69, 69, 73, 76, 76, 80, 83, 83, 87, 91, 94, 94, 98, 101, 101, 105};
+  for (int i = 1; i <= 16; ++i) CHECK_EQ(vgvCalc(6, i, 105, 0), p6[i - 1]);
+  CHECK_EQ(vgvCalc(2, 17, 100, 0), vgvCalc(2, 1, 100, 0));  // wraps every 16
+}
+TEST(bar_counter_advances_context_gb_once_per_bar) {
+  Rig r; r.ca.start();
+  r.pulses(95); CHECK_EQ(r.ctx.gb, 0);
+  r.pulses(1); CHECK_EQ(r.ctx.gb, 0);      // counted when the next pulse starts, as c34 counts after the other pages
+  r.pulses(1); CHECK_EQ(r.ctx.gb, 1);
+  r.pulses(96 * 8); CHECK_EQ(r.ctx.gb, 0); // modulo 9
 }
 TEST(inv_and_oct_pads_both_reset) {
   Rig r;
@@ -386,10 +403,6 @@ TEST(mono_follows_chord_scale_and_vgv) {
   clearEv();
   r.m.start(); CHECK_EQ(g_ev[0].note, 57);
   r.pulses(1); CHECK_EQ(g_ev[g_nev - 1].note, 60);  // degree 2 of A minor (folded tonic 57) = 60
-  r.ca.setParam(ChordArp::P_PANEL, ChordArp::PANEL_PARAM);
-  r.ca.pad(11, 1, true); r.ca.pad(11, 1, false);   // re-tap PARAM = PON
-  clearEv(); r.m.start();
-  CHECK_EQ(g_ev[g_nev - 1].vel, 90);               // pvt[1] with default weights
 }
 TEST(mono_without_chord_is_c_major_flat) {
   Mono m; m.setSink(rec, 0); clearEv();   // no context at all
@@ -450,6 +463,8 @@ TEST(mute_keeps_pending_gate_timer_like_c31) {
   r.ticks(1); CHECK_EQ(countOff(), 0);
   r.ticks(1); CHECK_EQ(countOff(), 1);        // the stale timer ended it after 2 ticks
 }
+
+#include "test_cases3.inc"
 
 int main() {
   for (int i = 0; i < g_nreg; ++i) {

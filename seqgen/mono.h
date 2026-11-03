@@ -1,4 +1,4 @@
-// Mono sequencer: owner's grid-composer c31 page 4 (lines 711-841), one instance = one c31 tk[k].
+// Mono sequencer: owner's grid-composer c34 page 4, one instance = one tk[k].
 #pragma once
 #include "chordarp.h"
 #include "seqgen.h"
@@ -22,9 +22,10 @@ class Mono : public SeqBase {
     P_HALF,       // visible half of the page: 0 = steps 1-8, 1 = steps 9-16
     P_DIV,        // pulses per step (read-only, SPD[speed])
     P_PLAYING,    // sounding note or -1 (read-only)
+    P_VG,         // velocity pattern 1..72 (c34 tk.vg; a, or a + 8*b blend)
     P_COUNT
   };
-  enum { kSerialVersion = 1, kSerialSize = 12 + 128 };
+  enum { kSerialVersion = 2, kSerialSize = 12 + 128 };
   enum { kMaxSteps = 128, kNoStep = -128, kWinLimit = 40 };
 
   Mono();
@@ -61,6 +62,7 @@ class Mono : public SeqBase {
   uint8_t lstart_, lend_, pos_, pc_, div_, spPos_, np_, ep_, pg_;
   int8_t win_, tpose_;
   bool mute_, ti_, half_;
+  uint8_t vg_;
   int16_t playing_;
   uint8_t fc_;
   bool bl_;

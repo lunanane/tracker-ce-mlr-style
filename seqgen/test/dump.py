@@ -4,7 +4,7 @@ import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lua_compare as lc
 lines = [l.strip() for l in open(sys.argv[1]) if l.strip()]
-lua = lc.LuaSide(lc.DEFAULT_C31); lua.run(lines)
+lua = lc.LuaSide(lc.DEFAULT_LUA); lua.run(lines)
 a = lc.normalise(lua.events()); b = lc.normalise(lc.run_cpp(os.path.join(lc.HERE, "..", "build", "lua_driver.exe"), lines))
 for i in range(max(len(a), len(b))):
     x = a[i] if i < len(a) else ""; y = b[i] if i < len(b) else ""

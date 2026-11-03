@@ -1,4 +1,4 @@
-// Chord/Arp engine, port of c31 page 3 (lines 237-708) without the arranger. See README.md for the mapping.
+// Chord/Arp engine, port of c34 page 3 without the arranger. See README.md for the mapping.
 #include "chordarp.h"
 
 namespace seqgen {
@@ -17,8 +17,12 @@ static const uint16_t kGlib[16] = {65535, 21845, 18761, 4369, 26214, 27437, 4369
 static const uint8_t kSm[4] = {5, 4, 3, 2};
 static const uint8_t kPlv[4] = {0, 20, 45, 100};
 static const uint8_t kPar[4][3] = {{2, 1, 1}, {3, 3, 1}, {3, 2, 2}, {2, 2, 1}};
-static const uint8_t kMdiv[4] = {12, 8, 6, 4};
-static const uint8_t kNsb[4] = {8, 12, 16, 12};
+static const uint8_t kMdiv[10] = {12, 8, 6, 4, 24, 16, 3, 2, 48, 32};
+static const uint8_t kNsb[10] = {8, 12, 16, 12, 4, 6, 16, 12, 2, 3};
+static const uint16_t kLM[5] = {0, 17476, 34952, 4369, 43690};  // gate lanes 1..4 (c34 LM)
+static const uint8_t kP1[6] = {1, 1, 1, 2, 2, 3}, kP2[6] = {2, 3, 4, 3, 4, 4};  // pair index 5..10 -> pads
+// c34 VP: velocity patterns 1..7 as 16 levels a..p per step (pattern 8 reuses 2 with a per-bar shape)
+static const char kVP[] = "pppppppppppppppppglgnglgnglgnglgmgjgpgjgmgjgpgjglhphlhphlhphlhphpdjdpdjdpdjdpdjdffghhijjklmmnooppoonmmlkjjihhgff";
 static const uint8_t kArpSq[8] = {1, 3, 2, 4, 3, 5, 4, 6};
 static const uint8_t kPnLut[6] = {5, 6, 9, 11, 14, 15};  // eased note pulse, index = distance from the cycle edge
 
@@ -33,7 +37,18 @@ int SeqContext::scaleDeg(int d) const {
   if (chord) return chord->scaleDeg(d);
   return 60 + 12 * floordiv(d, 7) + kScMaj[floormod(d, 7)];
 }
-int SeqContext::vgv(int i, int base) const { return chord ? chord->vgv(i, base) : base; }
+
+int vgvCalc(int g, int i, int base, int gb) {
+  int p = floormod(i - 1, 16), a = floormod(g - 1, 8) + 1, b = floordiv(g - 1, 8);
+  if (b == 0) b = a;
+  int m = (gb * 5 + p * 7 + p * p) % 9, N = 0;  // pattern 8 is scaled by h = (20 - m) / 20
+  for (int n = 0; n < 2; ++n) {
+    int k = n == 0 ? a : b;
+    int v = kVP[((k == 8 ? 2 : k) - 1) * 16 + p] - 'a' + 1;
+    N += v * (k == 8 ? 20 - m : 20);
+  }
+  return (2 * base * (5760 + 11 * N) + 12800) / 25600;  // floor(base*(0.45+0.55*L/32)+0.5), L = N/20
+}
 
 // ---- construction / state --------------------------------------------------------------------
 ChordArp::ChordArp() : ctx_(0), internalGate_(true) { ch_ = 3; reset(); }
@@ -43,6 +58,7 @@ void ChordArp::reset() {
   parch_ = 1; panel_ = PANEL_TYPES; pon_ = false;
   PW_[0] = 2; PW_[1] = 1; PW_[2] = 0;
   pseed_ = 1;
+  selVg_ = 1; lane_ = 0; orng_ = 1; ownGb_ = 0; xh_[0] = xh_[1] = 0; gbPending_ = false; gx_ = 0; rng_ = 2463534242u;
   qT_ = qS_ = qD_ = qSize_ = qG_ = qMod_ = 0;
   ql_.valid = false; last_.valid = false; last_.x = last_.y = 0;
   lockR_ = 60; lockMn_ = false; centerHeld_ = false; amute_ = false;
@@ -67,7 +83,6 @@ void ChordArp::pgen() {
   for (int i = 0; i < 16; ++i) {
     int w = kPlv[PW_[(i % 4 == 0) ? 0 : ((i % 2 == 0) ? 1 : 2)]];
     if (((pseed_ * 97 + i * 41) % 251) * 100 < w * 251) m |= (uint16_t)(1u << i);
-    pvt_[i] = (uint8_t)(76 + (32 * w) / 100);
   }
   pmask_ = m;
 }
@@ -78,14 +93,20 @@ bool ChordArp::gbit(int g, int i) const {
   return ((kGlib[idx - 1] >> (i - 1)) & 1) == 1;
 }
 
-// Groove step from bar position (c31 gstep). meas_ is 1..96 inside pulse().
+// Groove step from bar position (c31 gstep, c34: swing capped below the step length, gate per step).
+// meas_ is 1..96 inside pulse().
 int ChordArp::gstep(int sp) const {
-  if (sp < 1 || sp > 4 || meas_ == 0) return 0;
+  if (sp < 1 || sp > 10 || meas_ == 0) return 0;
   int d = kMdiv[sp - 1];
   int p = meas_ - 1;
   int t = p / d;
-  if (p != t * d + ((t % 2 == 1) ? sw_ : 0)) return 0;
-  return (t % kNsb[sp - 1]) + 1;
+  int swv = sw_ < d - 1 ? sw_ : d - 1;
+  if (p != t * d + ((t % 2 == 1) ? swv : 0)) return 0;
+  int n = (t % kNsb[sp - 1]) + 1;
+  int lo = lane_ % 8, hi = lane_ / 8;
+  unsigned mask = (lo <= 4 ? kLM[lo] : 0u) | (hi <= 4 ? kLM[hi] : 0u);
+  gx_ = ((mask >> (n - 1)) & 1) ? 7 : (uint8_t)gateTicks();
+  return n;
 }
 
 // ---- scale ------------------------------------------------------------------------------------
@@ -108,11 +129,6 @@ int ChordArp::scaleDeg(int d) const {
   return r + 12 * floordiv(d, 7) + (mn ? kScMin : kScMaj)[floormod(d, 7)];
 }
 
-int ChordArp::vgv(int i, int base) const {
-  if (pon_) return pvt_[floormod(i - 1, 16)];
-  return base;
-}
-
 int ChordArp::dlk(int note) const {
   const uint8_t* iv = lockMn_ ? kScMin : kScMaj;
   int rel = note - lockR_, oct = floordiv(rel, 12), off = floormod(rel, 12);
@@ -125,46 +141,31 @@ int ChordArp::lkd(int d) const {
   return lockR_ + 12 * floordiv(d, 7) + iv[floormod(d, 7)];
 }
 
-// ---- chord pool (c31 c_pool) -----------------------------------------------------------------
+// ---- chord pool (c34 c_pool: transpose T is applied while the pool is built, in the chord's own key) --------
 int ChordArp::pool(int r, int m, bool mn, int16_t out[8]) const {
-  int n = 0;
+  int raw[8], n = 0;
   if (amute_) return 0;
   m = clampv(m, 1, 15);
   int ko = 12 * koct_;
   bool lk = pmode_ >= 2;
-  if (m > 8) {
-    int rr = r;
-    if (lk) rr = lkd(dlk(r));
-    for (int i = 0; i < kCabsN[m - 9]; ++i) out[n++] = (int16_t)(rr + kCabs[m - 9][i] + ko);
-  } else if (lk) {
-    int d0 = dlk(r);
-    for (int i = 0; i < kCdegN[m - 1]; ++i) out[n++] = (int16_t)(lkd(d0 + kCdeg[m - 1][i]) + ko);
-  } else {
-    const uint8_t* iv = mn ? kScMin : kScMaj;
-    for (int i = 0; i < kCdegN[m - 1]; ++i) {
-      int d = kCdeg[m - 1][i];
-      out[n++] = (int16_t)(r + 12 * floordiv(d, 7) + iv[floormod(d, 7)] + ko);
-    }
-  }
-  if (n > selSize_) n = selSize_;
   int T = arpTpose_ + (ctx_ ? ctx_->gtpose : 0);
-  if (T != 0) {  // snap to scale degrees, shift by T, keep voices distinct
-    int degs[8];
-    int sr; bool smn; scaleSet(sr, smn);
-    const uint8_t* siv = smn ? kScMin : kScMaj;
-    for (int k = 0; k < n; ++k) {
-      int rel = out[k] - sr, oct = floordiv(rel, 12), pc = floormod(rel, 12);
-      int best = 99, bd = 0;
-      for (int di = 0; di < 7; ++di) { int dd = iabs(siv[di] - pc); if (dd < best) { best = dd; bd = di; } }
-      int dw = iabs(12 - pc); if (dw < best) { best = dw; bd = 7; }
-      degs[k] = oct * 7 + bd;
+  const uint8_t* iv = mn ? kScMin : kScMaj;
+  if (m > 8) {
+    int rr = r + 12 * floordiv(T, 7) + iv[floormod(T, 7)];
+    if (lk) rr = lkd(dlk(r) + T);
+    for (int i = 0; i < kCabsN[m - 9]; ++i) raw[n++] = rr + kCabs[m - 9][i] + ko;
+  } else if (lk) {
+    int d0 = dlk(r) + T;
+    for (int i = 0; i < kCdegN[m - 1]; ++i) raw[n++] = lkd(d0 + kCdeg[m - 1][i]) + ko;
+  } else {
+    for (int i = 0; i < kCdegN[m - 1]; ++i) {
+      int d = kCdeg[m - 1][i] + T;
+      raw[n++] = r + 12 * floordiv(d, 7) + iv[floormod(d, 7)] + ko;
     }
-    for (int i = 1; i < n; ++i) { int v = degs[i], j = i - 1; while (j >= 0 && degs[j] > v) { degs[j + 1] = degs[j]; --j; } degs[j + 1] = v; }
-    for (int i = 1; i < n; ++i) if (degs[i] <= degs[i - 1]) degs[i] = degs[i - 1] + 1;
-    int m2 = 0;
-    for (int i = 0; i < n; ++i) { int nn = scaleDeg(degs[i] + T); if (nn >= 0 && nn <= 127) out[m2++] = (int16_t)nn; }
-    n = m2;
   }
+  int k = 0;
+  for (int i = 0; i < n; ++i) if (i < selSize_ && raw[i] >= 0 && raw[i] <= 127) out[k++] = (int16_t)raw[i];
+  n = k;
   int iv2 = inv_;
   if (iv2 != 0 && n > 0) {
     for (int c = 0; c < iabs(iv2); ++c) {
@@ -175,14 +176,39 @@ int ChordArp::pool(int r, int m, bool mn, int16_t out[8]) const {
   return n;
 }
 
-int ChordArp::arp(const int16_t* p, int n, int d, int st, bool alt) const {
+uint32_t ChordArp::rnd(int l) {  // xorshift32, stands in for math.random(l) so runs are reproducible
+  uint32_t x = rng_;
+  x ^= x << 13; x ^= x >> 17; x ^= x << 5;
+  rng_ = x;
+  return 1 + x % (uint32_t)l;
+}
+
+int ChordArp::arp(const int16_t* p0, int n, int d, int st, bool alt) {
   if (n == 0) return -1;
-  int l = n, pi = -1;
+  int16_t q[24];
+  const int16_t* p = p0;
+  int l = n;
+  if (orng_ > 1) {  // arp octave range
+    l = 0;
+    for (int o = 0; o < orng_; ++o) for (int i = 0; i < n; ++i) if (p0[i] + 12 * o < 128 && l < 24) q[l++] = (int16_t)(p0[i] + 12 * o);
+    p = q;
+    if (l == 0) return -1;
+  }
+  int pi;
   if (d == 1) pi = p[(st - 1) % l];
   else if (d == 2) pi = p[l - ((st - 1) % l) - 1];
   else if (d == 3) { int cy = l * 2, ph = (st - 1) % cy; pi = ph < l ? p[ph] : p[cy - ph - 1]; }
   else if (d == 4) pi = p[(kArpSq[(st - 1) % 8] - 1) % l];
-  if (alt && st % 2 == 0 && pi >= 0) pi += 12;
+  else {
+    int j = (st - 1) % l, cy = 2 * l - 2 > 1 ? 2 * l - 2 : 1, ph = (st - 1) % cy, e = ph < l ? ph : cy - ph;
+    if (d == 5) pi = p[e];
+    else if (d == 6) pi = p[l - e - 1];
+    else if (d == 7) pi = p[rnd(l) - 1];
+    else if (d == 8) pi = p[(j % 2 == 0) ? j / 2 : l - j / 2 - 1];
+    else if (d == 9) { int mm = (l + 1) / 2; pi = p[(j % 2 == 0) ? mm - j / 2 - 1 : mm + j / 2]; }
+    else pi = p[(ph % 2 == 0) ? 0 : ph / 2 + 1];
+  }
+  if (alt && st % 2 == 0) pi += 12;
   return pi;
 }
 
@@ -218,9 +244,9 @@ void ChordArp::tickLive(int rootNote) {
     if (g) {
       lGptr_ = (uint8_t)g; killLive();
       if (gbit(selG_, g)) {
-        int v = vgv(g, 105);
+        int v = vgvSel(g, 105);
         int n = liveAt(rootNote, mn, p);
-        unsigned gt = gateTicks();
+        unsigned gt = gx_;
         for (int i = 0; i < n; ++i) {
           noteOnLive(p[i], v, gt * kTickMs);
           if (p[i] >= 0 && p[i] <= 127) lN_[p[i]] = true;
@@ -237,8 +263,8 @@ void ChordArp::tickLive(int rootNote) {
         int n = liveAt(rootNote, mn, p);
         int pn = arp(p, n, selD_, (int)lAptr_, selT_ == 3);
         if (pn >= 0) {
-          int v = vgv(g, 105);
-          unsigned gt = gateTicks();
+          int v = vgvSel(g, 105);
+          unsigned gt = gx_;
           noteOnLive(pn, v, gt * kTickMs);
           llArp_ = (pn <= 127) ? (int16_t)pn : (int16_t)-1;
           lgate_ = internalGate_ ? (uint8_t)gt : 0;
@@ -279,15 +305,26 @@ void ChordArp::barTick() {
   if (qc) lAptr_ = 1;
 }
 
+void ChordArp::applyBar() {
+  if (!gbPending_) return;
+  gbPending_ = false;
+  if (ctx_) ctx_->barTick(); else ownGb_ = (uint8_t)((ownGb_ + 1) % 9);
+}
+
 void ChordArp::pulse() {
+  applyBar();
   meas_++;
   if (meas_ % 24 == 0) applyQuarter();
   int r = rv(last_);
   if (r >= 0) tickLive(r);
-  if (meas_ >= kBarPulses) { meas_ = 0; barTick(); }
+  if (meas_ >= kBarPulses) {
+    meas_ = 0;
+    gbPending_ = true;  // c34 counts the bar after the other pages ran their pulse; applied at the next pulse/start
+    barTick();
+  }
 }
 
-void ChordArp::start() { meas_ = 0; }  // arranger resets (bar_c, g_ptr, a_ptr, c_stage) have no counterpart here
+void ChordArp::start() { applyBar(); meas_ = 0; }  // arranger resets (bar_c, g_ptr, a_ptr, c_stage) have no counterpart here
 
 void ChordArp::stop() { killLive(); }  // c31 252 leaves a pending gate timer armed (it only calls k_l)
 
@@ -323,7 +360,10 @@ void ChordArp::lockButton(bool down) {
 void ChordArp::pad(int col, int row, bool down) {
   if (col < 0 || col >= kCols || row < 0 || row >= kRows) return;
   if (col <= 5) gridRootEvent(row + 1, col + 1, down);
-  else if (col <= 9) panelEvent(col - 6, row, down);
+  else if (col <= 9) {
+    if (!down) { if ((row == 1 || row == 2) && xh_[row - 1] == col - 5) xh_[row - 1] = 0; }  // 2nd-finger tracking
+    panelEvent(col - 6, row, down);
+  }
   else controlEvent(row * 2 + (col - 10), down);
 }
 
@@ -393,8 +433,8 @@ void ChordArp::panelEvent(int pc, int pr, bool down) {
     case PANEL_SETTINGS: {
       int v = pc + 1;
       if (pr == 0) qT_ = (uint8_t)v;
-      else if (pr == 1) qS_ = (uint8_t)v;
-      else if (pr == 2) qD_ = (uint8_t)v;
+      else if (pr == 1) setPair(qS_, 1, v);
+      else if (pr == 2) setPair(qD_, 2, v);
       else qSize_ = kSm[v - 1];
       break;
     }
@@ -408,6 +448,18 @@ void ChordArp::panelEvent(int pc, int pr, bool down) {
       }
       pgen();
       break;
+  }
+}
+
+// c34: a second finger on the speed / direction row selects the pair (index 5..10) of the two held pads.
+void ChordArp::setPair(uint8_t& cur, int row, int v) {
+  int f = xh_[row - 1];
+  if (f && f != v) {
+    if (f > v) { int t = f; f = v; v = t; }
+    cur = (uint8_t)(4 + (f - 1) * 3 - ((f - 1) * (f - 2)) / 2 + v - f);
+  } else {
+    xh_[row - 1] = (uint8_t)v;
+    cur = (uint8_t)v;
   }
 }
 
@@ -442,6 +494,9 @@ int ChordArp::getParam(int id) const {
     case P_LOCK_ROOT: return lockR_;
     case P_LOCK_MINOR: return lockMn_;
     case P_SWING: return sw_;
+    case P_SEL_VG: return selVg_;
+    case P_LANE: return lane_;
+    case P_ORANGE: return orng_;
     case P_GATE: return glen_ - 1;
     case P_SEL_TYPE: return selT_;
     case P_SEL_SPEED: return selS_;
@@ -474,11 +529,14 @@ void ChordArp::setParam(int id, int v) {
     case P_PMODE: lockTransition(clampv(v, 1, 3), false); break;
     case P_LOCK_ROOT: lockR_ = (int16_t)clampv(v, 0, 127); break;
     case P_LOCK_MINOR: lockMn_ = v != 0; break;
-    case P_SWING: sw_ = (uint8_t)clampv(v, 0, 2); break;
+    case P_SWING: sw_ = (uint8_t)clampv(v, 0, 3); break;
+    case P_SEL_VG: selVg_ = (uint8_t)clampv(v, 1, 72); break;
+    case P_LANE: lane_ = (uint8_t)clampv(v, 0, 36); break;
+    case P_ORANGE: orng_ = (uint8_t)clampv(v, 1, 4); break;
     case P_GATE: glen_ = (uint8_t)(clampv(v, 0, 2) + 1); break;
     case P_SEL_TYPE: selT_ = (uint8_t)clampv(v, 1, 4); lAptr_ = 1; break;
-    case P_SEL_SPEED: selS_ = (uint8_t)clampv(v, 1, 4); lAptr_ = 1; break;
-    case P_SEL_DIR: selD_ = (uint8_t)clampv(v, 1, 4); lAptr_ = 1; break;
+    case P_SEL_SPEED: selS_ = (uint8_t)clampv(v, 1, 10); lAptr_ = 1; break;
+    case P_SEL_DIR: selD_ = (uint8_t)clampv(v, 1, 10); lAptr_ = 1; break;
     case P_SEL_SIZE: selSize_ = (uint8_t)clampv(v, 2, 5); lAptr_ = 1; break;
     case P_SEL_GROOVE: selG_ = (uint8_t)clampv(v, 1, 16); lAptr_ = 1; break;
     case P_SEL_MOD: selMod_ = (uint8_t)clampv(v, 1, 15); break;
@@ -509,6 +567,7 @@ size_t ChordArp::serialize(uint8_t* b, size_t cap) const {
   b[17] = PW_[0]; b[18] = PW_[1]; b[19] = PW_[2];
   b[20] = (uint8_t)(pseed_ & 0xff); b[21] = (uint8_t)((pseed_ >> 8) & 0xff);
   b[22] = (uint8_t)arpTpose_; b[23] = amute_; b[24] = panel_;
+  b[25] = selVg_; b[26] = lane_; b[27] = orng_;
   return kSerialSize;
 }
 
@@ -516,7 +575,8 @@ bool ChordArp::deserialize(const uint8_t* b, size_t len) {
   if (len < (size_t)kSerialSize || b[0] != kSerialVersion) return false;
   int pm = b[1], sw = b[5], gl = b[6], t = b[7], s = b[8], d = b[9], sz = b[10], g = b[11], mod = b[12];
   int pa = b[16], pseed = b[20] | (b[21] << 8), pn = b[24];
-  if (pm < 1 || pm > 3 || sw > 2 || gl < 1 || gl > 3 || t < 1 || t > 4 || s < 1 || s > 4 || d < 1 || d > 4 ||
+  if (pm < 1 || pm > 3 || sw > 3 || gl < 1 || gl > 3 || t < 1 || t > 4 || s < 1 || s > 10 || d < 1 || d > 10 ||
+      b[25] < 1 || b[25] > 72 || b[26] > 36 || b[27] < 1 || b[27] > 4 ||
       sz < 2 || sz > 5 || g < 1 || g > 16 || mod < 1 || mod > 15 || pa < 1 || pa > 4 || pseed > 250 || pn > 3 ||
       b[17] > 3 || b[18] > 3 || b[19] > 3 || (int8_t)b[13] < -1 || (int8_t)b[13] > 1 || (int8_t)b[14] < -6 ||
       (int8_t)b[14] > 6)
@@ -529,6 +589,7 @@ bool ChordArp::deserialize(const uint8_t* b, size_t len) {
   selG_ = (uint8_t)g; selMod_ = (uint8_t)mod; koct_ = (int8_t)b[13]; inv_ = (int8_t)b[14]; pon_ = b[15] != 0;
   parch_ = (uint8_t)pa; PW_[0] = b[17]; PW_[1] = b[18]; PW_[2] = b[19]; pseed_ = pseed;
   arpTpose_ = (int8_t)b[22]; amute_ = b[23] != 0; panel_ = (uint8_t)pn;
+  selVg_ = b[25]; lane_ = b[26]; orng_ = b[27]; xh_[0] = xh_[1] = 0;
   pgen();
   return true;
 }
@@ -574,8 +635,10 @@ void ChordArp::leds(uint8_t out[kPads], uint8_t* roles) const {
     } else if (panel_ == PANEL_SETTINGS) {
       int v = pc + 1;
       if (row == 0) led = ((qT_ ? qT_ : selT_) == v) ? pul : 0;
-      else if (row == 1) led = ((qS_ ? qS_ : selS_) == v) ? pul : 0;
-      else if (row == 2) led = ((qD_ ? qD_ : selD_) == v) ? pul : 0;
+      else if (row == 1 || row == 2) {
+        int cur = row == 1 ? (qS_ ? qS_ : selS_) : (qD_ ? qD_ : selD_);
+        led = (cur == v || (cur >= 5 && (kP1[cur - 5] == v || kP2[cur - 5] == v))) ? pul : 0;
+      }
       else led = (kSm[pc] == (qSize_ ? qSize_ : selSize_)) ? pul : 0;
     } else if (panel_ == PANEL_GROOVE) {
       int ag = qG_ ? qG_ : selG_;
