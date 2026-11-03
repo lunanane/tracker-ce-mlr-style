@@ -4,6 +4,7 @@
 
 #include "../chordarp.h"
 #include "../mono.h"
+#include "../playhead.h"
 
 using namespace seqgen;
 
@@ -270,4 +271,5 @@ static int arpNotes(Rig& r, int* out, int steps) {
   }
   return n;
 }
+#include "test_playhead.inc"
 #include "test_cases2.inc"

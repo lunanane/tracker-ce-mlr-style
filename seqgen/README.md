@@ -19,6 +19,8 @@ License: **to be chosen by the owner** (placeholder, no license is granted by th
 | `test/lua_driver.cpp`, `test/lua_compare.py` | differential test against the real Lua pages | - |
 | `test/scripts/*.txt` | scripted gesture sequences for the differential test | - |
 | `test/shrink.py`, `test/dump.py` | delta-debug a failing script / print both streams side by side | - |
+| `playhead.h/.cpp` | `Playhead`: MLR-style per-track playhead for the Session view (plan 002 S1), see the Playhead section | - |
+| `test/test_playhead.inc` | 24 Playhead tests (included by `test_main.cpp`) | - |
 | `Makefile` | `make test`, `make lua-compare`, `make arm` | - |
 
 ## Interface (both sequencers)
@@ -151,6 +153,63 @@ the 4 visible degrees, parametric groove "on" before any PARAM edit.
 | `mono.o` | 2738 B | 24 B (shared default context) |
 
 RAM per instance: `sizeof(ChordArp)` = 296 B, `sizeof(Mono)` = 216 B (host build; the ARM layout is the same size class).
+
+## Playhead (plan 002, S1)
+
+`playhead.h/.cpp`: one `Playhead` per track (16 in the firmware). Pure logic like the rest of seqgen. `sizeof(Playhead)` = 324 B
+(host), 16 tracks = 5.2 KB; `playhead.o` on ARM: 1458 B flash, 0 bss.
+
+```cpp
+Playhead p;                              // defaults: length 16, 8 columns, quantise 1, normal, forward
+p.setLength(1..256); p.setColumns(8|12); p.setQuantise(1..64 steps); p.setRate(RATE_HALF|NORMAL|DOUBLE); p.setReverse(b);
+p.press(col); p.release(col);            // pads of this track's row, 0-based
+p.recDown(); p.recUp();                  // playhead recording
+p.resync(globalStep);                    // align to the global step counter
+Playhead::StepOut o = p.step();          // once per sequencer step boundary -> o.pos, o.jumped, o.hold, o.pos2/has2/jumped2
+Playhead::noteOffsetFor(pos, hasNote, length, noteStep, stepsSince)   // "replay as if at pos"
+p.serialize(buf, cap) / p.deserialize(buf, len)                       // kSerialSize = 296 B, version byte 1
+```
+
+Rules (all covered by tests):
+- **The Playhead owns the track position.** The glue calls `step()` once per step boundary (instead of advancing the track's
+  own position) and plays `o.pos`. Before the first step the next position is 0. Quantise counts these `step()` calls
+  (index since `resync(globalStep)`; boundary = index % quantise == 0), so the glue should pass the global step to `resync()`
+  when it starts the transport.
+- **Columns:** column c starts at position `c * length / columns` (integer). A column's range runs to the next column's start - 1;
+  with fewer steps than columns, neighbouring columns share a position.
+- **`jumped`** = `pos` is not the engine's natural successor of the previously played position (+1, wrapping at the track end). So
+  it is set for pad jumps, loop wraps, every step when reversed, replayed jumps and the first step after `resync()`; it is
+  clear for a plain forward run and for a press that happens to hit the natural position. The glue re-seeks the track
+  (`actual_pos`) and, on `jumped`, retriggers the last note at or before `pos` with a sample offset from `noteOffsetFor`.
+- **One pad:** the jump is queued and applied at the next quantise boundary (the last press before the boundary wins);
+  playback then continues forward from there. Releasing it changes nothing.
+- **Two or more pads:** the loop is the outer columns (min..max of the held ones, inclusive, so the order of pressing is
+  irrelevant). It starts at the range start (the end when reversed) at the next boundary, wraps inside the range
+  (flagged `jumped`), and follows a third pad that widens it (it only jumps if the playhead is outside the new range).
+  When fewer than two pads are held the loop ends at once and the track runs on freely from the current position.
+- **Rate:** half = each position lasts 2 steps (second step: `hold` = true, same `pos`, trigger nothing). Double = `pos` for the
+  first half of the step and `pos2` (= next position, loop-aware) for the second half (`has2`, `jumped2`); the glue plays
+  `pos2` at the middle of the step (µstep 24 of 48). A jump restarts the half-rate phase. Reverse = positions run backwards;
+  wraps at 0 (or the loop start). Rate and reverse apply to free running only; a recorded loop is replayed as recorded.
+- **Playhead recording:** `recDown()` starts a take, each `step()` records the position that was played (after jumps, loops,
+  rate - one entry per step, incl. holds), max 256 steps; a full take closes itself (the loop then restarts at that moment).
+  `recUp()` closes it: the take becomes the replay loop and from the next step on the track plays it, step by step, forever
+  (also while the user is on other pages: it only needs `step()`). The previous loop stops while a new take is recorded and is
+  replaced by it; a take of 0 steps (tap Rec) clears the loop.
+- **Press while a recording replays (decision):** a pad **overrides** the recording while it is down: the jump/loop is queued
+  and applied at the boundary as usual, and the track free-runs from there while any pad is held. When the last pad is
+  released the track returns to the recorded loop **in phase** - the recorded loop keeps its own clock while overridden, so it
+  continues where it would have been. A tap (press and release before the boundary) overrides for exactly one step. The
+  recording is **not** cleared by a press or a two-pad loop (this differs from the provisional wording in plan 002); it is
+  cleared by `resync()`, `clearRecording()`, an empty take or `reset()`. Holding Rec while jamming records the overriding
+  positions (that is how a take is made).
+- **`resync(globalStep)`:** next position = `globalStep % length`, `jumped` set, loop/queue/held pads/recording cleared (stray
+  releases afterwards are ignored). Rate and reverse are kept.
+- **`noteOffsetFor`:** scans back from `position` (inclusive), wrapping to the end of the track; returns the step and the
+  number of steps since it; false if the track has no note at all.
+- **Serialized:** length, columns, quantise, rate, reverse and the recorded loop (positions + hold bits). Position, held pads
+  and queue restart clean. Changing the column count clears held pads, loop and queue.
+- Not in S1: stop/start of a track, the cut cache (S3), the firmware glue (S2).
 
 ## Open questions
 

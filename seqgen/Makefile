@@ -4,7 +4,7 @@
 #   make arm          compile the library for Cortex-M4F and print object sizes (needs arm-none-eabi-g++)
 CXX ?= g++
 CXXFLAGS ?= -std=c++11 -Wall -Wextra -Wdouble-promotion -O1
-SRC = chordarp.cpp mono.cpp
+SRC = chordarp.cpp mono.cpp playhead.cpp
 PYTHON ?= python
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
 LUA ?= E:/claude/iii-grid-composer/monome_iii_c34.lua   # set LUA=...monome_iii_c31.lua to run the older script (the port follows c34, so it will differ)
@@ -14,7 +14,7 @@ FUZZ ?= 40
 test: build/seqgen_tests$(EXE)
 	build/seqgen_tests$(EXE)
 
-build/seqgen_tests$(EXE): test/test_main.cpp test/test_cases2.inc test/test_cases3.inc $(SRC) seqgen.h chordarp.h mono.h
+build/seqgen_tests$(EXE): test/test_main.cpp test/test_cases2.inc test/test_cases3.inc test/test_playhead.inc $(SRC) seqgen.h chordarp.h mono.h playhead.h
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) test/test_main.cpp $(SRC) -o $@
 
@@ -31,7 +31,8 @@ arm:
 	mkdir -p build
 	arm-none-eabi-g++ $(ARMFLAGS) -c chordarp.cpp -o build/chordarp.o
 	arm-none-eabi-g++ $(ARMFLAGS) -c mono.cpp -o build/mono.o
-	arm-none-eabi-size build/chordarp.o build/mono.o
+	arm-none-eabi-g++ $(ARMFLAGS) -c playhead.cpp -o build/playhead.o
+	arm-none-eabi-size build/chordarp.o build/mono.o build/playhead.o
 
 clean:
 	rm -rf build

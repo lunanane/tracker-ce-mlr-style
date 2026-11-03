@@ -59,7 +59,7 @@ A jump to position X re-plays the track **as if its playhead had been at X**:
 - Does a retriggered track return to sync at pattern end, or stay offset until re-synced?
 
 ## Phases
-- **S1 library** (`seqgen/playhead.*`, host tests, no hardware): quantised jumps, two-pad loop ranges, playhead
+- **S1 library** (DONE 2026-11-04: `seqgen/playhead.*`, 24 host tests, 99 total green; press-over-recording rule = override while held, resume in phase, see seqgen/README "Playhead") (`seqgen/playhead.*`, host tests, no hardware): quantised jumps, two-pad loop ranges, playhead
   recording + looping, the "as if at X" note/offset lookup, rate ½/2×, reverse.
 - **S2 firmware glue**: Session view page, per-track playhead override in `inc_uStep`/`switchRowStep`, retrigger
   with offset, sidecar save. Needs `make original` (owner OK).
