@@ -25,5 +25,8 @@ Order is sequential (one implementation agent at a time, lead reviews + builds b
 - Recovery documented: reset pinhole + known-good `.ptf` in /Firmware/.
 
 ## License (owner 2026-11-04)
-Our add-in (seqgen/ and new glue files, each with a short header naming CC BY-NC 4.0) is CC BY-NC 4.0; edits
-inside Polyend files stay PolyForm NC 1.0.0. The release README states both.
+Our add-in (seqgen/ and new glue files, each with a short header) is **PolyForm Noncommercial 1.0.0** (owner first
+said CC BY-NC, then "Polyform is good"). Polyend relicensed CE upstream on 2026-11-03 (commit 9cc7aae) to MIT
+with a "no wholesale commercial clones" restriction; edits inside Polyend files follow that. The release README
+states both. Push target: https://github.com/lunanane/tracker-ce-mlr-style (its `main` = upstream 9cc7aae, three
+commits ahead of our base 9b9a13b → merge mod/main into seq-tracks after step A, before the release build).
