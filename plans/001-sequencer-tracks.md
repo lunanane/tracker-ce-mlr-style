@@ -98,11 +98,16 @@ r4    degree window +0       | WIN−  —     —     —
 
 ## Recording chords (a tracker track plays one note per step)
 - Arp → one note per step on the track: fits directly.
-- Chord on a **MIDI track**: root + `FX_TYPE_MIDI_CHORD` when the chord is in the Tracker's chord list
-  (`chordDefName`), otherwise …
-- … spread over consecutive tracks (chord size N uses the track and the N−1 tracks to its right).
+- **Chord mode → the lowest note + `FX_TYPE_MIDI_CHORD`** (owner 2026-11-03). The Tracker's chord FX
+  (`core/source/mtChordDefs.h`) is a table of 29 interval bitmasks (at most 4 notes within 15 semitones of the bass
+  note) and is played only on **MIDI tracks** (`Sequencer::sendMidiChordOn`, `mtSequencer.cpp:2344`).
+  - The glue (firmware side, not seqgen) turns the sounding chord into intervals above its lowest note and looks the
+    bitmask up in `chordDef`. Exact match → note + chord FX.
+  - No exact match (size-5 chords, wide inversions, extended types beyond the table): drop the highest notes until
+    it matches, and show "chord reduced" on the screen. [provisional; owner may prefer spreading over tracks]
+  - Chord mode Record on a sample track: only the lowest note is written, with a screen hint "chords need a MIDI
+    track". [provisional]
 - Live mode has no such limit: it sends all chord notes.
-[Provisional default: MIDI_CHORD where it matches, spread otherwise; owner may decide differently.]
 
 ## Phases
 - **P0 Build check**: `make original` builds on this PC (needs the owner's OK: it runs downloaded code); note free
