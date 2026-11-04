@@ -140,8 +140,8 @@ void HrScript::leds(uint8_t out[kPads], uint8_t* roles) const {
 }
 
 // ---------------------------------------------------------------- slot
-static_assert(sizeof(HrStab) <= HrSlot::kBytes && sizeof(HrArpSeq) <= HrSlot::kBytes && sizeof(HrChordArp) <= HrSlot::kBytes && sizeof(HrGridSeq) <= HrSlot::kBytes && sizeof(HrEuclid) <= HrSlot::kBytes && sizeof(HrBass) <= HrSlot::kBytes, "HrSlot buffer too small");
-static_assert((int)HrStab::kSerialSize <= (int)HrScript::kMaxSerial && (int)HrArpSeq::kSerialSize <= (int)HrScript::kMaxSerial && (int)HrChordArp::kSerialSize <= (int)HrScript::kMaxSerial && (int)HrGridSeq::kSerialSize <= (int)HrScript::kMaxSerial && (int)HrEuclid::kSerialSize <= (int)HrScript::kMaxSerial && (int)HrBass::kSerialSize <= (int)HrScript::kMaxSerial, "HrScript::kMaxSerial too small");
+static_assert(sizeof(HrStab) <= HrSlot::kBytes && sizeof(HrArpSeq) <= HrSlot::kBytes && sizeof(HrChordArp) <= HrSlot::kBytes && sizeof(HrStepFollow) <= HrSlot::kBytes && sizeof(HrGridSeq) <= HrSlot::kBytes && sizeof(HrEuclid) <= HrSlot::kBytes && sizeof(HrBass) <= HrSlot::kBytes, "HrSlot buffer too small");
+static_assert((int)HrStab::kSerialSize <= (int)HrScript::kMaxSerial && (int)HrArpSeq::kSerialSize <= (int)HrScript::kMaxSerial && (int)HrChordArp::kSerialSize <= (int)HrScript::kMaxSerial && (int)HrStepFollow::kSerialSize <= (int)HrScript::kMaxSerial && (int)HrGridSeq::kSerialSize <= (int)HrScript::kMaxSerial && (int)HrEuclid::kSerialSize <= (int)HrScript::kMaxSerial && (int)HrBass::kSerialSize <= (int)HrScript::kMaxSerial, "HrScript::kMaxSerial too small");
 
 HrScript* HrSlot::create(uint8_t hrType) {
   switch (hrType) {
@@ -152,6 +152,7 @@ HrScript* HrSlot::create(uint8_t hrType) {
     case HR_BASS: s_ = new (buf_) HrBass(); break;
     case HR_EUCLID: s_ = new (buf_) HrEuclid(); break;
     case HR_GRIDSEQ: s_ = new (buf_) HrGridSeq(); break;
+    case HR_STEPFOLLOW: s_ = new (buf_) HrStepFollow(); break;
     default: s_ = 0; break;
   }
   return s_;

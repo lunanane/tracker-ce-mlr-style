@@ -364,6 +364,24 @@ def gen_gridseq(rng, n):
     return cmds
 
 
+def gen_stepfollow(rng, n):
+    cmds = []
+    for _ in range(n):
+        r = rng.random()
+        if r < 0.34: cmds += tap(rng.randint(1, 8), rng.randint(1, 4))
+        elif r < 0.42: cmds += tap(8, rng.randint(3, 4)) * rng.randint(1, 4)  # the page keys
+        elif r < 0.62: cmds.append("pulse %d" % rng.choice([1, 1, 2, 3, 5, 6, 6, 12, 24, 40, 100]))
+        elif r < 0.66: cmds.append("param div %d" % rng.choice([1, 2, 3, 4, 6, 8, 12, 24, rng.randint(1, 24)]))
+        elif r < 0.70: cmds.append("param vel %d" % rng.randint(1, 127))
+        elif r < 0.75: cmds.append("param octave %d" % rng.randint(-2, 2))
+        elif r < 0.80: lo = rng.randint(1, 8); cmds.append("param range %d" % (lo * 10 + rng.randint(lo, 8)))
+        elif r < 0.87: cmds.append(bus_cmd(rng))
+        elif r < 0.94: cmds.append(rng.choice(["start", "start", "stop"]))
+        else: cmds.append("sync")
+    cmds.append("sync")
+    return cmds
+
+
 SCRIPTS = {
     "arp_lines": ("arp_lines.lua", lambda rng, n: gen_stab(rng, n, True)),
     "chord_stabs": ("chord_stabs.lua", lambda rng, n: gen_stab(rng, n, False)),
@@ -372,6 +390,7 @@ SCRIPTS = {
     "bassline_seq": ("bassline_seq.lua", gen_bass),
     "euclid_trigger": ("euclid_trigger.lua", gen_euclid),
     "grid_seq": ("grid_seq.lua", gen_gridseq),
+    "step_follower": ("step_follower.lua", gen_stepfollow),
 }
 
 

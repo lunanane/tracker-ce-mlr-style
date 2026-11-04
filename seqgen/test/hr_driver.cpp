@@ -27,6 +27,7 @@ static const Names kNames[] = {
     {"bassline_seq", HR_BASS, {"octave", "direction", "groove", 0}},
     {"euclid_trigger", HR_EUCLID, {"grouping", "vel", "swing", "chance", "note1", "note2", "note3", "note4", 0}},
     {"grid_seq", HR_GRIDSEQ, {"grouping", "vel", "transp", "div", "range", "note1", "note2", "note3", "note4", 0}},
+    {"step_follower", HR_STEPFOLLOW, {"div", "vel", "octave", "range", 0}},
 };
 
 int main(int argc, char** argv) {

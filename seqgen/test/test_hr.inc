@@ -532,6 +532,52 @@ TEST(hr_gridseq_serialize_keeps_the_pattern_and_settings) {
   CHECK(!b.s->deserialize(buf, n));
 }
 
+// ======================= Step Follower =======================
+TEST(hr_stepfollow_steps_are_scale_degrees_of_the_shared_scale_and_root) {
+  HrRig r(HR_STEPFOLLOW);
+  r.tap(0, 3); r.tap(1, 2); r.tap(1, 3);  // window base 0: row 4 = degree 0, row 3 = degree 1; step 1 = degree 0, step 2 = degrees 1 + 0
+  CHECK_EQ(r.led(0, 3), 15); CHECK_EQ(r.led(1, 2), 15);
+  r.s->start();  // default scale D# minor, default root 60: degree 0 = 51, degree 1 = 53
+  CHECK_EQ(countOn(), 1); CHECK_EQ(g_ev[0].note, 51); CHECK_EQ(g_ev[0].vel, 100);
+  clearEv();
+  r.pulses(6);   // step 2: the first column ends, the second sounds degree 0 and 1
+  CHECK_EQ(countOff(), 1); CHECK_EQ(countOn(), 2);
+  int n[8]; ons(n);
+  CHECK_EQ(n[0], 51); CHECK_EQ(n[1], 53);        // sorted by degree
+  r.bus.nScale = 0; r.bus.root = 40;            // another track published "no scale" and a root: chromatic from 40
+  clearEv();
+  r.pulses(48);                                  // the loop wraps to step 1
+  ons(n);
+  CHECK_EQ(g_ev[g_nev - 1].kind == EV_NOTE_ON ? 1 : 0, 1);
+  CHECK_EQ(n[0], 40);
+}
+TEST(hr_stepfollow_window_pages_and_the_octave_shifts_the_notes_not_the_degrees) {
+  HrRig r(HR_STEPFOLLOW);
+  CHECK_EQ(r.s->getParam(HrStepFollow::P_BASE), 0);
+  r.tap(7, 2);                                   // nav up: two degrees
+  CHECK_EQ(r.s->getParam(HrStepFollow::P_BASE), 2);
+  r.tap(7, 3); r.tap(7, 3);
+  CHECK_EQ(r.s->getParam(HrStepFollow::P_BASE), -2);
+  r.s->setParam(HrStepFollow::P_OCTAVE, 2);
+  r.bus.nScale = 0; r.bus.root = 100;            // chromatic: window base -2 + 24 octave-up notes would pass 120: the up key is dim
+  CHECK_EQ(r.led(7, 2), 3);
+}
+TEST(hr_stepfollow_serialize_keeps_the_lit_degrees_and_window) {
+  HrRig a(HR_STEPFOLLOW), b(HR_STEPFOLLOW);
+  a.tap(0, 3); a.tap(5, 0); a.tap(7, 2); a.tap(2, 1);
+  a.s->setParam(HrStepFollow::P_RANGE, 25);
+  uint8_t buf[HrScript::kMaxSerial];
+  size_t n = a.s->serialize(buf, sizeof buf);
+  CHECK_EQ(n, HrStepFollow::kSerialSize);
+  CHECK(b.s->deserialize(buf, n));
+  CHECK_EQ(b.s->getParam(HrStepFollow::P_BASE), 2); CHECK_EQ(b.s->getParam(HrStepFollow::P_RANGE), 25);
+  uint8_t buf2[HrScript::kMaxSerial];
+  CHECK_EQ(b.s->serialize(buf2, sizeof buf2), n);
+  for (size_t i = 0; i < n; ++i) CHECK_EQ(buf[i], buf2[i]);
+  buf[8] = 99;
+  CHECK(!b.s->deserialize(buf, n));
+}
+
 // ======================= helpers, bus, slots, legends =======================
 TEST(hr_euclid_and_velocity_helpers) {
   uint8_t o[16];

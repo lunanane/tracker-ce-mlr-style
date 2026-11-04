@@ -8,3 +8,4 @@
 #include "hr_bass.h"
 #include "hr_euclid.h"
 #include "hr_gridseq.h"
+#include "hr_stepfollow.h"

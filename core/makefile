@@ -25,7 +25,7 @@ C_SRCS 	 	+= $(shell find ./libs/ -name *.c)
 
 # sequencer tracks mod: the pure C++ library in ../seqgen is built into the core (objects under obj/seqgen/)
 SEQGEN_DIR	?= ../seqgen
-SEQGEN_SRCS	:= chordarp mono playhead hr hr_stab hr_arpseq hr_chordarp hr_bass hr_euclid hr_gridseq
+SEQGEN_SRCS	:= chordarp mono playhead hr hr_stab hr_arpseq hr_chordarp hr_bass hr_euclid hr_gridseq hr_stepfollow
 
 _CPP_OBJS	= $(patsubst ./%.cpp, %.o, $(CPP_SRCS))
 _C_OBJS		= $(patsubst ./%.c, %.o, $(C_SRCS))
