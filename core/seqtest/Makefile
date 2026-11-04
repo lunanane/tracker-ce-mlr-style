@@ -17,7 +17,7 @@ build/seq_glue_tests$(EXE): test_main.cpp test_session.cpp test_cut.inc ../sourc
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) test_main.cpp test_session.cpp $(GLUE) $(SEQ) -o $@
 
-build/seq_perform_tests$(EXE): test_perform.cpp ../source/seqPerformLogic.h
+build/seq_perform_tests$(EXE): test_perform.cpp ../source/seqPerformLogic.h ../source/seqModLogic.h
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) test_perform.cpp -o $@
 

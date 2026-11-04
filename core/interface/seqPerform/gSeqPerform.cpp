@@ -30,23 +30,17 @@ void cSeqPerform::initDisplayControls()
     prop2.h = 54;
     bgLabel = display.createControl<cBgLabel>(&prop2);
 
-    // title and five info lines in the middle of the screen
+    // the fader screen: one custom control below the stock title bar (y 29-422)
     strControlProperties prop3;
-    prop3.colors = display.getTheme().defaultTextColors;
-    prop3.text = (char*)"";
-    prop3.style = (controlStyleShow | controlStyleCenterX | controlStyleCenterY | controlStyleFont4);
-    prop3.x = 400;
-    prop3.y = 55;
-    prop3.w = 780;
-    prop3.h = 40;
+    prop3.colors = nullptr;
+    prop3.text = nullptr;
+    prop3.style = controlStyleShow;
+    prop3.x = 0;
+    prop3.y = 29;
+    prop3.w = 800;
+    prop3.h = 394;
     prop3.value = 0;
-    titleLabel = display.createControl<cLabel>(&prop3);
-
-    for (uint8_t i = 0; i < 5; i++)
-    {
-        prop3.style = (controlStyleShow | controlStyleCenterX | controlStyleCenterY | controlStyleFont2);
-        prop3.y = 110 + 52 * i;
-        prop3.h = 36;
-        infoLabel[i] = display.createControl<cLabel>(&prop3);
-    }
+    prop3.data = &viewData;
+    viewCtrl = display.createControl<cSeqFaderView>(&prop3);
+    display.setControlData(viewCtrl, &viewData);
 }
