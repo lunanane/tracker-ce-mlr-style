@@ -186,13 +186,39 @@ void projectSidecarPath(char* out, size_t cap, const char* path, const char* nam
 // 4 KB and on the Plus SRAM_DTC is nearly full.
 __NOINIT(EXTERNAL_RAM) uint8_t s_io[seqtracks::Engine::kSidecarMax];
 
+// Writes <path>.tmp completely, then replaces <path> (remove + rename: a half-written file never takes the place of the old one;
+// the FAT API has no atomic replace, so a power loss between remove and rename leaves only the .tmp file, which nothing reads).
+// On success s_savedHash = hash of what was written; on failure it stays, so the next change check retries.
 bool writeSidecar(const char* path)
 {
     uint8_t* buf = s_io;
+    uint16_t h = seqEngine.stateHash();
     size_t n = seqEngine.saveState(buf, seqtracks::Engine::kSidecarMax);
     if (!n)
         return false;
-    return fileTransfer.saveMemoryToFile(buf, path, (uint32_t)n) == fileTransferEnd;
+    FileSystem* fs = newFileManager.getFileSystem();
+    char tmp[PATCH_SIZE + 8];
+    int len = snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    bool ok;
+    if (fs && len > 0 && (size_t)len < sizeof(tmp))
+    {
+        ok = fileTransfer.saveMemoryToFile(buf, tmp, (uint32_t)n) == fileTransferEnd;
+        if (ok)
+        {
+            if (fs->exists(path))
+                fs->remove(path);
+            ok = fs->rename(tmp, path);
+        }
+        if (!ok && fs->exists(tmp))
+            fs->remove(tmp);
+    }
+    else
+    {
+        ok = fileTransfer.saveMemoryToFile(buf, path, (uint32_t)n) == fileTransferEnd;
+    }
+    if (ok)
+        s_savedHash = h;
+    return ok;
 }
 
 enum ReadResult { READ_MISSING, READ_VALID, READ_INVALID };
@@ -293,9 +319,9 @@ void seqTracksUpdate()
             s_hashInit = true;
             s_savedHash = h; // the state at boot is what is on the card (all Off without a sidecar)
         }
-        if (h != s_savedHash)
+        // s_savedHash only moves when a write succeeded (writeSidecar), so a failed write is retried at the next check
+        if (h != s_savedHash && !s_wsWritePending)
         {
-            s_savedHash = h;
             s_hadSidecar = true;
             newFileManager.setProjectStructChanged();
             s_wsWritePending = true;
@@ -320,7 +346,7 @@ void seqTracksSaveWorkspace()
     if (!s_wsWritePending)
         return;
     s_wsWritePending = false;
-    writeSidecar(kWorkspaceSidecar);
+    writeSidecar(kWorkspaceSidecar); // on failure s_savedHash stays: the next change check (<= 1 s) flags it again
 }
 
 void seqTracksSaveProject(const char* path, const char* name)

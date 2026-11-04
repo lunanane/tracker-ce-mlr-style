@@ -177,7 +177,7 @@ Built around immediate playability; no separate Seq page, no Off/Live/Rec modes.
   writes the pattern and stores **one** undo revision per recording (first write). Nothing touches the SD from the audio context.
   Recording ends when: Rec again, the loop is complete, the transport stops, the track is set Off, the pattern changes, or Play mode is left (`cSeqPlay::stop`).
 - Sidecar `seqtracks.bin` (2810 bytes max): "SQTR", version 1, 16 tracks, per track [type, ChordArp block, Mono block], CRC16-CCITT.
-  Written next to `project.mt` by Save / Save as (only when a sequencer was ever used in the project), mirrored in
+  Written (to `<file>.tmp`, then remove + rename: the FAT API has no atomic replace; the change hash only advances after a successful write, so a failed write is retried) next to `project.mt` by Save / Save as (only when a sequencer was ever used in the project), mirrored in
   `Workspace/seqtracks.bin` by the Workspace autosave (state change detected by a hash about once a second), copied from the project
   folder into the Workspace when a project is opened, read when the Workspace is loaded. Missing / short / corrupt / wrong version =
   all tracks Off, nothing else changes. Save / Save as with a project that never used a sequencer writes nothing and removes a stale
