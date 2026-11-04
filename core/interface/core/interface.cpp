@@ -476,6 +476,11 @@ void Interface::switchModuleByButton(hModule module, uint8_t button, uint32_t op
         return;
     }
 
+    // sequencer tracks mod: fader FX kept running into Pattern / Song follow the stock rule on any other page (plan 005 R3)
+    if (seqFaderKept() && button != interfaceButtonPattern && button != interfaceButtonSong &&
+        button != interfaceButtonPerformance && button != interfaceButtonMaster && button != interfaceButtonParams)
+        seqFaderEndKept();
+
     uint32_t localOptions = options > 0 ? options : modulesButtons[index][2];
 
     deactivateModule(module);

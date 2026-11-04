@@ -245,7 +245,7 @@ Setup: patterns 1-4 with different notes on tracks 1-3 (CLIPS needs them), track
 
 Entry is **Shift + the top-row Performance button** (firmware "Performance"), from the stock Performance page AND from every other page.
 Fader positions and active FX are NOT saved with the project: after loading a project every perform FX is off.
-Provisional parts (owner did not specify): LATCH pads, jog-wheel settings, the steps' value mapping, what DISENGAGE does to PING / REV project values.
+Provisional parts (owner did not specify): LATCH pads, jog-wheel settings, the steps' value mapping, what DISENGAGE does to PING / REV project values (restores the earlier value).
 
 ## 11. Alt Performance page (Shift + Performance)
 Setup: a project with tracks playing; on the stock Performance page give the slots a few FX (e.g. slot 1 low-pass, slot 2 sample volume,
@@ -258,7 +258,7 @@ slot 5 pan, slot 9 tune).
 | **Shift + Performance** on the stock Performance page | Fader page. The tracks page and the 8 track buttons are as you left them; FX that were latched on the stock pad rows show as lit rows. |
 | **Shift + Performance** from Pattern, Song, Master, Params, Sample pages, File ... | Fader page. No track is affected yet (buttons under the screen show 1-8 without brackets, the header says "no track selected" in a warning colour), every row is DISENGAGED. |
 | **Performance** (plain press) on the fader page | Back on the stock Performance page; the 8 buttons keep their state; FX that were playing from the stock pad rows still sound and their pads are lit. |
-| Screen layout | Below the title bar: a chip row (FX 1-4, FX 5-8, FX 9-12 | PING, REV = pad columns 9 / 10; the page you are on is filled, a green dot marks a page with something dialled in) and on the right "affects tracks 1-4 7". Under the chips the step numbers 1-8. Four bands = the four pad rows: row number, FX name, current value, a long bar of 8 steps (lit from the left), a LATCH and a DISENGAGE cell (pad columns 11 / 12), the state word under them (DISENGAGED / ENGAGED / LATCHED; PING / REV project rows: PROJECT / DIALLED / DEFAULT) and a second line (slot number and range). A strip at the bottom shows the group line (FX pages: how many are dialled in; PING: time / rate, feedback, filter, ping-pong, sync; REV: size, damp, predelay, diffusion). An empty slot is drawn dim with "(empty slot)". |
+| Screen layout | Below the title bar: a chip row (FX 1-4, FX 5-8, FX 9-12 | PING, REV = pad columns 9 / 10; the page you are on is filled, a green dot marks a page with something dialled in) and on the right "affects tracks 1-4 7". Under the chips the step numbers 1-8. Four bands = the four pad rows: row number, FX name, current value, a long bar of 8 steps (lit from the left), a LATCH and a DISENGAGE cell (pad columns 11 / 12), the state word under them (DISENGAGED / ENGAGED / LATCHED; PING / REV project rows: PROJECT / DIALLED) and a second line (slot number and range). A strip at the bottom shows the group line (FX pages: how many are dialled in; PING: time / rate, feedback, filter, ping-pong, sync; REV: size, damp, predelay, diffusion). An empty slot is drawn dim with "(empty slot)". |
 | Pad LEDs | Pad rows 1-4 lit only where a slot has an FX; column 9 group pads: current page bright, a page with something dialled in medium, others dim (row 4 dark on purpose); PING / REV (column 10) likewise; LATCH column dim (bright when latched); DISENGAGE column (12) bright where its row has something to take off, dim otherwise. |
 | Hold a pad, plain Performance press | Leaves at once (a held pad does not block it). |
 
@@ -292,8 +292,8 @@ slot 5 pan, slot 9 tune).
 | Jog wheel right / left | Ping-pong on / off (bottom strip shows it); audible stereo bounce. |
 | Shift + jog wheel right | Sync on: fader 2 is now the rate (band "Rate 1/8" etc.), pad 1 = "8", pad 8 = "1/32". Shift + jog left = sync off. |
 | Fader 3 pad 8 | Feedback 99 (long repeats); fader 4 pad 1 = about 194 Hz (dull repeats). |
-| **DISENGAGE** of row 2/3/4 | Time 500 ms (or rate 8), feedback 50, filter 20000 Hz; state DEFAULT. Row 1 (send): off. |
-| Tap **REV** | Fader 1 reverb send of the selected tracks; 2 size, 3 damp, 4 predelay (0-100); jog wheel = diffusion; the bottom strip shows it. DISENGAGE returns the defaults (50 / 50 / 50). |
+| **DISENGAGE** of row 2/3/4 after you moved it with the fader | The value it had BEFORE your first fader press comes back (time and rate index, feedback, filter), state PROJECT again; a second DISENGAGE does nothing. On a row you never touched DISENGAGE does nothing. Row 1 (send): off. |
+| Tap **REV** | Fader 1 reverb send of the selected tracks; 2 size, 3 damp, 4 predelay (0-100); jog wheel = diffusion; the bottom strip shows it. DISENGAGE restores the value from before the fader touched it. |
 | Change PING / REV values, save the project, power off, open it | The values are saved with the project (same as changing them on the Master page); open the Master page: it shows the same values. The fader positions / latches / engaged state are NOT saved: after loading, the fader page is all DISENGAGED / PROJECT. |
 | No volume or panning on this page | Correct (owner decision). |
 
@@ -317,7 +317,11 @@ Setup: tracks 1 and 2 selected, a filter on slot 1, a volume FX on slot 2; latch
 | Latched FX running, any page, press **Stop** | Every perform FX ends (panic): fader rows DISENGAGED (also latches), rows handed over from the stock page too. PING / REV project values stay. Stop then Play = plain playback. |
 | Same on the fader page | Press Stop: all rows go DISENGAGED at once, the page stays open. |
 | Launch clips, open the fader page, dial an FX, leave and press Stop | Clips are stopped by the launcher panic, the FX ends; no pattern is reloaded while clips still own performance mode. |
-| Save the project with FX engaged, load it | All perform FX are off after loading. |
+| Save the project with FX engaged, load it | All perform FX are off after loading (also a latched FX kept into the Pattern editor, even if you load while stopped); performance mode is not left on. |
+| Latched FX kept into the Pattern editor, edit steps (unsaved), press Stop | The FX end; the pattern is NOT reloaded from the SD card, the unsaved edits stay (reload only happens when per-track performance patterns were loaded on the stock page). |
+| From the Pattern editor (FX kept) go on to File / Config / Sample pages | The kept FX follow the stock rule: they end at the pattern end while playing, at once when stopped; Master / Params / Song / Pattern / Performance keep or hand over as above. |
+| Hold Shift while pressing Performance, keep Shift down and press a pad / jog | Shift is ignored until you release it once (no accidental Shift + DISENGAGE or Shift jog). |
+| Leave the fader page while playing (any button) | No SD / config write at that moment; DISENGAGE of a stock pad row marks the perform data, written after Stop. Device test: moving a PING / REV fader 2-4 sets the project changed flag, so the stock 10 s autosave can run while playing (same as the Master page). Watch for stream hiccups. |
 
 # Stock-behaviour checks (section 12) — run last, and after every change
 A project with no sequencer set and no Session use must behave exactly like stock CE.

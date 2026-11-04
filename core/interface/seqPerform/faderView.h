@@ -11,7 +11,7 @@ struct strFaderBand
 {
     char name[22];  // FX name / "Time" / "Delay send" ...
     char value[16]; // "+42", "500 ms", "off"
-    char note[40];  // second line: "slot 3   range -100..100", "project value"
+    char note[64];  // second line: "slot 3   range -100..100", "project value"
     char state[12]; // "LIVE", "LATCHED", "DISENGAGED", ...
     uint8_t step;   // 0..8 cells lit from the left
     uint8_t status; // seqperf::RowStatus

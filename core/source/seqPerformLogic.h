@@ -166,7 +166,7 @@ inline uint8_t pageForCell(Cell c, uint8_t index, uint8_t current)
 }
 
 // Is the pad of a non-fader cell lit? engaged: the row of a DISENGAGE pad has something to disengage (lit = it will act).
-inline bool padIsLit(const PadInfo& p, uint8_t page, bool latch, bool engaged = true)
+inline bool padIsLit(const PadInfo& p, uint8_t page, bool latch, bool engaged)
 {
     switch (p.cell)
     {
@@ -182,9 +182,10 @@ inline bool padIsLit(const PadInfo& p, uint8_t page, bool latch, bool engaged = 
 // ---- engaged state of the four fader rows (plan 005 R3) ----
 // A row is ENGAGED when its effect is dialled in: FX page: step != 0; send fader (PING / REV row 1): step != 0; PING / REV rows
 // 2-4 are project values and count as dialled once a fader pad was pressed. DISENGAGE (pad column 12) takes the row back to
-// "not dialled in" with nothing remembered. The state lives in a long-lived object so it survives leaving the page.
-enum ParamState : uint8_t { PS_PROJECT = 0, PS_DIALLED = 1, PS_DEFAULT = 2 };
-enum RowStatus : uint8_t { RS_OFF = 0, RS_LIVE, RS_LATCHED, RS_PROJECT, RS_DIALLED, RS_DEFAULT };
+// "not dialled in". An FX row remembers nothing; a project-value row restores the value it had before the fader touched it. The
+// state lives in a long-lived object so it survives leaving the page.
+enum ParamState : uint8_t { PS_PROJECT = 0, PS_DIALLED = 1 };
+enum RowStatus : uint8_t { RS_OFF = 0, RS_LIVE, RS_LATCHED, RS_PROJECT, RS_DIALLED };
 
 struct State
 {
@@ -192,6 +193,8 @@ struct State
     uint8_t sendStep[2];        // PING / REV fader 1 (send of the selected tracks)
     bool latch[PAGE_COUNT][4];
     uint8_t paramState[2][3];   // PING / REV faders 2-4: ParamState
+    float pre[2][3];            // value of a dialled project-value row before the first fader touch (restored by DISENGAGE)
+    uint8_t preRate;            // PING fader 2 only: the sync rate index (delayParams bits 0-5) before the first touch
 
     void clear()
     {
@@ -202,8 +205,12 @@ struct State
         {
             sendStep[i] = 0;
             for (int r = 0; r < 3; r++)
+            {
                 paramState[i][r] = PS_PROJECT;
+                pre[i][r] = 0;
+            }
         }
+        preRate = 0;
         for (int p = 0; p < PAGE_COUNT; p++)
             for (int r = 0; r < 4; r++)
                 latch[p][r] = false;
@@ -252,17 +259,41 @@ struct State
             sendStep[page - PAGE_PING] = 0;
         else
         {
-            if (paramState[page - PAGE_PING][row - 1] != PS_DEFAULT)
-                had = true;
-            paramState[page - PAGE_PING][row - 1] = PS_DEFAULT;
+            // a project-value row only has something to take back while it is dialled; the caller restores pre[] / preRate
+            uint8_t& ps = paramState[page - PAGE_PING][row - 1];
+            had = ps == PS_DIALLED;
+            ps = PS_PROJECT;
         }
         return had;
     }
-    // A fader pad was pressed on a project-value row.
-    void dialParam(uint8_t page, uint8_t row)
+    // A fader pad was pressed on a project-value row. The value before the FIRST touch is remembered (value / rate index); a
+    // second press while dialled does not overwrite it. Call this BEFORE the new value is applied.
+    void dialParam(uint8_t page, uint8_t row, float value, uint8_t rate)
     {
-        if (isParamRow(page, row))
-            paramState[page - PAGE_PING][row - 1] = PS_DIALLED;
+        if (!isParamRow(page, row))
+            return;
+        uint8_t& ps = paramState[page - PAGE_PING][row - 1];
+        if (ps != PS_DIALLED)
+        {
+            pre[page - PAGE_PING][row - 1] = value;
+            if (page == PAGE_PING && row == 1)
+                preRate = rate;
+        }
+        ps = PS_DIALLED;
+    }
+    // Rows that do NOT keep sounding when the page is left for the mod's own views (a held pad only): bit = FX slot 0..11, bit
+    // 12 / 13 = PING / REV send. stockMask: slots the stock page had latched.
+    uint16_t dropOnLeave(uint16_t stockMask) const
+    {
+        uint16_t m = 0;
+        for (uint8_t p = 0; p < 3; p++)
+            for (uint8_t r = 0; r < 4; r++)
+                if (fxStep[p][r] && !keepsOnLeave(p, r, (stockMask & (1u << (p * 4 + r))) != 0))
+                    m = (uint16_t)(m | (1u << (p * 4 + r)));
+        for (uint8_t i = 0; i < 2; i++)
+            if (sendStep[i] && !keepsOnLeave((uint8_t)(PAGE_PING + i), 0, false))
+                m = (uint16_t)(m | (1u << (12 + i)));
+        return m;
     }
     // Leaving for the mod's own views: does this row keep sounding? Latched rows do, and so do rows the stock page had latched
     // (stockRow). A row that only plays because a pad is held does not.
@@ -275,7 +306,7 @@ struct State
         if (isParamRow(page, row))
         {
             uint8_t s = paramState[page - PAGE_PING][row - 1];
-            return s == PS_DIALLED ? RS_DIALLED : (s == PS_DEFAULT ? RS_DEFAULT : RS_PROJECT);
+            return s == PS_DIALLED ? RS_DIALLED : RS_PROJECT;
         }
         if (!engaged(page, row))
             return RS_OFF;

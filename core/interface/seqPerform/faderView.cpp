@@ -91,7 +91,6 @@ uint32_t statusColor(const Pal& p, uint8_t status)
         case RS_DIALLED: return p.live;
         case RS_LATCHED: return p.latched;
         case RS_PROJECT:
-        case RS_DEFAULT: return p.project;
         default: return p.off;
     }
 }
@@ -151,7 +150,7 @@ void cSeqFaderView::update()
             int16_t x = kBarX + c * kCellStep;
             if (lit)
             {
-                bool soft = b.status == RS_PROJECT || b.status == RS_DEFAULT;
+                bool soft = b.status == RS_PROJECT;
                 fill(sc, soft ? 150 : 255, x, y0 + kCellY, kCellW, kCellH);
             }
             else

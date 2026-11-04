@@ -7,6 +7,7 @@
 // Stock page, Shift held on the press: the fader page opens with the perform FX state handed over.
 bool seqFaderShiftFromStock()
 {
+    seqPerform.fromStock = true; // start() hands the stock state over (not guessed from dontClearPerformanceMode)
     return true;
 }
 
@@ -30,4 +31,21 @@ void seqFaderStockEntered()
 void seqPanicFx()
 {
     seqPerform.panic();
+}
+
+// A project was loaded (sidecar load dispatcher): perform FX of the old project are gone, nothing is dialled in.
+void seqFaderProjectLoaded()
+{
+    seqPerform.projectLoaded();
+}
+
+// Kept FX followed on to a page that does not keep them (interface.cpp switchModuleByButton): the stock rule applies.
+void seqFaderEndKept()
+{
+    seqPerform.endKeptStockRule();
+}
+
+bool seqFaderKept()
+{
+    return seqPerform.keptFx();
 }

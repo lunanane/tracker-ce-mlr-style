@@ -154,12 +154,12 @@ static void test_pad_lit()
 {
     PadInfo g1 = mapPad(padOf(1, 8)), ping = mapPad(padOf(0, 9)), rev = mapPad(padOf(1, 9));
     PadInfo lat = mapPad(padOf(2, 10)), rst = mapPad(padOf(2, 11)), dark = mapPad(padOf(3, 8));
-    CHECK(padIsLit(g1, PAGE_FX2, false) && !padIsLit(g1, PAGE_FX1, false));
-    CHECK(padIsLit(ping, PAGE_PING, false) && !padIsLit(ping, PAGE_REV, false));
-    CHECK(padIsLit(rev, PAGE_REV, false) && !padIsLit(rev, PAGE_PING, false));
-    CHECK(padIsLit(lat, PAGE_FX1, true) && !padIsLit(lat, PAGE_FX1, false));
-    CHECK(padIsLit(rst, PAGE_FX1, false));
-    CHECK(!padIsLit(dark, PAGE_FX1, true) && !padIsLit(dark, PAGE_PING, true));
+    CHECK(padIsLit(g1, PAGE_FX2, false, true) && !padIsLit(g1, PAGE_FX1, false, true));
+    CHECK(padIsLit(ping, PAGE_PING, false, true) && !padIsLit(ping, PAGE_REV, false, true));
+    CHECK(padIsLit(rev, PAGE_REV, false, true) && !padIsLit(rev, PAGE_PING, false, true));
+    CHECK(padIsLit(lat, PAGE_FX1, true, true) && !padIsLit(lat, PAGE_FX1, false, true));
+    CHECK(padIsLit(rst, PAGE_FX1, false, true));
+    CHECK(!padIsLit(dark, PAGE_FX1, true, true) && !padIsLit(dark, PAGE_PING, true, true));
 }
 
 
@@ -203,10 +203,10 @@ static void test_state_engaged()
     q.clear();
     CHECK(State::isParamRow(PAGE_PING, 1) && State::isParamRow(PAGE_REV, 3) && !State::isParamRow(PAGE_PING, 0) &&
           !State::isParamRow(PAGE_FX1, 2));
-    q.dialParam(PAGE_PING, 2);
+    q.dialParam(PAGE_PING, 2, 40.0f, 0);
     CHECK(q.engaged(PAGE_PING, 2) && q.status(PAGE_PING, 2) == RS_DIALLED && !q.anyEngaged());
     CHECK(q.pageMask() == (1u << PAGE_PING));
-    q.dialParam(PAGE_FX1, 0); // no effect on FX rows
+    q.dialParam(PAGE_FX1, 0, 1.0f, 0); // no effect on FX rows
     CHECK(!q.engaged(PAGE_FX1, 0));
 }
 
@@ -233,13 +233,23 @@ static void test_disengage()
     // send row
     CHECK(s.disengage(PAGE_PING, 0) && s.sendStep[0] == 0 && !s.latch[PAGE_PING][0]);
     CHECK(s.anyEngaged()); // the FX rows of page 1 are still there
-    // project-value rows go to DEFAULT, then a fader press dials them again; disengage again goes back to DEFAULT
+    // project-value rows: an untouched row has nothing to disengage; a dialled row gets its earlier value back, once
     CHECK(s.status(PAGE_REV, 2) == RS_PROJECT);
-    CHECK(s.disengage(PAGE_REV, 2) && s.status(PAGE_REV, 2) == RS_DEFAULT && !s.engaged(PAGE_REV, 2));
-    s.dialParam(PAGE_REV, 2);
-    CHECK(s.status(PAGE_REV, 2) == RS_DIALLED);
-    CHECK(s.disengage(PAGE_REV, 2) && s.status(PAGE_REV, 2) == RS_DEFAULT);
+    CHECK(!s.disengage(PAGE_REV, 2) && s.status(PAGE_REV, 2) == RS_PROJECT && !s.engaged(PAGE_REV, 2));
+    s.dialParam(PAGE_REV, 2, 0.25f, 0);
+    CHECK(s.status(PAGE_REV, 2) == RS_DIALLED && s.engaged(PAGE_REV, 2) && s.pre[1][1] == 0.25f);
+    s.dialParam(PAGE_REV, 2, 0.9f, 0); // a second press must not overwrite the remembered value
+    CHECK(s.pre[1][1] == 0.25f && s.status(PAGE_REV, 2) == RS_DIALLED);
+    CHECK(s.disengage(PAGE_REV, 2) && s.status(PAGE_REV, 2) == RS_PROJECT && s.pre[1][1] == 0.25f); // caller restores pre[]
     CHECK(!s.disengage(PAGE_REV, 2));
+    s.dialParam(PAGE_REV, 2, 0.6f, 0); // dialled again after disengage: a fresh snapshot
+    CHECK(s.pre[1][1] == 0.6f);
+    s.disengage(PAGE_REV, 2);
+    // PING fader 2 also remembers the sync rate index
+    s.dialParam(PAGE_PING, 1, 500.0f, 7);
+    s.dialParam(PAGE_PING, 1, 3500.0f, 9);
+    CHECK(s.pre[0][0] == 500.0f && s.preRate == 7);
+    s.disengage(PAGE_PING, 1);
     // the whole page (Shift + DISENGAGE)
     for (int r = 0; r < 4; r++)
         s.disengage(PAGE_FX1, (uint8_t)r);
@@ -339,6 +349,36 @@ static void test_format_tracks()
     CHECK(n <= 3 && small[n] == 0);
 }
 
+static void test_drop_on_leave_resume_panic_load()
+{
+    State s;
+    s.clear();
+    s.fxStep[0][0] = 5;                                  // held pad only
+    s.fxStep[0][1] = 6; s.latch[0][1] = true;            // latched
+    s.fxStep[1][3] = 2;                                  // stock row
+    s.sendStep[0] = 3;                                   // held send
+    s.sendStep[1] = 4; s.latch[PAGE_REV][0] = true;      // latched send
+    uint16_t stock = (uint16_t)(1u << 7);
+    uint16_t drop = s.dropOnLeave(stock);
+    CHECK(drop == ((1u << 0) | (1u << 12)));             // slot 1 and the PING send end; the rest keeps sounding
+    s.clear();
+    CHECK(s.dropOnLeave(0xFFFF) == 0);
+    // resume: kept state comes back only with the FX owner and something engaged
+    State k;
+    k.clear();
+    k.fxStep[0][1] = 6; k.latch[0][1] = true;
+    CHECK(canResume(true, true, k.anyEngaged()));
+    // Stop panic: everything cleared, nothing to resume afterwards (project values stay: they are not in State)
+    k.dialParam(PAGE_PING, 2, 50.0f, 0);
+    k.clear();
+    CHECK(!k.anyEngaged() && k.pageMask() == 0 && !k.latch[0][1] && k.status(PAGE_PING, 2) == RS_PROJECT);
+    CHECK(!canResume(true, true, k.anyEngaged()));
+    // project load: same clear, and the snapshots are gone too
+    k.dialParam(PAGE_REV, 3, 0.4f, 0);
+    k.clear();
+    CHECK(k.pre[1][2] == 0 && k.preRate == 0 && !k.engaged(PAGE_REV, 3));
+}
+
 int main()
 {
     test_pad_map();
@@ -356,6 +396,7 @@ int main()
     test_leave_rules();
     test_owner_interplay();
     test_format_tracks();
+    test_drop_on_leave_resume_panic_load();
     printf("seqperf: %d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

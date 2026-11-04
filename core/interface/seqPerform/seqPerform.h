@@ -8,6 +8,7 @@
 
 #include "core/modulesBase.h"
 #include "seqPerform/faderView.h"
+#include "seqModLogic.h"
 #include "seqPerformLogic.h"
 
 class cSeqPerform : public ModuleBase
@@ -29,6 +30,10 @@ class cSeqPerform : public ModuleBase
     void jog(int16_t value);
     void leaveToStock();
     void leaveTo(uint8_t button);
+    bool shiftHeld();
+    void flushSave();
+    void projectLoaded();                 // a project was loaded: nothing of ours is dialled in any more
+    void endKeptStockRule();              // kept FX followed on to a page that does not keep them: stock rule
     void releaseAll();
     void releaseMomentary();
     void refreshScreen();
@@ -59,6 +64,9 @@ class cSeqPerform : public ModuleBase
     uint64_t padHeld = 0;         // fader pads currently held (bit = pad)
     bool fxKept = false;          // we left the page with FX dialled in and kept them running
     bool fromElsewhere = false;   // entered by Shift + Performance from another module
+    bool fromStock = false;       // entered by Shift + Performance on the stock page (state handed over)
+    bool shiftFromEntry = false;  // Shift was still held from the entry press: ignored until its first release
+    seqlogic::DirtyGate saveGate; // perform data (stock pad rows) changed: saved after Stop, never while playing
     bool shiftView = false;
     uint8_t leaveKind = seqperf::LEAVE_END;
 

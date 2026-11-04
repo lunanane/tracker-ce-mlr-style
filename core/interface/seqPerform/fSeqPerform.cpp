@@ -89,7 +89,9 @@ void cSeqPerform::start(uint32_t options)
     if (mtConfig.general.performanceSource < performanceDataSourceCount)
         performance.readPerfData(mtConfig.general.performanceSource);
 
-    const bool handedOver = PM->dontClearPerformanceMode != 0; // from the stock page (Shift + Performance there)
+    const bool handedOver = fromStock; // set by seqFaderShiftFromStock (Shift + Performance on the stock page)
+    fromStock = false;
+    flushSave();
     PM->dontClearPerformanceMode = 0; // set again only when we hand over to the stock page / Master / Params
     const bool entered = fromElsewhere;
     fromElsewhere = false;
@@ -144,11 +146,12 @@ void cSeqPerform::start(uint32_t options)
             }
         }
     }
-    // the perform FX own performance mode (plan 005 C1); the launcher may own it as well
-    if (!sequencer.seqPerfOwners.has(seqlogic::PERF_OWNER_FX))
-        sequencer.enterPerformanceMode();
+    // the perform FX own performance mode (plan 005 C1); the launcher may own it as well. Idempotent: it also cancels a pending
+    // turn-off at the pattern end that an earlier page exit may have armed.
+    sequencer.enterPerformanceMode();
 
     padHeld = 0;
+    shiftFromEntry = buttons->isButtonPressed(interfaceButtonShift); // still held from the entry press: ignored until released
     shiftView = false;
     leaveKind = LEAVE_END;
     shownKey = 0xFFFFFFFF;
@@ -180,7 +183,9 @@ void cSeqPerform::stop()
         // like cPerformanceMode::stop: when the target does not keep the perform FX they end here
         if (!PM->dontClearPerformanceMode)
         {
-            if (performance.turnOff())
+            // fader FX never change pattern data: reload only when per-track performance patterns were loaded
+            const bool reload = sequencer.isPerformancePatternChanged();
+            if (performance.turnOff() && reload)
             {
                 newFileManager.loadWorkspacePatternNow(mtProject.values.actualPattern);
                 sequencer.switchRamPatternsNow();
@@ -188,14 +193,32 @@ void cSeqPerform::stop()
             mtPadBoard.releaseAllInstruments();
         }
     }
-    performance.forceSaveConfig();
+    flushSave(); // only when the perform data changed, and never while playing (plan 005 M2)
     padsBacklight.clearGlobalPads(1, 1, 1);
+}
+
+void cSeqPerform::flushSave()
+{
+    if (saveGate.take(sequencer.isPlay()))
+        performance.forceSaveConfig();
+}
+
+bool cSeqPerform::shiftHeld()
+{
+    bool pressed = buttons->isButtonPressed(interfaceButtonShift);
+    if (shiftFromEntry)
+    {
+        if (!pressed)
+            shiftFromEntry = false;
+        return false;
+    }
+    return pressed;
 }
 
 //----------------------------------------------------------------------------------------------
 void cSeqPerform::update()
 {
-    bool shift = buttons->isButtonPressed(interfaceButtonShift);
+    bool shift = shiftHeld();
     if (shift != shiftView)
     {
         shiftView = shift;
@@ -291,53 +314,67 @@ static void setParamStep(uint8_t pg, uint8_t row, uint8_t step)
     projectChanged();
 }
 
-static void setParamDefault(uint8_t pg, uint8_t row)
+// Current project value of a PING / REV fader 2-4 (what DISENGAGE restores later).
+static float currentParam(uint8_t pg, uint8_t row)
+{
+    auto& v = mtProject.values;
+    if (pg == PAGE_PING)
+        return row == 1 ? (float)v.delayTime : (row == 2 ? (float)v.delayFeedback : (float)v.delayFilterFrequency);
+    return row == 1 ? v.reverb.size : (row == 2 ? v.reverb.damp : v.reverb.predelay);
+}
+
+// DISENGAGE of a dialled project-value row: the value it had before the fader touched it comes back. Only what differs is set
+// (no needless delay-time jump). PING fader 2 restores time and rate index and keeps the current ping-pong / sync bits.
+static void restoreParam(uint8_t pg, uint8_t row, float pre, uint8_t preRate)
 {
     auto& v = mtProject.values;
     if (pg == PAGE_PING)
     {
         if (row == 1)
         {
-            if (v.delayParams & 0x40)
+            if (v.delayTime != (uint16_t)pre)
             {
-                v.delayParams &= 0xC0;
-                engine.setDelayParams(v.delayParams);
-            }
-            else
-            {
-                v.delayTime = 500;
+                v.delayTime = (uint16_t)pre;
                 engine.setDelayTime(v.delayTime);
+            }
+            uint8_t np = (uint8_t)((v.delayParams & 0xC0) | (preRate & 0x3F));
+            if (np != v.delayParams)
+            {
+                v.delayParams = np;
+                engine.setDelayParams(v.delayParams);
             }
         }
         else if (row == 2)
         {
-            v.delayFeedback = 50;
-            engine.setDelayFeedback(v.delayFeedback);
+            if (v.delayFeedback != (uint8_t)pre)
+            {
+                v.delayFeedback = (uint8_t)pre;
+                engine.setDelayFeedback(v.delayFeedback);
+            }
         }
-        else
+        else if (v.delayFilterFrequency != (uint16_t)pre)
         {
-            v.delayFilterFrequency = DELAY_FILTER_FREQ_MAX;
+            v.delayFilterFrequency = (uint16_t)pre;
             engine.setDelayFilterFrequency(v.delayFilterFrequency);
         }
     }
     else if (row == 1)
     {
-        v.reverb.size = DEFAULT_REVERB_SIZE;
-        engine.setReverbSize(v.reverb.size);
+        v.reverb.size = pre;
+        engine.setReverbSize(pre);
     }
     else if (row == 2)
     {
-        v.reverb.damp = DEFAULT_REVERB_DAMP;
-        engine.setReverbDamp(v.reverb.damp);
+        v.reverb.damp = pre;
+        engine.setReverbDamp(pre);
     }
     else
     {
-        v.reverb.predelay = DEFAULT_REVERB_PREDELAY;
-        engine.setReverbPredelay(v.reverb.predelay);
+        v.reverb.predelay = pre;
+        engine.setReverbPredelay(pre);
     }
     projectChanged();
 }
-
 
 void cSeqPerform::faderPress(uint8_t row, uint8_t step)
 {
@@ -361,8 +398,8 @@ void cSeqPerform::faderPress(uint8_t row, uint8_t step)
     }
     else
     {
+        st.dialParam(page, row, currentParam(page, row), (uint8_t)(mtProject.values.delayParams & 0x3F)); // remembers the value before the first touch
         setParamStep(page, row, step);
-        st.dialParam(page, row);
     }
     screenDirty = true;
 }
@@ -421,7 +458,7 @@ void cSeqPerform::faderRelease(uint8_t row)
 }
 
 // DISENGAGE (pad column 12): this row's effect goes back to "not dialled in". Nothing is remembered: FX off (the stock pad row
-// too), send off, LATCH off. A project-value row (PING / REV faders 2-4) returns to its default.
+// too), send off, LATCH off. A dialled project-value row (PING / REV faders 2-4) gets back the value it had before the fader.
 void cSeqPerform::faderDisengage(uint8_t row)
 {
     if (row >= 4)
@@ -437,6 +474,7 @@ void cSeqPerform::faderDisengage(uint8_t row)
             stockOn &= (uint16_t)~(1u << slot);
             stockVal[slot] = 0;
             performance.setSelectedRow(slot, 0);
+            saveGate.mark(); // the perform data changed: saved once the transport is stopped
         }
         if (st.fxStep[page][row] != 0 || fxVal[slot] != 0)
         {
@@ -449,9 +487,9 @@ void cSeqPerform::faderDisengage(uint8_t row)
         if (st.sendStep[page - PAGE_PING] != 0)
             perfApplySend(page == PAGE_REV, 0);
     }
-    else
+    else if (st.paramState[page - PAGE_PING][row - 1] == PS_DIALLED)
     {
-        setParamDefault(page, row);
+        restoreParam(page, row, st.pre[page - PAGE_PING][row - 1], st.preRate); // back to the value before the fader touched it
     }
     st.disengage(page, row);
     reapplyActive();
@@ -550,18 +588,28 @@ void cSeqPerform::releaseAll()
 // stock page had latched keep sounding.
 void cSeqPerform::releaseMomentary()
 {
-    padHeld = 0;
-    for (uint8_t p = 0; p <= PAGE_FX3; p++)
+    // a stock-latched row under a held pad goes back to its stock value (it keeps sounding, but not at the held value)
+    if (page <= PAGE_FX3)
     {
         for (uint8_t r = 0; r < 4; r++)
         {
-            if (st.fxStep[p][r] && !st.keepsOnLeave(p, r, (stockOn & (1u << slotOf(p, r))) != 0))
-                releaseFxRow(this, p, r);
+            bool held = false;
+            for (uint8_t c = 0; c < 8; c++)
+                held = held || (padHeld & (1ULL << padOf(r, c)));
+            if (held && !st.latch[page][r] && (stockOn & (1u << slotOf(page, r))))
+                releaseFxRow(this, page, r);
         }
+    }
+    padHeld = 0;
+    const uint16_t drop = st.dropOnLeave(stockOn);
+    for (uint8_t slot = 0; slot < 12; slot++)
+    {
+        if (drop & (1u << slot))
+            releaseFxRow(this, slot / 4, slot % 4);
     }
     for (uint8_t i = 0; i < 2; i++)
     {
-        if (st.sendStep[i] && !st.keepsOnLeave((uint8_t)(PAGE_PING + i), 0, false))
+        if (drop & (1u << (12 + i)))
             releaseFxRow(this, (uint8_t)(PAGE_PING + i), 0);
     }
     reapplyActive();
@@ -580,6 +628,7 @@ void cSeqPerform::endEngaged(bool alsoStockRows)
             stockOn &= (uint16_t)~(1u << slot);
             stockVal[slot] = 0;
             performance.setSelectedRow(slot, 0);
+            saveGate.mark(); // the perform data changed: saved once the transport is stopped
             performance.releaseSlotDirect(slot);
         }
         else if (st.fxStep[p][r] || fxVal[slot])
@@ -606,6 +655,7 @@ void cSeqPerform::endEngaged(bool alsoStockRows)
 // Transport Stop (plan 005 M6): every perform FX we hold ends. Project values (PING / REV time, size ...) stay.
 void cSeqPerform::panic()
 {
+    flushSave(); // the transport is stopped now: perform data deferred while playing is written
     const bool onScreen = mtInterface.isSeqPerformScreenActive();
     if (!onScreen && !fxKept)
         return; // nothing of ours is running (the stock page's own rows are not ours)
@@ -618,10 +668,60 @@ void cSeqPerform::panic()
         return;
     }
     fxKept = false;
-    if (performance.turnOff())
+    // fader FX never change pattern data: no reload (it would drop unsaved pattern edits) unless per-track performance patterns
+    // were loaded, and then only when the file manager is idle
+    const bool reload = sequencer.isPerformancePatternChanged();
+    if (performance.turnOff() && reload && newFileManager.isIdleForScratch())
     {
         newFileManager.loadWorkspacePatternNow(mtProject.values.actualPattern);
         sequencer.switchRamPatternsNow();
+    }
+}
+
+// A project was loaded: whatever we held is gone with the old project. No pattern reload.
+void cSeqPerform::projectLoaded()
+{
+    const bool owner = sequencer.seqPerfOwners.has(seqlogic::PERF_OWNER_FX);
+    if (fxKept || owner || st.anyEngaged() || stockOn)
+    {
+        endEngaged(true);
+        fxKept = false;
+        if (owner && !mtInterface.isSeqPerformScreenActive())
+            performance.turnOff();
+    }
+    st.clear();
+    memset(fxVal, 0, sizeof(fxVal));
+    memset(stockVal, 0, sizeof(stockVal));
+    stockOn = 0;
+    saveGate.dirty = false;
+    screenDirty = true;
+}
+
+// Kept FX followed on from Pattern / Song to a page that does not keep them: the stock rule (at the pattern end while playing,
+// else now). interface.cpp switchModuleByButton asks for this.
+void cSeqPerform::endKeptStockRule()
+{
+    if (!fxKept)
+        return;
+    fxKept = false;
+    st.clear();
+    memset(fxVal, 0, sizeof(fxVal));
+    memset(stockVal, 0, sizeof(stockVal));
+    stockOn = 0;
+    if (!sequencer.isPerformanceMode())
+        return;
+    if (sequencer.isPlay())
+    {
+        PM->turnOffAtEndOfPattern();
+    }
+    else
+    {
+        const bool reload = sequencer.isPerformancePatternChanged();
+        if (performance.turnOff() && reload && newFileManager.isIdleForScratch())
+        {
+            newFileManager.loadWorkspacePatternNow(mtProject.values.actualPattern);
+            sequencer.switchRamPatternsNow();
+        }
     }
 }
 
@@ -664,7 +764,7 @@ void cSeqPerform::padEvent(uint8_t pad, uint8_t state)
                 screenDirty = true;
                 break;
             case CELL_DISENGAGE:
-                if (buttons->isButtonPressed(interfaceButtonShift))
+                if (shiftHeld())
                 {
                     for (uint8_t r = 0; r < 4; r++) // Shift: the whole page
                         faderDisengage(r);
@@ -689,7 +789,7 @@ void cSeqPerform::padEvent(uint8_t pad, uint8_t state)
 
 void cSeqPerform::trackButton(uint8_t button)
 {
-    bool shift = buttons->isButtonPressed(interfaceButtonShift);
+    bool shift = shiftHeld();
     uint8_t track = (uint8_t)(button + ((PM->tracksPage ? 1 : 0) ^ (shift ? 1 : 0)) * 8);
     if (track >= kPerformanceTracks)
         return;
@@ -708,7 +808,7 @@ void cSeqPerform::jog(int16_t value)
         return;
     if (page == PAGE_PING)
     {
-        if (buttons->isButtonPressed(interfaceButtonShift))
+        if (shiftHeld())
         {
             if (value > 0)
                 v.delayParams |= 0x40;
@@ -801,7 +901,7 @@ void cSeqPerform::refreshPads()
             out[padOf(row, c)] = (mask & (1u << c)) ? 24 : 0;
         }
         out[padOf(row, 10)] = (page > PAGE_FX3 && row > 0) ? 0 : (st.latch[page][row] ? 30 : 4);
-        out[padOf(row, 11)] = usable ? (st.engaged(page, row) ? 30 : 4) : 0; // DISENGAGE: bright = it will take something off
+        out[padOf(row, 11)] = usable ? (padIsLit(mapPad(padOf(row, 11)), page, false, st.engaged(page, row)) ? 30 : 4) : 0; // DISENGAGE: bright = it will take something off
     }
     const uint8_t dialled = st.pageMask();
     for (uint8_t i = 0; i < 48; i++)
@@ -811,7 +911,7 @@ void cSeqPerform::refreshPads()
         {
             uint8_t pg = (p.cell == CELL_GROUP) ? p.index : (p.cell == CELL_PING ? (uint8_t)PAGE_PING : (uint8_t)PAGE_REV);
             // the page you are on is bright; a page with something dialled in is medium
-            out[i] = padIsLit(p, page, false) ? 30 : ((dialled & (1u << pg)) ? 14 : 6);
+            out[i] = padIsLit(p, page, false, true) ? 30 : ((dialled & (1u << pg)) ? 14 : 6);
         }
     }
     for (int i = 0; i < 48; i++)
@@ -974,12 +1074,11 @@ void cSeqPerform::refreshScreen()
                 snprintf(b.name, sizeof(b.name), "%s", r == 1 ? "Size" : (r == 2 ? "Damp" : "Predelay"));
                 snprintf(b.value, sizeof(b.value), "%d", (int)(f * 100 + 0.5f));
             }
-            const char* how = b.status == RS_DIALLED ? "dialled in with the fader"
-                              : b.status == RS_DEFAULT ? "back at the default value"
-                                                      : "project value (saved with the project)";
+            const char* how = b.status == RS_DIALLED ? "dialled in with the fader (DISENGAGE restores the earlier value)"
+                                                     : "project value (saved with the project)";
             snprintf(b.note, sizeof(b.note), "%s", how);
         }
-        static const char* const kState[6] = { "DISENGAGED", "ENGAGED", "LATCHED", "PROJECT", "DIALLED", "DEFAULT" };
+        static const char* const kState[5] = { "DISENGAGED", "ENGAGED", "LATCHED", "PROJECT", "DIALLED" };
         snprintf(b.state, sizeof(b.state), "%s", kState[b.status]);
     }
 
@@ -993,11 +1092,11 @@ void cSeqPerform::refreshScreen()
         char f[16];
         khz(f, sizeof(f), (int)v.delayFilterFrequency);
         if (v.delayParams & 0x40)
-            snprintf(vw.summary, sizeof(vw.summary), "PING  rate %s  fb %d  filter %s  ping-pong %s (jog)  sync ON (Shift+jog)",
+            snprintf(vw.summary, sizeof(vw.summary), "PING  rate %s  fb %d  filter %s  ping-pong %s  sync ON  (jog, Shift+jog)",
                      kRateNames[(v.delayParams & 0x3F) < 19 ? (v.delayParams & 0x3F) : 18], (int)v.delayFeedback, f,
                      (v.delayParams & 0x80) ? "ON" : "off");
         else
-            snprintf(vw.summary, sizeof(vw.summary), "PING  time %d ms  fb %d  filter %s  ping-pong %s (jog)  sync off (Shift+jog)",
+            snprintf(vw.summary, sizeof(vw.summary), "PING  time %d ms  fb %d  filter %s  ping-pong %s  sync off  (jog, Shift+jog)",
                      (int)v.delayTime, (int)v.delayFeedback, f, (v.delayParams & 0x80) ? "ON" : "off");
     }
     else if (page == PAGE_REV)
@@ -1008,7 +1107,7 @@ void cSeqPerform::refreshScreen()
     }
     else
     {
-        snprintf(vw.summary, sizeof(vw.summary), "FX %d-%d   %d dialled in   LATCH keeps a row, DISENGAGE (Shift: all four) takes it off",
+        snprintf(vw.summary, sizeof(vw.summary), "FX %d-%d   %d dialled in   DISENGAGE: pad 12 (Shift = all four)",
                  page * 4 + 1, page * 4 + 4, dialledFx);
     }
 
@@ -1048,7 +1147,7 @@ static void functEncoder(int16_t value)
 
 static void functPlayAction()
 {
-    bool shift = SP->buttons->isButtonPressed(interfaceButtonShift);
+    bool shift = SP->shiftHeld();
     if (sequencer.getSeqState() == Sequencer::SEQ_STATE_STOP)
     {
         if (!shift)
