@@ -5,6 +5,7 @@
 #include "core/interface.h"
 #include "elapsedMillis.h"
 #include "seqTracks.h"
+#include "seqLauncher.h"
 #include "fileManager.h"
 #include "mtAudioEngine.h"
 #include "mtAudioExport.h"
@@ -168,6 +169,7 @@ void TrackerImpl::update()
     engine.updateSdStream();
     sequencer.update();
     seqTracksUpdate();
+    seqSessionUpdate();
 }
 
 void TrackerImpl::updateAudioBuffers(void* left, void* right, int length)

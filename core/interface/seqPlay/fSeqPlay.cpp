@@ -23,7 +23,7 @@ static void functRecAction()
 }
 
 static void functPlayAction();
-static void functRecAction();
+static void functPatternNext();
 
 static const char* const kTypeNames[seqlogic::TYPE_COUNT] = { "Off", "Chord/Arp", "Mono" };
 static const char kTypeLetters[seqlogic::TYPE_COUNT] = { '-', 'C', 'M' };
@@ -44,7 +44,7 @@ void cSeqPlay::start(uint32_t options)
     ip->setButtonObj(interfaceButtonSampleRec, buttonPress, functSwitchModule);
     ip->setButtonObj(interfaceButtonSampleLoad, buttonPress, functSwitchModule);
     ip->setButtonObj(interfaceButtonSong, buttonPress, functSwitchModule);
-    ip->setButtonObj(interfaceButtonPattern, buttonPress, functSwitchModule); // Pattern again: back to the editor
+    ip->setButtonObj(interfaceButtonPattern, buttonPress, functPatternNext); // Pattern again: Session view (then the editor)
     ip->setButtonObj(interfaceButtonGame, buttonPress, functSwitchModule);
 
     ip->setButtonObj(interfaceButtonPlay, buttonPress, functPlayAction);
@@ -369,6 +369,11 @@ static void functPads(uint8_t pad, uint8_t state, [[maybe_unused]] int16_t velo)
 static void functEncoder(int16_t value)
 {
     SP->jog(value);
+}
+
+static void functPatternNext()
+{
+    SP->eventFunct(eventActivateSeqSession, SP, 0, 0);
 }
 
 static void functPlayAction()

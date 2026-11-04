@@ -1286,6 +1286,7 @@ static void test_save_uses_critical_sections()
     CHECK(h.critEnters == 2 * kTracks && h.critDepth == 0);
     delete e;
 }
+int sessionTests(int& checks);
 
 int main()
 {
@@ -1324,6 +1325,7 @@ int main()
     test_state_change_detection();
     test_hash_ignores_performance();
     test_save_uses_critical_sections();
+    g_fail += sessionTests(g_checks);
     printf("%d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

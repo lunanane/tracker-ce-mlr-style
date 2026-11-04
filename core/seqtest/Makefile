@@ -10,9 +10,9 @@ test: build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE)
 	build/seq_glue_tests$(EXE)
 	build/seq_perform_tests$(EXE)
 
-build/seq_glue_tests$(EXE): test_main.cpp ../source/seqTracksCore.cpp ../source/seqTracksCore.h ../source/seqTracksLogic.h ../source/seqTracksRec.h $(SEQ)
+build/seq_glue_tests$(EXE): test_main.cpp test_session.cpp ../source/seqSessionLogic.h ../source/seqTracksCore.cpp ../source/seqTracksCore.h ../source/seqTracksLogic.h ../source/seqTracksRec.h $(SEQ)
 	mkdir -p build
-	$(CXX) $(CXXFLAGS) test_main.cpp ../source/seqTracksCore.cpp $(SEQ) -o $@
+	$(CXX) $(CXXFLAGS) test_main.cpp test_session.cpp ../source/seqTracksCore.cpp $(SEQ) -o $@
 
 build/seq_perform_tests$(EXE): test_perform.cpp ../source/seqPerformLogic.h
 	mkdir -p build

@@ -775,6 +775,12 @@ class Sequencer
     bool seqRecMicrotiming() { return recMicrotiming() != 0; }
     bool seqRecVelocity() { return recVelocity() != 0; }
     void seqWriteStep(uint8_t track, uint8_t step, uint8_t kind, uint8_t note, uint8_t instrument, uint8_t chord, int8_t volume, int8_t micromove);
+    // session clip launcher (seqLauncher.cpp)
+    void seqSessionStep(uint8_t row);
+    void seqSessionApplyClip(uint8_t track, bool restart);
+    void seqSessionApplyStop(uint8_t track);
+    void seqSessionPatternSwitched();
+    void seqSessionEnterPerformance();
     void continueSong(uint8_t songPos);
     void loopCurrentPattern(uint8_t songPos);
     int16_t findSlotWithPattern();

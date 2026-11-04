@@ -96,3 +96,63 @@ A clip = one track's part in one pattern; a scene = a whole pattern.
 - **S2 firmware glue**: Session view page, per-track playhead override in `inc_uStep`/`switchRowStep`, retrigger
   with offset, sidecar save. Needs `make original` (owner OK).
 - **S3 cut cache** for streamed samples on the original Tracker.
+
+## C1 as built (2026-11-04, provisional where marked)
+- Code: pure logic `core/source/seqSessionLogic.h` (Launcher, Window, NoteCache, quantise, LED states, pad map; tests in
+  `core/seqtest/test_session.cpp`), firmware glue `core/source/seqLauncher.{h,cpp}`, module `core/interface/seqSession/`
+  (`seqSession.h`, `fSeqSession.cpp`, `gSeqSession.cpp`, `clipsLayer.*`, `sessionLayer.h`). Hooks: `inc_uStep` (after
+  `switchRowStep`), `play_microStep` (stopped check next to the takeover check), `switchRamPatternsNow` (pattern switched),
+  `Tracker::update`; `cFileManager::getPatternTracksWithNotes`; `eventActivateSeqSession`; Play mode's Pattern button.
+- Pattern tap cycle: Editor -> Play -> Session -> Editor. Pattern held combos in the editor are untouched.
+- Screen buttons in Session (owner/lead 2026-11-04): per layer the buttons choose the group - CLIPS (8 tracks): button 1 = tracks 1-8,
+  button 2 = 9-16; CUT (4 tracks): buttons 1-4 = tracks 1-4, 5-8, 9-12, 13-16. **Button 7 = CLIPS, button 8 = CUT.** All 48 pads belong to
+  the active layer (no layer-switch pads). Rec is forwarded to the layer (CLIPS ignores it).
+- Window: 4 patterns, jog wheel scrolls one pattern per detent (Shift = 4); on entering it shows the loaded pattern.
+- Launch: the main loop reads the clip at once (`cFileManager::loadClipTrackToBuffer`: file -> `fileManagerPatternBuffer` scratch -> one
+  track into `fileManagerPerformancePatternBuffer`; the next-pattern buffer is never used; refused with "Busy" while any file
+  operation runs). Performance mode is switched on for the per-track lengths (lengths filled before the flag; only switched off
+  again by Session if Session switched it on). The audio path copies the clip (`switchPerformanceTrackNow`, after closing the old
+  note) at the track's step boundary when the quantise point hits. Quantise counter: own step counter in the hook (follows
+  `globalPos` until the first launch, then runs on with the frozen pattern length because `globalPos` wraps at the length of track 1's
+  clip): next bar = counter % 16 == 0 (the last bar of a pattern whose length is not a multiple of 16 is short), pattern end =
+  counter 0, immediate = the track's next step. Bar / pattern end: the clip starts at its first step (= on the bar). Immediate: it
+  joins in phase (`counter % clipLength`). Transport stopped: launches apply at once. SCENE = stock `sequencialSwitch`
+  (pattern end, whatever QUANT says; the own pattern too = all tracks back); stopped: at once. A newer tap wins (tapping the track's
+  own pattern cancels a queued clip / stop).
+- **User data**: the tracks that came from launched clips (`Launcher::launchedMask`) are never written to the pattern file. Every save
+  path (`copyCurrentPatternToBuff`: 10 s autosave, queued switch step 0, project save; `saveWorkspacePatternNow`: editor leave, Pattern+jog)
+  fills the file buffer with the pattern FILE and overlays the header and the non-launched tracks from RAM (`seqSessionMergeForSave`,
+  planner `seqsession::saveSource`; cleared tracks when no file exists yet). While Session owns performance mode, Pattern+jog saves
+  normally. Edits made to a launched clip live in RAM only and are lost at the next switch. Undo snapshots still hold the RAM pattern.
+- Ownership: if performance mode is switched off by somebody else while clips are mixed in, the launched tracks are restored from the file.
+- Stop: per-track stopped mask checked in `play_microStep`; applies at the quantise point (closes the sounding note); a launch, a
+  scene / pattern switch or a transport stop clears it. An empty clip pad stops the track (Ableton) [provisional].
+- LEDs (PWM = level * 2): playing 15, queued blinks 15/0 (a pending stop blinks the playing clip), has notes 3, empty 0; the "has
+  notes" cache of the window is read one row per main-loop pass (Workspace files; the loaded pattern from RAM).
+
+### Hook order (for the CUT merge)
+`inc_uStep(row)`: `switchRowStep(row)` -> `seqSessionStep(row)` (clip launch / stop at the quantise point) -> (CUT) `seqCutBoundary`.
+A clip launch must call the track's Playhead `restart()`. Session STOP wins over CUT: the track is silent (`play_microStep` returns) and
+the playhead is frozen while stopped.
+
+### SessionLayer interface (for the CUT / MLR component)
+`core/interface/seqSession/sessionLayer.h`, namespace `seqsession`:
+```
+struct SessionLayer {
+  const char* name() const;                       // "CUT"
+  void enter(uint8_t firstTrack);                 // layer becomes visible (default: setGroup)
+  void leave();                                   // hidden / Session left: release held pads
+  void setGroup(uint8_t firstTrack);              // first track of the group
+  uint8_t groupSize() const;                      // 8 (CLIPS default) or 4 (CUT): decides what screen buttons 1-4 mean
+  void rec(bool down);                            // Rec button forwarded (CLIPS ignores it)
+  void pad(uint8_t col, uint8_t row, bool down);  // 0-based col 0..11, row 0..3; pad index = row * 12 + col
+  void leds(uint8_t out[48]);                     // 0..15 per pad
+  void update(uint32_t nowMs);                    // main loop, every pass while visible (optional)
+  bool jog(int16_t value, bool shift);            // true = handled (optional)
+  void info(char lines[4][48]);                   // four text lines under the title
+};
+```
+The module owns the screen buttons (groups, 7 = CLIPS, 8 = CUT) and the Play button; every pad, the jog wheel and Rec go to the layer. Plug in with `seqSession.setCutLayer(&myLayer)` (default
+`CutStubLayer`: "CUT - coming"). A layer runs on the main loop only; the audio side is reached through the existing `seqEngine`
+post calls or a new ring like `seqsession::Launcher`.
+
