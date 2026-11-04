@@ -195,6 +195,11 @@ Built around immediate playability; no separate Seq page, no Off/Live/Rec modes.
   so the audio context cannot tear a block. The change hash covers settings only (lock root in key mode, visible panel / half / edit page
   are masked), so performing does not mark the project changed; Save still stores everything. Save / Save as with a project that never used a sequencer writes nothing and removes a stale
   `seqtracks.bin` (and the Workspace mirror) unless it is the project the file was loaded from (an unreadable or newer file is kept there). `.mtp`, `project.mt` and the pattern struct are untouched.
+- Review follow-ups (2026-11-04): Play-mode exit ends a recording; stale `seqtracks.bin` removed; blockTick for external clock; pad releases
+  never lost; generators start on the bar grid; per-track critical section + per-track load fallback; record queue 128 + overflow hint;
+  grid pads only for takeover; one note per group on sample tracks; hash ignores performance fields; Pattern tap 400 ms / popup /
+  first-tap fixes; Rec double-press toggles. Cost: MK66 FLASH +2.4 KB, RAM +1.1 KB (record queue +768 B, internal RAM; moving the
+  whole engine to external RAM would need placement construction and slower audio-context access, not done).
 - Not done: Copy / Paste of a track's sequencer, recording into other patterns than the one active at Rec start, pad velocity record.
 
 ## Script sequencers — parked (owner 2026-11-03)

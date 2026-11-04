@@ -146,7 +146,7 @@ void Engine::recSink(const seqrec::Op& op)
     if (n == rTail_)
     {
         if (recDrops_ < 255)
-            recDrops_++; // full: drop, but say so ("Rec overflow" on the screen)
+            recDrops_ = (uint8_t)(recDrops_ + 1); // full: drop, but say so ("Rec overflow" on the screen)
         return;
     }
     recRing_[h] = op;
