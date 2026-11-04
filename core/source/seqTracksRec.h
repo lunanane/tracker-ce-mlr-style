@@ -103,7 +103,7 @@ class Planner
     uint8_t track() const { return track_; }
     uint8_t hints() const { return hints_; }
     uint8_t ends() const { return ends_; } // counts finished sessions (wraps)
-    uint8_t why() const { return why_; }   // why the last session ended: 0 asked for (Rec, panic ...), 1 loop complete, 2 transport / clock, 3 track Off, 4 reset
+    uint8_t why() const { return why_; }   // why the last session ended: 0 asked for (Rec, panic ...), 1 loop complete, 2 transport / clock, 3 track Off, 4 reset, 5 pattern changed
 
     // Punch-in: records from now on. One loop: armed until the track's playhead is at step 0.
     // fromStart: the transport starts with this recording (step `curPos` has not been entered yet): that step belongs to the
@@ -151,8 +151,10 @@ class Planner
         ends_++;
     }
 
-    // The playhead enters step `pos` (call when the track's uStep is 1).
-    void enter(uint8_t pos)
+    // The playhead enters step `pos` (call when the track's uStep is 1). live: the sequencer is being played on the track right now
+    // (pads held / a Mono sequence runs). Only then is a step without a note replaced by an empty one (a gap inside live playing);
+    // an idle step is left alone, so a take that plays nothing for a while (or for a whole lap) never wipes what the pattern holds.
+    void enter(uint8_t pos, bool live = true)
     {
         if (state_ == IDLE || pos >= kMaxSteps)
             return;
@@ -173,7 +175,7 @@ class Planner
         entered_ = pos;
         haveEntered_ = true;
         stepsSeen_++;
-        if (cur_ == 0)
+        if (cur_ == 0 && live)
             emit(OP_CLEAR, pos, 0, 0, kNoChord, kNoVolume, kNoMicro);
     }
 

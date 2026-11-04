@@ -262,10 +262,12 @@ void Sequencer::seqCutMicroStep(int row)
     seqcut::Cut* c = seqEngine.cut();
     strPlayer::strPlayerTrack& p = player.track[row];
     seqcut::StepPlan plan;
-    if (c && row < seqlogic::kTracks && p.uStep == 25)
+    // the middle of a step (rate x2 second half), or - quantise "off" - the audio tick after a pad was pressed: a jump played at once
+    if (c && row < seqlogic::kTracks && p.uStep > 1 && (p.uStep == 25 || c->quant() == seqcut::Q_OFF))
     {
         int steps = seqCutSteps((uint8_t)row);
-        if (c->mid((uint8_t)row, steps, plan, seqSessionStopped(row)))
+        if ((p.uStep == 25 && c->mid((uint8_t)row, steps, plan, seqSessionStopped(row))) ||
+            c->now((uint8_t)row, steps, plan, seqSessionStopped(row)))
         {
             uint8_t saved = p.uStep;
             p.actual_pos = seqCutLimit(plan.pos, steps);
@@ -536,6 +538,11 @@ bool seqRecStart(bool oneLoop, uint8_t track)
     return seqEngine.postRec(track, oneLoop ? seqtracks::Engine::REC_LOOP : seqtracks::Engine::REC_PUNCH);
 }
 
+bool seqRecStopPatternChanged()
+{
+    return seqEngine.postRec(seqEngine.recTrack(), seqtracks::Engine::REC_STOP_PATTERN);
+}
+
 bool seqRecStop()
 {
     // the track number only has to be valid: the audio side ends whatever take is on (also one that is queued but not published yet)
@@ -567,20 +574,25 @@ void seqTracksUpdate()
     if (s_pendingRel.any())
         s_pendingRel.retry([](uint8_t t, uint8_t p) { return seqEngine.postPad(t, p, false); });
 
+    // 0. the pattern changed under a running take (song mode, scene, queue): the take ends with the reason "pattern changed". Checked
+    // every pass, not only when steps arrive, so an idle take ends too. Steps still in the queue at that moment belong to the
+    // old pattern, which is not the current one any more: they are dropped (at most the steps of one main loop pass).
+    const bool patternMoved = mtProject.values.actualPattern != s_rec.pattern;
+    if (patternMoved && seqEngine.recState() != seqrec::Planner::IDLE && !s_rec.stopSent)
+    {
+        s_rec.stopSent = true;
+        if (!seqRecStopPatternChanged())
+            s_rec.stopSent = false; // queue full: again next pass
+    }
+
     // 1. operations planned in the audio context -> pattern (one undo step per recording)
     seqrec::Op op;
     bool wrote = false;
     while (seqEngine.popRecOp(op))
     {
-        if (mtProject.values.actualPattern != s_rec.pattern)
-        {
-            if (!s_rec.stopSent)
-            {
-                s_rec.stopSent = true;
-                seqRecStop(); // the pattern changed under the recording: end it, write nothing more
-            }
-            continue;
-        }
+        if (patternMoved)
+            continue; // see 0.
+
         if (!s_rec.undoDone)
         {
             newFileManager.storePatternUndoRevision();

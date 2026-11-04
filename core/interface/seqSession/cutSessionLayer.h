@@ -47,7 +47,7 @@ class CutSessionLayer : public SessionLayer
     void info(char lines[4][48]) override
     {
         snprintf(lines[0], 48, "Rows = tracks %d-%d", first_ + 1, first_ + 4);
-        snprintf(lines[1], 48, "Pads 1-8: jump, two held: loop");
+        snprintf(lines[1], 48, "Pads 1-8: jump, two = latched loop");
         snprintf(lines[2], 48, "9 STOP  10 REV  11 RATE  12 SYNC");
         snprintf(lines[3], 48, "Rec on, jam, Rec off = record a loop");
     }

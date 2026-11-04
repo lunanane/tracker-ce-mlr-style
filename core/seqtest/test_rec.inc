@@ -554,13 +554,168 @@ static void test_mlr_quantise_grid()
     freshCut(idleFake);
 }
 
+// ---- plan 008 A (owner review): latched loops, takes on the grid, quantise off = at once, bar follows the pattern ----
+static void test_mlr_loop_latches()
+{
+    using namespace seqcut;
+    FakePattern f;
+    f.steps = 32;
+    seqcut::Cut* c = freshCut(f);
+    if (!c)
+        return;
+    c->apply(0, packQuant(Q_STEP));
+    int g = 0;
+    stepOnce(*c, f, g);
+    stepOnce(*c, f, g);
+    c->apply(0, packArg(SUB_PAD, true, 1)); // columns 1..3 = positions 4..15
+    c->apply(0, packArg(SUB_PAD, true, 3));
+    c->apply(0, packArg(SUB_PAD, false, 1)); // both up before the boundary: the loop is still wanted
+    c->apply(0, packArg(SUB_PAD, false, 3));
+    StepPlan p = stepOnce(*c, f, g);
+    CHECK(p.override && p.pos == 4);
+    for (int i = 0; i < 40; i++)
+    {
+        p = stepOnce(*c, f, g);
+        CHECK(p.override && p.pos >= 4 && p.pos <= 15); // latched: it turns with no pad down
+    }
+    CHECK(c->playhead(0).heldCount() == 0 && c->view(0).loopLo == 1 && c->view(0).loopHi == 3);
+    // one pad in the row jumps and ends the loop
+    c->apply(0, packArg(SUB_PAD, true, 6));
+    c->apply(0, packArg(SUB_PAD, false, 6));
+    p = stepOnce(*c, f, g);
+    CHECK(p.override && p.pos == 24 && c->view(0).loopLo > c->view(0).loopHi);
+    p = stepOnce(*c, f, g);
+    CHECK(p.pos == 25);
+    // RESYNC ends a latched loop too
+    c->apply(0, packArg(SUB_PAD, true, 1));
+    c->apply(0, packArg(SUB_PAD, true, 3));
+    c->apply(0, packArg(SUB_PAD, false, 1));
+    c->apply(0, packArg(SUB_PAD, false, 3));
+    stepOnce(*c, f, g);
+    CHECK(c->view(0).loopLo == 1);
+    c->apply(0, packArg(SUB_RESYNC, true, 0));
+    p = stepOnce(*c, f, g);
+    CHECK(c->view(0).loopLo > c->view(0).loopHi && !c->playhead(0).looping());
+}
+
+static void test_mlr_take_snaps_to_the_grid()
+{
+    using namespace seqcut;
+    FakePattern f;
+    seqcut::Cut* c = freshCut(f);
+    if (!c)
+        return;
+    c->apply(0, packQuant(Q_BEAT));
+    int g = 0;
+    stepOnce(*c, f, g); // global 1
+    c->apply(0, packArg(SUB_REC, true, 0));
+    c->apply(0, packArg(SUB_PAD, true, 6)); // position 12, waits for the beat at 4
+    c->apply(0, packArg(SUB_PAD, false, 6));
+    StepPlan p = stepOnce(*c, f, g); // 2
+    CHECK(p.pos == 2 && (c->view(0).flags & VF_REC) && c->playhead(0).recordedLength() == 0);
+    p = stepOnce(*c, f, g); // 3
+    CHECK(p.pos == 3);
+    p = stepOnce(*c, f, g); // 4: applied, the take starts
+    CHECK(p.pos == 12);
+    p = stepOnce(*c, f, g); // 13
+    CHECK(p.pos == 13);
+    c->apply(0, packArg(SUB_REC, false, 0)); // Rec off in the middle of a beat: the take runs on to the grid
+    CHECK(c->view(0).flags & VF_REC);
+    p = stepOnce(*c, f, g); // 14
+    CHECK(p.pos == 14 && (c->view(0).flags & VF_REC));
+    p = stepOnce(*c, f, g); // 15 and the next step is the grid: closed
+    CHECK(p.pos == 15);
+    CHECK(!(c->view(0).flags & VF_REC) && (c->view(0).flags & VF_RECORDED) && c->playhead(0).recordedLength() == 4);
+    // the replay starts with the take's first step and keeps its phase
+    for (int lap = 0; lap < 3; lap++)
+        for (int i = 0; i < 4; i++)
+        {
+            p = stepOnce(*c, f, g);
+            CHECK(p.override && p.pos == 12 + i);
+        }
+}
+
+static void test_mlr_quantise_off_is_at_once()
+{
+    using namespace seqcut;
+    FakePattern f;
+    seqcut::Cut* c = freshCut(f);
+    if (!c)
+        return;
+    c->apply(0, packQuant(Q_OFF));
+    int g = 0;
+    for (int i = 0; i < 3; i++)
+        stepOnce(*c, f, g);
+    StepPlan pl;
+    c->apply(0, packArg(SUB_PAD, true, 6));
+    CHECK(c->now(0, 16, pl) && pl.override && pl.pos == 12); // between two steps, no boundary needed
+    CHECK(!c->now(0, 16, pl));                                // consumed
+    f.pos = 12;
+    StepPlan p = stepOnce(*c, f, g);                          // the boundary carries on from there, no second jump
+    CHECK(p.override && p.pos == 13);
+    // a two-pad loop starts at once as well
+    c->apply(0, packArg(SUB_PAD, false, 6));
+    c->apply(0, packArg(SUB_PAD, true, 1));
+    c->apply(0, packArg(SUB_PAD, true, 3));
+    CHECK(c->now(0, 16, pl) && pl.pos == 2 && c->view(0).loopLo == 1 && c->view(0).loopHi == 3);
+    // step = the next boundary, never in between
+    freshCut(f);
+    c->apply(0, packQuant(Q_STEP));
+    c->apply(0, packArg(SUB_PAD, true, 6));
+    CHECK(!c->now(0, 16, pl));
+    p = stepOnce(*c, f, g);
+    CHECK(p.pos == 12);
+    // a stopped track does not play it
+    freshCut(f);
+    c->apply(0, packQuant(Q_OFF));
+    c->apply(0, packArg(SUB_STOP, true, 0));
+    c->apply(0, packArg(SUB_PAD, true, 6));
+    CHECK(!c->now(0, 16, pl));
+    c->apply(0, packQuant(Q_BEAT));
+}
+
+static void test_mlr_bar_follows_the_pattern()
+{
+    using namespace seqcut;
+    CHECK(quantStepsFor(Q_BAR, 16) == 16 && quantStepsFor(Q_BAR, 32) == 16 && quantStepsFor(Q_BAR, 128) == 16);
+    CHECK(quantStepsFor(Q_BAR, 24) == 24 && quantStepsFor(Q_BAR, 12) == 12 && quantStepsFor(Q_BAR, 100) == 64);
+    CHECK(quantStepsFor(Q_BEAT, 24) == 4 && quantStepsFor(Q_STEP, 24) == 1 && quantStepsFor(Q_OFF, 24) == 1);
+    // a 24 step pattern: the bar is the whole pattern, so a jump waits for its start (stock position 0), not for a drifting 16
+    FakePattern f;
+    f.steps = 24;
+    seqcut::Cut* c = freshCut(f);
+    if (!c)
+        return;
+    c->apply(0, packQuant(Q_BAR));
+    int g = 0;
+    for (int i = 0; i < 10; i++)
+        stepOnce(*c, f, g);
+    c->apply(0, packArg(SUB_PAD, true, 2)); // columns of 24 steps: 2 -> position 6
+    c->apply(0, packArg(SUB_PAD, false, 2));
+    CHECK(c->playhead(0).quantise() == 24);
+    int landed = -1;
+    for (int k = 1; k <= 20; k++)
+    {
+        StepPlan p = stepOnce(*c, f, g);
+        if (p.override && p.pos == 6)
+        {
+            landed = k;
+            break;
+        }
+    }
+    CHECK(landed == 14); // global positions 11..23 pass, 0 is the pattern start
+    c->apply(0, packQuant(Q_BEAT));
+}
+
 // ---- Play mode: the Rec key against the engine and a model of the pattern ----
+// Plan 008 (owner intent "Rec should just record"): a take replaces a step only while the sequencer is played on the track; steps
+// the take passes while nothing is played keep what the pattern holds, lap after lap.
 namespace
 {
 struct StepM
 {
-    int note; // -1 empty, -2 note-off, >= 0 note
-    int mark; // which take wrote it (0 = was there before)
+    int note;  // -1 empty, -2 note-off, >= 0 note
+    int mark;  // which take wrote it last (0 = was there before)
 };
 struct PlayFlow
 {
@@ -569,6 +724,7 @@ struct PlayFlow
     Head hd;
     seqrecui::RecToggle key;
     std::vector<StepM> pat;
+    int writes[16];
     int takeId = 0;
     int ms = 0;
     uint8_t lastWhy = 0xFF;
@@ -578,14 +734,19 @@ struct PlayFlow
         e->postType(2, TYPE_CHORDARP);
         e->idleTick();
         for (int i = 0; i < 16; i++)
+        {
             pat[i] = { 40 + i, 0 }; // a busy pattern: every step holds a note
+            writes[i] = 0;
+        }
     }
     ~PlayFlow() { delete e; }
-    // the audio side runs `n` uSteps (2.604 ms each); the main loop then takes the recorded steps over (seqTracksUpdate)
+    // the audio side runs `n` uSteps (2.604 ms each) the way Sequencer::tick does (advanceUs, blockTick, stepClock); the main loop
+    // then takes the recorded steps over (seqTracksUpdate)
     void run(int uSteps)
     {
         for (int i = 0; i < uSteps; i++)
         {
+            e->blockTick(true, 2604); // the transport runs: drains the commands, no idle logic
             playRec(*e, h, hd, 1);
             ms += 3;
             drain();
@@ -597,6 +758,7 @@ struct PlayFlow
         while (e->popRecOp(op))
         {
             StepM& s = pat[op.step];
+            writes[op.step]++;
             if (op.kind == seqrec::OP_OFF_SOFT)
             {
                 if (s.note == -1)
@@ -643,6 +805,7 @@ struct PlayFlow
                 recPress(shift);
         }
     }
+    void pad(bool down) { e->postPad(2, 0, down); }
     int changed() const
     {
         int n = 0;
@@ -651,69 +814,151 @@ struct PlayFlow
                 n++;
         return n;
     }
+    int totalWrites() const
+    {
+        int n = 0;
+        for (int i = 0; i < 16; i++)
+            n += writes[i];
+        return n;
+    }
 };
 } // namespace
 
-// The take of a Rec press: starts, survives the hold events and the release of the key, ends with the next press.
+// The take of a Rec press: starts, survives the hold events and the release of the key, ends with the next press. A chord is
+// played in the middle of it: exactly the steps that passed while it was played are replaced.
 static void test_play_rec_key_flow()
 {
     PlayFlow p;
     p.run(48 * 3 + 20); // the transport runs, position 3
     p.takeId = 1;
-    p.keyDown(1000); // Rec pressed and held for 1 s: press, hold events, release
+    p.keyDown(400); // Rec pressed and held for 0.4 s: press, one hold event (333 ms), release
     CHECK(p.e->recState() == seqrec::Planner::PUNCH);
     CHECK(p.key.on());
-    p.run(48 * 3); // 3 more steps: the take is still on
+    CHECK(p.totalWrites() == 0); // nothing played yet: the take has not touched the pattern
+    p.pad(true);                 // the chord is played for about 5 steps ...
+    p.run(48 * 5);
+    p.pad(false);
+    p.run(48 * 2); // ... and let go; the take goes on, idle
     CHECK(p.e->recState() == seqrec::Planner::PUNCH && p.key.on());
     p.keyDown(80); // the second press ends it
     p.run(2);
     CHECK(p.e->recState() == seqrec::Planner::IDLE && !p.key.on());
     CHECK(p.e->recWhy() == seqrecui::END_USER && p.lastWhy == 0xFF); // asked for: no message
-    // the take lasted about 10 steps: the steps that passed were replaced, the rest of the track was not touched
-    int ch = p.changed();
-    CHECK(ch >= 8 && ch <= 12);
+    // steps 0-3 are before the take, steps 14-15 after the played part: untouched; the played part is written
     for (int i = 0; i <= 3; i++)
-        CHECK(p.pat[i].mark == 0 && p.pat[i].note == 40 + i); // before the take
+        CHECK(p.pat[i].mark == 0 && p.pat[i].note == 40 + i);
+    int ch = p.changed();
+    CHECK(ch >= 4 && ch <= 8);
+    for (int i = 0; i < 16; i++)
+        if (p.pat[i].mark == 0)
+            CHECK(p.pat[i].note == 40 + i && p.writes[i] == 0);
+    CHECK(p.pat[14].mark == 0 && p.pat[15].mark == 0);
 }
 
-// "a new take never wipes the whole track": punch a region, then a second region; everything else is untouched
-static void test_play_rec_punch_region_only()
+// A take that plays nothing changes nothing, lap after lap (the v0.2.4 take cleared every step it entered: "Rec just doesn't do its
+// job, a new recording overwrites the old one completely")
+static void test_play_rec_idle_take_changes_nothing()
 {
     PlayFlow p;
-    p.run(48 * 4 + 10); // position 4, mid step
+    p.run(48 * 3 + 20);
+    p.takeId = 1;
+    p.recPress();
+    p.run(48 * 16 * 3); // three laps
+    CHECK(p.e->recState() == seqrec::Planner::PUNCH);
+    p.recPress();
+    p.run(2);
+    CHECK(p.e->recState() == seqrec::Planner::IDLE);
+    CHECK(p.changed() == 0 && p.totalWrites() == 0);
+}
+
+// Notes that cross the loop wrap are kept when the next lap is idle ("from the 2nd lap on a step is only rewritten if it gets live input")
+static void test_play_rec_wrap_keeps_lap1()
+{
+    PlayFlow p;
+    p.run(48 * 12 + 10); // position 12
     p.takeId = 1;
     p.recPress();
     p.run(2);
-    CHECK(p.e->recState() == seqrec::Planner::PUNCH);
-    p.run(48 * 4 + 20); // steps 5, 6, 7, 8 pass (position is now 8)
-    p.recPress();
-    p.run(2);
-    CHECK(p.e->recState() == seqrec::Planner::IDLE);
+    p.pad(true); // played from step 13 over the wrap into step 1-2
+    p.run(48 * 5);
+    p.pad(false);
+    p.run(10);
+    int w1[16];
+    int tot1 = p.totalWrites();
+    CHECK(tot1 > 0);
+    StepM snap[16];
     for (int i = 0; i < 16; i++)
     {
-        bool inside = i >= 5 && i <= 8; // the step already playing at the press (4) is left alone, steps 5-8 were entered
-        if (inside)
-            CHECK(p.pat[i].mark == 1);
-        else
-            CHECK(p.pat[i].mark == 0 && p.pat[i].note == 40 + i);
+        w1[i] = p.writes[i];
+        snap[i] = p.pat[i];
     }
-    // a second take elsewhere does not touch the first one
-    p.run(48 * 6 + 10); // position 14
-    p.takeId = 2;
-    p.recPress();
-    p.run(2);
-    p.run(40); // step 15 passes
-    p.recPress();
-    p.run(2);
-    CHECK(p.e->recState() == seqrec::Planner::IDLE);
-    for (int i = 5; i <= 8; i++)
-        CHECK(p.pat[i].mark == 1);
-    CHECK(p.pat[15].mark == 2);
-    int untouched = 0;
+    CHECK(w1[13] > 0 || w1[14] > 0);       // before the wrap
+    CHECK(w1[0] > 0 || w1[1] > 0);         // after the wrap
+    p.run(48 * 16 * 2);                    // two idle laps with the take still on
+    CHECK(p.e->recState() == seqrec::Planner::PUNCH);
     for (int i = 0; i < 16; i++)
-        if (p.pat[i].mark == 0)
-            untouched++;
-    CHECK(untouched >= 10);
+        CHECK(p.writes[i] == w1[i] && p.pat[i].note == snap[i].note && p.pat[i].mark == snap[i].mark);
+}
+
+// A gap inside live playing is replaced (the arp pauses, the pattern's old note must not sound through it)
+static void test_play_rec_live_gap_replaced()
+{
+    PlayFlow p;
+    p.run(48 * 2 + 10);
+    p.takeId = 1;
+    p.recPress();
+    p.run(2);
+    p.pad(true); // hold a pad for ten steps: every step that passes is part of the take
+    p.run(48 * 10);
+    p.pad(false);
+    p.recPress();
+    p.run(2);
+    int replaced = 0;
+    for (int i = 3; i <= 11; i++)
+        if (p.pat[i].mark == 1)
+            replaced++;
+    CHECK(replaced >= 8); // steps with a note and the steps in between (a slow arp leaves gaps) were all replaced
+    CHECK(p.pat[0].mark == 0 && p.pat[1].mark == 0); // (step 2 was playing at the press: a note may land on it)
+    CHECK(p.pat[14].mark == 0 && p.pat[15].mark == 0);
+}
+
+// Muting is a monitoring choice: a muted track still records what the pads play (and sounds nothing)
+static void test_play_rec_muted_track_records()
+{
+    PlayFlow p;
+    p.h.mute[2] = true;
+    p.run(48 * 2 + 10);
+    p.takeId = 1;
+    p.recPress();
+    p.run(2);
+    p.pad(true);
+    p.run(48 * 4);
+    p.pad(false);
+    p.run(48);
+    p.recPress();
+    p.run(2);
+    CHECK(p.h.count('+', 2) == 0); // silent
+    int notes = 0;
+    for (int i = 0; i < 16; i++)
+        if (p.pat[i].mark == 1 && p.pat[i].note >= 0)
+            notes++;
+    CHECK(notes >= 1);
+    CHECK(p.pat[0].mark == 0 && p.pat[1].mark == 0); // (step 2 was playing at the press: a note may land on it)
+}
+
+// The pattern changes under a take: it ends with its own reason, "pattern changed"
+static void test_play_rec_pattern_changed_reason()
+{
+    PlayFlow p;
+    p.run(48 * 2 + 10);
+    p.recPress();
+    p.run(2);
+    CHECK(p.e->recState() == seqrec::Planner::PUNCH);
+    p.e->postRec(2, Engine::REC_STOP_PATTERN); // what seqTracksUpdate posts when mtProject.values.actualPattern moved
+    p.run(2);
+    CHECK(p.e->recState() == seqrec::Planner::IDLE && p.e->recWhy() == seqrecui::END_PATTERN);
+    CHECK(!p.key.on() && p.lastWhy == seqrecui::END_PATTERN);
+    CHECK(seqrecui::endText(seqrecui::END_PATTERN) != 0);
 }
 
 // Rec started from a stopped transport and a bounce of the key (a second press 1 ms later) neither ends nor restarts it
@@ -737,20 +982,33 @@ static void test_play_rec_bounce_and_transport()
     CHECK(seqrecui::endText(p.lastWhy) != 0);
 }
 
-// Shift + Rec: exactly one loop
+// Shift + Rec: exactly one loop. Idle: nothing written. Played through the whole loop: every step once.
 static void test_play_rec_shift_loop()
 {
-    PlayFlow p;
-    p.run(48 * 5 + 10);
-    p.takeId = 1;
-    p.keyDown(300, true);
-    p.run(2);
-    CHECK(p.e->recState() == seqrec::Planner::LOOP || p.e->recState() == seqrec::Planner::ARMED);
-    p.run(48 * 40); // well over one lap
-    CHECK(p.e->recState() == seqrec::Planner::IDLE);
-    CHECK(p.e->recWhy() == seqrecui::END_LOOP);
-    CHECK(p.changed() == 16); // exactly the loop: every step once
-    CHECK(!p.key.on() && p.lastWhy == 1 /* loop done: expected, the UI shows nothing */);
+    {
+        PlayFlow p;
+        p.run(48 * 5 + 10);
+        p.takeId = 1;
+        p.keyDown(300, true);
+        p.run(2);
+        CHECK(p.e->recState() == seqrec::Planner::LOOP || p.e->recState() == seqrec::Planner::ARMED);
+        p.run(48 * 40); // well over one lap
+        CHECK(p.e->recState() == seqrec::Planner::IDLE);
+        CHECK(p.e->recWhy() == seqrecui::END_LOOP);
+        CHECK(p.changed() == 0); // nothing was played: the loop is as it was
+        CHECK(!p.key.on() && p.lastWhy == seqrecui::END_LOOP && seqrecui::endText(p.lastWhy) == 0);
+    }
+    {
+        PlayFlow p;
+        p.run(48 * 5 + 10);
+        p.takeId = 1;
+        p.keyDown(300, true);
+        p.run(2);
+        p.pad(true); // a chord held across the whole loop
+        p.run(48 * 40);
+        CHECK(p.e->recState() == seqrec::Planner::IDLE && p.e->recWhy() == seqrecui::END_LOOP);
+        CHECK(p.changed() == 16); // exactly the loop: every step replaced
+    }
 }
 
 // Why a take ended: the audio side tells

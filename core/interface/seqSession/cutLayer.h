@@ -4,7 +4,7 @@
 // Pad grid: 4 rows x 12 columns (0-based; index = row * 12 + col), same as every other pad layer.
 //   row r      = track groupFirst + r (group of 4 tracks, see cutSetGroup)
 //   col 0..7   = 8 positions of the track (Playhead::columnPosition with 8 columns); one pad = jump (at the next step),
-//                two pads held in one row = loop between them (release = back to the whole track)
+//                two pads in one row = a loop between them that latches (a single pad in the row ends it)
 //   col 8      = STOP / START the track (START re-aligns it to the global position)
 //   col 9      = REVERSE   col 10 = RATE (1/2 -> 1 -> 2 -> 1/2 ...)   col 11 = RESYNC (global position, clears loop/recording)
 // Rec (toggle) = playhead recording: press Rec, a row starts its take with the first pad pressed on it, press Rec again to close

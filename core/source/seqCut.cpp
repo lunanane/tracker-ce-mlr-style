@@ -61,7 +61,8 @@ void Cut::activate(uint8_t t)
     int steps = hooks_.trackSteps ? hooks_.trackSteps(hooks_.user, t) : 16;
     int pos = hooks_.trackPos ? hooks_.trackPos(hooks_.user, t) : 0;
     p.setLength(steps);
-    p.setQuantise(quantSteps(quant_)); // queued jumps / loops wait for the grid (plan 008 A)
+    p.setQuantise(quantStepsFor(quant_, steps)); // queued jumps / loops wait for the grid (plan 008 A)
+    p.setImmediate(quant_ == Q_OFF);
     p.restart((uint32_t)(pos + 1)); // the track continues where it is (and the grid counter with it)
     stock_[t] = (int16_t)pos;
     memset(&rt_[t], 0, sizeof(Rt));
@@ -94,9 +95,14 @@ void Cut::publish(uint8_t t)
             if (lo < 0) lo = c;
             hi = c;
         }
-    if (n >= 2)
+    if (p.looping())
     {
-        v.loopLo = (uint8_t)lo;
+        v.loopLo = (uint8_t)p.loopLo(); // a loop stays after the pads are up
+        v.loopHi = (uint8_t)p.loopHi();
+    }
+    else if (n >= 2)
+    {
+        v.loopLo = (uint8_t)lo; // two pads are down and the loop waits for its grid
         v.loopHi = (uint8_t)hi;
     }
     uint8_t f = VF_ACTIVE;
@@ -169,7 +175,10 @@ void Cut::apply(uint8_t t, uint8_t arg)
             quant_ = argQuant(arg);
             for (uint8_t i = 0; i < kCutTracks; i++)
                 if ((activeMask_ >> i) & 1u)
-                    ph_[i].setQuantise(quantSteps(quant_));
+                {
+                    ph_[i].setQuantise(quantStepsFor(quant_, ph_[i].length()));
+                    ph_[i].setImmediate(quant_ == Q_OFF);
+                }
             return;
         }
         if (argCol(arg) != 0) return; // col 0 = RESET, col 1 = SYNC ALL, anything else is not a command
@@ -294,6 +303,8 @@ StepPlan Cut::boundary(uint8_t t, int steps, int globalPos, bool frozen)
         publish(t);
         return plan;
     }
+    p.setQuantise(quantStepsFor(quant_, steps));
+    p.setGridPos((uint32_t)(stock_[t] >= 0 && stock_[t] < steps ? stock_[t] : globalPos % steps)); // the grid is the pattern's, not a counter
     const int prev = p.position();
     Playhead::StepOut s = p.step();
     plan.override = true;
@@ -342,6 +353,28 @@ bool Cut::mid(uint8_t t, int steps, StepPlan& out, bool frozen)
     r.noteStep = out.noteStep;
     r.elapsed = out.elapsed;
     setHold(t, false);
+    return true;
+}
+
+bool Cut::now(uint8_t t, int steps, StepPlan& out, bool frozen)
+{
+    memset(&out, 0, sizeof(out));
+    if (frozen || quant_ != Q_OFF || t >= kCutTracks || !((activeMask_ >> t) & 1u) || steps < 1) return false;
+    Rt& r = rt_[t];
+    if (r.stopped) return false;
+    Playhead& p = ph_[t];
+    if (p.length() != steps) p.setLength(steps);
+    Playhead::StepOut s;
+    if (!p.applyNow(s)) return false;
+    out.override = true;
+    out.pos = s.pos;
+    planJump(t, steps, out.pos, out);
+    r.has2 = false;
+    r.retrig = out.retrigger;
+    r.noteStep = out.noteStep;
+    r.elapsed = out.elapsed;
+    setHold(t, false);
+    publish(t);
     return true;
 }
 
