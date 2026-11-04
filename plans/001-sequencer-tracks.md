@@ -170,7 +170,8 @@ Built around immediate playability; no separate Seq page, no Off/Live/Rec modes.
   in `seqTracks.cpp` (`seqTracksUpdate()` called from `TrackerImpl::update`), Rec button in `core/interface/seqPlay`. Tests: `core/seqtest`.
 - Rec button exists only inside Play mode (the stock Rec outside it is untouched). **Rec** = punch-in on the current track,
   **Shift + Rec** = one loop, Rec again ends either. It uses its own recording state, not the stock `isREC`/edit mode.
-- Transport stopped: Rec starts the pattern from step 1 and records at once (Shift + Rec: the loop starts at once, as step 1 is the loop start). [provisional]
+- Two Rec presses before the audio side drained the first one toggle (the engine ends a recording that is asked to begin again on the same track).
+- Transport stopped: Rec starts the pattern from step 1 and records at once (step 1 is part of the pass and cleared: `Planner::begin(..., fromStart)`) (Shift + Rec: the loop starts at once, as step 1 is the loop start). [provisional]
 - Replace: every step the playhead enters is cleared (`clearStep`) unless a sequencer note already claimed it; a note replaces the whole
   step (note, instrument = the taken-over instrument, volume = velocity only if stock "rec velocity" is on, micromove only if
   stock "rec microtiming" is on, chord FX in fx[0]). Quantise = stock rule (second half of a step goes to the next step).

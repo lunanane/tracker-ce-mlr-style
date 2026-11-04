@@ -121,6 +121,7 @@ Then hold a root pad in columns 1-6. The selection stays when you release (it is
 | Wait for the wrap | At step 1 the info line changes to "one loop, ends by itself"; the sequencer's notes replace every step of the loop. |
 | At the next wrap | Recording stops by itself, info line clears. The whole loop is one undo step. A note near the end of the last step that would quantise to step 1 is NOT written to step 1. |
 | Transport stopped: **Shift + Rec** | The transport starts at step 1 and the loop starts at once. |
+| Press **Rec** twice quickly (double tap) | Recording starts and ends again (toggle); it does not restart. |
 | **Rec** (without Shift) while armed or recording | Ends it at once (what was written stays). |
 
 ## 8. Save / load with the project

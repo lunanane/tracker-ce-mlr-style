@@ -830,6 +830,55 @@ static void test_rec_queue_overflow_hint()
     delete e;
 }
 
+// Rec from a stopped transport: step 0 is part of the pass (cleared); Rec while playing leaves the playing step alone.
+static void test_rec_from_stop_clears_step0()
+{
+    MockHost h;
+    Engine* e = mk(h);
+    e->postType(2, TYPE_CHORDARP);
+    e->blockTick(false, 3000);
+    e->postRec(2, Engine::REC_PUNCH); // the main loop starts the transport and posts Rec
+    long u = 0;
+    playPos(*e, h, 2, u);
+    std::vector<seqrec::Op> ops = drainOps(*e);
+    CHECK(!ops.empty() && ops[0].kind == seqrec::OP_CLEAR && ops[0].step == 0);
+    delete e;
+
+    MockHost h2;
+    Engine* e2 = mk(h2);
+    e2->postType(2, TYPE_CHORDARP);
+    long u2 = 3 * 48 + 10;
+    playPos(*e2, h2, 1, u2);
+    e2->postRec(2, Engine::REC_PUNCH);
+    playPos(*e2, h2, 5, u2);
+    ops = drainOps(*e2);
+    for (size_t i = 0; i < ops.size(); i++)
+        CHECK(ops[i].step != 3); // mid-step punch-in: the playing step is not cleared
+    delete e2;
+}
+
+// Two Rec presses before the audio side drained the first one: the second ends the recording (toggle), no restart.
+static void test_double_rec_toggles()
+{
+    MockHost h;
+    Engine* e = mk(h);
+    e->postType(2, TYPE_CHORDARP);
+    e->blockTick(false, 3000);
+    long u = 0;
+    playPos(*e, h, 2, u);
+    unsigned ends = e->recEnds();
+    CHECK(e->postRec(2, Engine::REC_PUNCH));
+    CHECK(e->postRec(2, Engine::REC_PUNCH)); // UI still saw IDLE
+    playPos(*e, h, 2, u);
+    CHECK(e->recState() == seqrec::Planner::IDLE);
+    CHECK(e->recEnds() != (uint8_t)ends);
+    // a third press starts again
+    e->postRec(2, Engine::REC_PUNCH);
+    playPos(*e, h, 2, u);
+    CHECK(e->recState() == seqrec::Planner::PUNCH);
+    delete e;
+}
+
 static void test_engine_rec_loop_and_stop()
 {
     MockHost h;
@@ -1256,6 +1305,8 @@ int main()
     test_planner_chord_groups();
     test_engine_rec_punch();
     test_rec_queue_overflow_hint();
+    test_rec_from_stop_clears_step0();
+    test_double_rec_toggles();
     test_engine_rec_loop_and_stop();
     test_planner_punch_out_note_off();
     test_engine_rec_chord();

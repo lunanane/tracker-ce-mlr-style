@@ -105,7 +105,9 @@ class Planner
     uint8_t ends() const { return ends_; } // counts finished sessions (wraps)
 
     // Punch-in: records from now on. One loop: armed until the track's playhead is at step 0.
-    void begin(uint8_t track, bool oneLoop, uint8_t curPos)
+    // fromStart: the transport starts with this recording (step `curPos` has not been entered yet): that step belongs to the
+    // pass and is cleared like any other; otherwise the step that is already playing is not cleared.
+    void begin(uint8_t track, bool oneLoop, uint8_t curPos, bool fromStart = false)
     {
         reset();
         track_ = track;
@@ -117,8 +119,11 @@ class Planner
         else
         {
             state_ = PUNCH;
-            entered_ = curPos; // the step that is already playing is not cleared, notes may still replace it
-            haveEntered_ = true;
+            if (!fromStart)
+            {
+                entered_ = curPos; // the step that is already playing is not cleared, notes may still replace it
+                haveEntered_ = true;
+            }
         }
     }
 

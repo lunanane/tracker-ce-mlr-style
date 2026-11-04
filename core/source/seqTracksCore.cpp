@@ -169,11 +169,16 @@ void Engine::applyRec(uint8_t track, uint8_t mode)
     }
     else if (t_[track].type != TYPE_OFF)
     {
+        bool again = rec_.active() && rec_.track() == track;
         rec_.stop();
-        recDrops_ = 0;
-        seqrec::TrackPos p;
-        host_->trackPos(track, p);
-        rec_.begin(track, mode == REC_LOOP, p.pos);
+        if (!again) // a second Rec before the screen showed the first one ends the recording (toggle), it does not restart it
+        {
+            recDrops_ = 0;
+            seqrec::TrackPos p;
+            host_->trackPos(track, p);
+            // transport not running yet (Rec started it): the first step belongs to the pass
+            rec_.begin(track, mode == REC_LOOP, p.pos, !playing_);
+        }
     }
     recPublish();
 }
