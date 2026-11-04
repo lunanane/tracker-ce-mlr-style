@@ -788,6 +788,8 @@ static void test_state_change_detection()
     delete e;
 }
 
+int sessionTests(int& checks);
+
 int main()
 {
     test_tap();
