@@ -2,8 +2,19 @@
 
 #include "effect_polyverb.h"
 #include "cr_mtb_buffer.h"
+#include "utility/dspinst.h"
+#include <math.h>
+#include <string.h>
 
 extern uint16_t externalRamReverbBuff[];
+// The ring reverb of the reverb type "Plinky" (plan 007 F3). Original Tracker: 64 KB ring + 16 KB stereo pre-delay in one block of
+// external RAM (80 KB). Tracker Plus / Mini (external RAM is full there): the ring lives in the two buffers of the stock reverb
+// (idle while this type runs) and only a 4 KB pre-delay line is added. Cleared in pieces (clearStep) every time the type is entered.
+#if defined(PLATFORM_IMX)
+static __NOINIT(EXTERNAL_RAM) int16_t ringPreMemory[2 * ringverb::kPreSize];
+#else
+static __NOINIT(EXTERNAL_RAM) int16_t ringReverbMemory[ringverb::kRingSize + 2 * ringverb::kPreSize];
+#endif
 #ifdef PLATFORM_IMX
 static uint16_t internalRamReverbBuff[16384] __attribute__((section(".noinit")));
 #else
@@ -17,6 +28,11 @@ AudioEffectPolyverb::AudioEffectPolyverb()
     buffer2 = externalRamReverbBuff;
     reverb.Init(buffer, buffer2);
 
+#if defined(PLATFORM_IMX)
+    ring.init(ringverb::SplitRing{ (int16_t*)buffer, (int16_t*)buffer2 }, ringPreMemory);
+#else
+    ring.init(ringverb::PlainRing{ ringReverbMemory }, ringReverbMemory + ringverb::kRingSize);
+#endif
     reverb.SetInputGain(0.1f);
     reverb.SetDiffusion(0.625f);
     setTime(0.7f);
@@ -47,7 +63,66 @@ AUDIO_CORE_RAM void AudioEffectPolyverb::update(void)
         return;
     }
 
-    reverb.Process(block_left->data, block_right->data, AUDIO_BLOCK_SAMPLES);
+    int16_t* l = block_left->data;
+    int16_t* r = block_right->data;
+
+    // F2: highpass on the reverb input (both types). Smoothed centre, out of the path (mix 0) it costs nothing.
+    hpControl.blockUpdate();
+    const float hpMix = hpControl.mix();
+    if (hpMix > 0.0f)
+    {
+        const seqfx::SvfCoef hc = hpControl.coef();
+        for (int s = 0; s < AUDIO_BLOCK_SAMPLES; s++)
+        {
+            float xl = (float)l[s], xr = (float)r[s];
+            l[s] = (int16_t)signed_saturate_rshift((int32_t)(xl + hpMix * (seqfx::highpass(hpLeft, hc, xl) - xl)), 16, 0);
+            r[s] = (int16_t)signed_saturate_rshift((int32_t)(xr + hpMix * (seqfx::highpass(hpRight, hc, xr) - xr)), 16, 0);
+        }
+        seqfx::svfFlush(hpLeft);
+        seqfx::svfFlush(hpRight);
+    }
+    else
+    {
+        hpLeft.clear();
+        hpRight.clear();
+    }
+
+    // F3: the type switch is a small state machine, one step per block
+    switch (typeSwitch.step(requestedType))
+    {
+        case seqfx::TypeSwitch::ACT_FADE_OUT:
+            runType(l, r);
+            for (int s = 0; s < AUDIO_BLOCK_SAMPLES; s++)
+            {
+                int32_t gain = AUDIO_BLOCK_SAMPLES - s; // 128 .. 1
+                l[s] = (int16_t)((l[s] * gain) >> 7);
+                r[s] = (int16_t)((r[s] * gain) >> 7);
+            }
+            break;
+        case seqfx::TypeSwitch::ACT_CLEAR:
+            for (int s = 0; s < AUDIO_BLOCK_SAMPLES; s++)
+                l[s] = r[s] = 0;
+            if (clearStep())
+            {
+                typeSwitch.clearFinished();
+                if (typeSwitch.active == seqfx::RT_STOCK)
+                    reverb.ResetState();
+                else
+                    ring.resetState();
+                ringDirty = true;
+            }
+            break;
+        case seqfx::TypeSwitch::ACT_FADE_IN:
+            runType(l, r);
+            for (int s = 0; s < AUDIO_BLOCK_SAMPLES; s++)
+            {
+                int32_t gain = s + 1; // 1 .. 128
+                l[s] = (int16_t)((l[s] * gain) >> 7);
+                r[s] = (int16_t)((r[s] * gain) >> 7);
+            }
+            break;
+        default: runType(l, r); break;
+    }
 
     transmit(block_left, 0);
     transmit(block_right, 1);
@@ -56,10 +131,95 @@ AUDIO_CORE_RAM void AudioEffectPolyverb::update(void)
     release(block_right);
 }
 
+AUDIO_CORE_RAM void AudioEffectPolyverb::runType(int16_t* l, int16_t* r)
+{
+    if (typeSwitch.active == seqfx::RT_PLINKY)
+    {
+        if (ringDirty)
+        {
+            ringDirty = false;
+            ring.setParams(seqfx::ringFade(size_), seqfx::ringColor(damp_), seqfx::ringApGain(diffusion_),
+                           seqfx::ringPredelay(predelay_));
+        }
+        ring.process(l, r, AUDIO_BLOCK_SAMPLES);
+    }
+    else
+    {
+        reverb.Process(l, r, AUDIO_BLOCK_SAMPLES);
+    }
+}
+
+// Clears 8 KB of the memory of typeSwitch.clearType per call; true when everything is clean. The stock reverb has two buffers;
+// the ring reverb is one block (original Tracker) or the same two stock buffers plus the small pre-delay line (Plus / Mini).
+AUDIO_CORE_RAM bool AudioEffectPolyverb::clearStep()
+{
+    uint8_t* seg[3];
+    uint32_t len[3];
+    int n = 0;
+#if defined(PLATFORM_IMX)
+    seg[n] = (uint8_t*)buffer;
+    len[n++] = 16384 * sizeof(uint16_t); // internalRamReverbBuff
+    seg[n] = (uint8_t*)buffer2;
+    len[n++] = 16384 * sizeof(uint16_t); // externalRamReverbBuff (REVERB_MEMORY_SIZE)
+    if (typeSwitch.clearType == seqfx::RT_PLINKY)
+    {
+        seg[n] = (uint8_t*)ringPreMemory;
+        len[n++] = sizeof(ringPreMemory);
+    }
+#else
+    if (typeSwitch.clearType == seqfx::RT_PLINKY)
+    {
+        seg[n] = (uint8_t*)ringReverbMemory;
+        len[n++] = sizeof(ringReverbMemory);
+    }
+    else
+    {
+        seg[n] = (uint8_t*)buffer;
+        len[n++] = 16384 * sizeof(uint16_t); // internalRamReverbBuff
+        seg[n] = (uint8_t*)buffer2;
+        len[n++] = 16384 * sizeof(uint16_t); // externalRamReverbBuff (REVERB_MEMORY_SIZE)
+    }
+#endif
+    int which = 0;
+    uint32_t start = 0;
+    uint32_t m = seqfx::nextClearPiece(len, n, typeSwitch.clearOffset, 8192, &which, &start);
+    if (m)
+        memset(seg[which] + start, 0, m);
+    return typeSwitch.clearOffset >= seqfx::clearTotal(len, n);
+}
+
+AUDIO_CORE_FLASH void AudioEffectPolyverb::setHighpass(uint8_t idx)
+{
+    float hz = seqfx::hpHz(idx);
+    if (hz <= 0.0f)
+    {
+        hpControl.targetMix = 0.0f;
+        return;
+    }
+    hpControl.targetOct = log2f(hz);
+    hpControl.targetQ = seqfx::kHpQ;
+    hpControl.targetMix = 1.0f;
+}
+
 AUDIO_CORE_FLASH void AudioEffectPolyverb::reset(void)
 {
     isBlockedUpdate = true;
-    reverb.Reset();
+    typeSwitch.jumpTo(requestedType);
+    if (typeSwitch.active == seqfx::RT_PLINKY)
+    {
+#if defined(PLATFORM_IMX)
+        reverb.Reset(); // clears the two stock buffers, which hold the ring here
+        memset(ringPreMemory, 0, sizeof(ringPreMemory));
+#else
+        memset(ringReverbMemory, 0, sizeof(ringReverbMemory));
+#endif
+        ring.resetState();
+        ringDirty = true;
+    }
+    else
+    {
+        reverb.Reset();
+    }
     isBlockedUpdate = false;
 }
 

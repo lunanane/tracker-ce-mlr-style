@@ -13,6 +13,7 @@
 #include "mtStructs.h"
 #include "sampleRecorder/sampleRecorder.h"
 #include "tempoSyncRateValues.h"
+#include "seqFxLogic.h"
 #include "util.h"
 #include <Recorder.h>
 
@@ -1073,6 +1074,18 @@ void audioEngine::setReverbPredelay(float value)
 void audioEngine::setReverbDiffusion(float value)
 {
     polyverb->SetDiffusion(value);
+}
+void audioEngine::setDelayFilterWidth(uint8_t twelfthsOfAnOctave)
+{
+    delay->setFilterWidth(seqfx::bwOctaves(twelfthsOfAnOctave));
+}
+void audioEngine::setReverbHighpass(uint8_t index)
+{
+    polyverb->setHighpass(index);
+}
+void audioEngine::setReverbType(uint8_t type)
+{
+    polyverb->setType(type);
 }
 
 void audioEngine::setLimiterAttack(uint16_t attack)

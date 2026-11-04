@@ -1,6 +1,7 @@
 #ifndef LIBS_AUDIO_EFFECT_SHORTDELAY_H_
 #define LIBS_AUDIO_EFFECT_SHORTDELAY_H_
 #include "AudioStream.h"
+#include "seqFxLogic.h"
 
 constexpr uint8_t MAX_SHORT_DELAY_VOICES = 12;
 constexpr uint16_t MAX_SHORT_DELAY_TIME = 3500;
@@ -28,7 +29,10 @@ class AudioEffectShortDelay : public AudioStream
     void setRate(uint8_t r);
     void setPingpongEnable(bool pp);
     void setSyncEnable(bool se);
+    // Plan 007 F1: the filter in the feedback loop is a bandpass. frequency = centre in Hz (>= seqfx::kOpenHz: out of the signal
+    // path, the stock "open" setting), width in octaves. Both move smoothly (block-rate smoothing, no clicks).
     void setFilterFrequency(float frequency);
+    void setFilterWidth(float octaves);
     virtual void update(void);
     bool process(int16_t input[], int16_t outputLeft[], int16_t outputRight[], int sampleCount);
     void clear();
@@ -40,16 +44,7 @@ class AudioEffectShortDelay : public AudioStream
     }
 
   private:
-    struct FilterCoeffs
-    {
-        int32_t a0;
-        int32_t a1;
-        int32_t b1;
-    };
-
-    static constexpr int kFilterCoeffsShift = 10;
     static constexpr int kFeedbackShift = 8;
-    static constexpr uint16_t kMaxFilterCoeff = (1 << kFilterCoeffsShift) - 1;
     static constexpr float kMaxFeedback = 0.99f;
     static constexpr uint32_t delaylineLengthMask = MAX_DELAYLINE_LENGTH - 1;
     int16_t* pingpongDelaylineRight;
@@ -63,13 +58,11 @@ class AudioEffectShortDelay : public AudioStream
     uint8_t
       isPingpong; // uint8_t allows to use conditionally execution instead conditionally branch
     bool isSync;
-    FilterCoeffs filterCoeffs;
-    int32_t lastFilterInRight;
-    int32_t lastFilterInLeft;
-    int32_t lastFilterInMono;
-    int32_t lastFilterOutRight;
-    int32_t lastFilterOutLeft;
-    int32_t lastFilterOutMono;
+    seqfx::FilterControl bandpassControl;
+    seqfx::SvfState bandpassRight;
+    seqfx::SvfState bandpassLeft;
+    seqfx::SvfState bandpassMono;
+    float filterWidthOctaves = 1.0f;
     uint32_t silentSamplesCount = MAX_DELAYLINE_LENGTH;
 };
 

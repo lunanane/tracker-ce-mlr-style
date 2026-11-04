@@ -16,6 +16,7 @@
 #include "performanceMode/performanceFx.h"
 #include "performanceMode/performanceMode.h"
 #include "seqTracks.h"
+#include "seqFx.h"
 
 using namespace seqperf;
 
@@ -38,6 +39,10 @@ static void projectChanged()
 {
     newFileManager.setProjectStructChanged();
 }
+
+// PING page, column 10, rows 3 and 4 (CELL_NONE in seqperf::mapPad): ping-pong on / off, tempo sync on / off
+static constexpr uint8_t kPadPingPong = 2 * 12 + 9;
+static constexpr uint8_t kPadSync = 3 * 12 + 9;
 
 //----------------------------------------------------------------------------------------------
 // Entry. The fader state (dialled-in FX) is NOT saved with the project and starts off. It lives in this long-lived object so FX
@@ -781,7 +786,20 @@ void cSeqPerform::padEvent(uint8_t pad, uint8_t state)
                     faderDisengage(p.index);
                 }
                 break;
-            default: break;
+            default:
+                // plan 007: the two free pads of column 10 on the PING page (they used to be the jog wheel): ping-pong and sync
+                if (page == PAGE_PING && (pad == kPadPingPong || pad == kPadSync))
+                {
+                    auto& v = mtProject.values;
+                    const uint8_t bit = pad == kPadPingPong ? 0x80 : 0x40;
+                    v.delayParams = (uint8_t)(v.delayParams ^ bit);
+                    engine.setDelayParams(v.delayParams);
+                    if (pad == kPadSync && (v.delayParams & 0x40))
+                        engine.setDelayTime(v.delayTime);
+                    projectChanged();
+                    screenDirty = true;
+                }
+                break;
         }
     }
     else if (state == 0 && p.cell == CELL_FADER)
@@ -806,8 +824,9 @@ void cSeqPerform::trackButton(uint8_t button)
     screenDirty = true;
 }
 
-// Jog wheel (the screen buttons select tracks): PING: ping-pong on/off, Shift = tempo sync on/off;
-// REV: diffusion.
+// Jog wheel (the screen buttons select tracks). Plan 007: PING: jog = the delay bandpass centre (the same value as fader 4),
+// Shift + jog = its width (1/3 .. 3 octaves). REV: jog = the reverb highpass (low cut), Shift + jog = diffusion. Ping-pong and
+// tempo sync moved to two pads of the PING page (padEvent).
 void cSeqPerform::jog(int16_t value)
 {
     auto& v = mtProject.values;
@@ -817,34 +836,32 @@ void cSeqPerform::jog(int16_t value)
     {
         if (shiftHeld())
         {
-            if (value > 0)
-                v.delayParams |= 0x40;
-            else
-                v.delayParams &= (uint8_t)~0x40;
-            engine.setDelayParams(v.delayParams);
-            if (value > 0)
-                engine.setDelayTime(v.delayTime);
+            seqFxSetBandwidth(seqfx::jogWidth(seqFxBandwidth(), value)); // saved with the project (sidecar), never written while playing
         }
         else
         {
-            if (value > 0)
-                v.delayParams |= 0x80;
-            else
-                v.delayParams &= (uint8_t)~0x80;
-            engine.setDelayParams(v.delayParams);
+            v.delayFilterFrequency = seqfx::jogCenter(v.delayFilterFrequency, value);
+            engine.setDelayFilterFrequency(v.delayFilterFrequency);
+            projectChanged();
         }
-        projectChanged();
     }
     else if (page == PAGE_REV)
     {
-        float d = v.reverb.diffusion + 0.0085f * value;
-        if (d > REVERB_DIFFUSION_MAX)
-            d = REVERB_DIFFUSION_MAX;
-        if (d < REVERB_DIFFUSION_MIN)
-            d = REVERB_DIFFUSION_MIN;
-        v.reverb.diffusion = d;
-        engine.setReverbDiffusion(d);
-        projectChanged();
+        if (shiftHeld())
+        {
+            float d = v.reverb.diffusion + 0.0085f * value;
+            if (d > REVERB_DIFFUSION_MAX)
+                d = REVERB_DIFFUSION_MAX;
+            if (d < REVERB_DIFFUSION_MIN)
+                d = REVERB_DIFFUSION_MIN;
+            v.reverb.diffusion = d;
+            engine.setReverbDiffusion(d);
+            projectChanged();
+        }
+        else
+        {
+            seqFxSetHighpass(seqfx::jogHp(seqFxHighpass(), value));
+        }
     }
     screenDirty = true;
 }
@@ -910,6 +927,11 @@ void cSeqPerform::refreshPads()
         out[padOf(row, 10)] = (page > PAGE_FX3 && row > 0) ? 0 : (st.latch[page][row] ? 30 : 4);
         out[padOf(row, 11)] = usable ? (padIsLit(mapPad(padOf(row, 11)), page, false, st.engaged(page, row)) ? 30 : 4) : 0; // DISENGAGE: bright = it will take something off
     }
+    if (page == PAGE_PING)
+    {
+        out[kPadPingPong] = (mtProject.values.delayParams & 0x80) ? 30 : 4;
+        out[kPadSync] = (mtProject.values.delayParams & 0x40) ? 30 : 4;
+    }
     const uint8_t dialled = st.pageMask();
     for (uint8_t i = 0; i < 48; i++)
     {
@@ -937,6 +959,22 @@ static void khz(char* out, size_t n, int hz)
         snprintf(out, n, "%d.%d kHz", hz / 1000, (hz % 1000) / 100);
     else
         snprintf(out, n, "%d Hz", hz);
+}
+
+// the delay bandpass center: the top of the range is "open" (the filter is out of the signal path, as in stock)
+static void centreText(char* out, size_t n, int hz)
+{
+    if (seqfx::centerOpen((uint16_t)hz))
+        snprintf(out, n, "open");
+    else
+        khz(out, n, hz);
+}
+
+// bandwidth in octaves, one decimal ("1.0 oct")
+static void widthText(char* out, size_t n, uint8_t twelfths)
+{
+    int tenths = (twelfths * 10 + 6) / 12;
+    snprintf(out, n, "%d.%d oct", tenths / 10, tenths % 10);
 }
 
 void cSeqPerform::refreshScreen()
@@ -967,6 +1005,9 @@ void cSeqPerform::refreshScreen()
     mix(v.delayTime);
     mix(v.delayFeedback);
     mix(v.delayFilterFrequency);
+    mix(seqFxBandwidth());
+    mix(seqFxHighpass());
+    mix(seqFxReverbType());
     mix((uint32_t)(v.reverb.size * 1000));
     mix((uint32_t)(v.reverb.damp * 1000));
     mix((uint32_t)(v.reverb.predelay * 1000));
@@ -1071,8 +1112,8 @@ void cSeqPerform::refreshScreen()
                 }
                 else
                 {
-                    snprintf(b.name, sizeof(b.name), "Filter");
-                    khz(b.value, sizeof(b.value), (int)v.delayFilterFrequency);
+                    snprintf(b.name, sizeof(b.name), "BP center");
+                    centreText(b.value, sizeof(b.value), (int)v.delayFilterFrequency);
                 }
             }
             else
@@ -1083,7 +1124,27 @@ void cSeqPerform::refreshScreen()
             }
             const char* how = b.status == RS_DIALLED ? "dialled in with the fader (DISENGAGE restores the earlier value)"
                                                      : "project value (saved with the project)";
-            snprintf(b.note, sizeof(b.note), "%s", how);
+            if (page == PAGE_PING && r == 3)
+            {
+                char w[16];
+                widthText(w, sizeof(w), seqFxBandwidth());
+                snprintf(b.note, sizeof(b.note), "jog = center   Shift+jog = width %s   %s", w,
+                         b.status == RS_DIALLED ? "dialled in" : "project value");
+            }
+            else if (page == PAGE_REV && r == 3)
+            {
+                char h[16];
+                if (seqFxHighpass() == 0)
+                    snprintf(h, sizeof(h), "off");
+                else
+                    khz(h, sizeof(h), (int)(seqfx::hpHz(seqFxHighpass()) + 0.5f));
+                snprintf(b.note, sizeof(b.note), "jog = low cut %s   Shift+jog = diffusion   %s", h,
+                         b.status == RS_DIALLED ? "dialled in" : "project value");
+            }
+            else
+            {
+                snprintf(b.note, sizeof(b.note), "%s", how);
+            }
         }
         static const char* const kState[5] = { "DISENGAGED", "ENGAGED", "LATCHED", "PROJECT", "DIALLED" };
         snprintf(b.state, sizeof(b.state), "%s", kState[b.status]);
@@ -1096,21 +1157,23 @@ void cSeqPerform::refreshScreen()
     dialledFx += (st.sendStep[0] ? 1 : 0) + (st.sendStep[1] ? 1 : 0);
     if (page == PAGE_PING)
     {
-        char f[16];
-        khz(f, sizeof(f), (int)v.delayFilterFrequency);
-        if (v.delayParams & 0x40)
-            snprintf(vw.summary, sizeof(vw.summary), "PING  rate %s  fb %d  filter %s  ping-pong %s  sync ON  (jog, Shift+jog)",
-                     kRateNames[(v.delayParams & 0x3F) < 19 ? (v.delayParams & 0x3F) : 18], (int)v.delayFeedback, f,
-                     (v.delayParams & 0x80) ? "ON" : "off");
-        else
-            snprintf(vw.summary, sizeof(vw.summary), "PING  time %d ms  fb %d  filter %s  ping-pong %s  sync off  (jog, Shift+jog)",
-                     (int)v.delayTime, (int)v.delayFeedback, f, (v.delayParams & 0x80) ? "ON" : "off");
+        char f[16], w[16];
+        centreText(f, sizeof(f), (int)v.delayFilterFrequency);
+        widthText(w, sizeof(w), seqFxBandwidth());
+        snprintf(vw.summary, sizeof(vw.summary), "PING  %s center %s   %s width %s   ping-pong %s  sync %s",
+                 shiftView ? "jog:" : "[jog]", f, shiftView ? "[Shift+jog]" : "Shift+jog:", w,
+                 (v.delayParams & 0x80) ? "ON" : "off", (v.delayParams & 0x40) ? "ON" : "off");
     }
     else if (page == PAGE_REV)
     {
-        snprintf(vw.summary, sizeof(vw.summary), "REV  size %d  damp %d  predelay %d  diffusion %d (jog)",
-                 (int)(v.reverb.size * 100 + 0.5f), (int)(v.reverb.damp * 100 + 0.5f), (int)(v.reverb.predelay * 100 + 0.5f),
-                 (int)(v.reverb.diffusion * 100 / 0.85f + 0.5f));
+        char h[16];
+        if (seqFxHighpass() == 0)
+            snprintf(h, sizeof(h), "off");
+        else
+            khz(h, sizeof(h), (int)(seqfx::hpHz(seqFxHighpass()) + 0.5f));
+        snprintf(vw.summary, sizeof(vw.summary), "REV  %s low cut %s   %s diffusion %d   type %s", shiftView ? "jog:" : "[jog]", h,
+                 shiftView ? "[Shift+jog]" : "Shift+jog:", (int)(v.reverb.diffusion * 100 / 0.85f + 0.5f),
+                 seqfx::reverbTypeName(seqFxReverbType()));
     }
     else
     {

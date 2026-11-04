@@ -412,14 +412,14 @@ slot 5 pan, slot 9 tune).
 ## 11c. PING (delay) and REV (reverb)
 | Press | Expected |
 |---|---|
-| Tap **PING** | Chip PING filled; faders: 1 delay send (DISENGAGED until used), 2 time (or rate when sync is on), 3 feedback, 4 filter - bars 2-4 show the current project values, state PROJECT (default time 500 ms = pad 3, feedback 50 = pad 5, filter 20000 = pad 8). The bottom strip lists time, fb, filter, ping-pong and sync. |
+| Tap **PING** | Chip PING filled; faders: 1 delay send (DISENGAGED until used), 2 time (or rate when sync is on), 3 feedback, 4 bandpass center - bars 2-4 show the current project values, state PROJECT (default time 500 ms = pad 3, feedback 50 = pad 5, center 20000 = pad 8 = "open", the filter is out). The bottom strip shows what the jog wheel changes (v0.2.4, see 11e) and ping-pong / sync. |
 | Hold pad 6 of fader 1, release | Delay send of the selected tracks goes up (+63) while held, back to normal on release (LATCH keeps it). |
 | Press pad 2 / 5 / 8 of fader 2 (sync off) | Delay time changes (about 219 / 1367 / 3500 ms) and STAYS after releasing; the band shows ms and the state DIALLED. |
-| Jog wheel right / left | Ping-pong on / off (bottom strip shows it); audible stereo bounce. |
-| Shift + jog wheel right | Sync on: fader 2 is now the rate (band "Rate 1/8" etc.), pad 1 = "8", pad 8 = "1/32". Shift + jog left = sync off. |
-| Fader 3 pad 8 | Feedback 99 (long repeats); fader 4 pad 1 = about 194 Hz (dull repeats). |
-| **DISENGAGE** of row 2/3/4 after you moved it with the fader | The value it had BEFORE your first fader press comes back (time and rate index, feedback, filter), state PROJECT again; a second DISENGAGE does nothing. On a row you never touched DISENGAGE does nothing. Row 1 (send): off. |
-| Tap **REV** | Fader 1 reverb send of the selected tracks; 2 size, 3 damp, 4 predelay (0-100); jog wheel = diffusion; the bottom strip shows it. DISENGAGE restores the value from before the fader touched it. |
+| Pad row 3, column 10 (below REV; v0.2.4: it used to be the jog wheel) | Ping-pong on / off (the pad is bright when on, the bottom strip shows it); audible stereo bounce. |
+| Pad row 4, column 10 | Sync on: fader 2 is now the rate (band "Rate 1/8" etc.), pad 1 = "8", pad 8 = "1/32". Tap again = sync off. (Both pads are dark on the other pages.) |
+| Fader 3 pad 8 | Feedback 99 (long repeats); fader 4 pad 1 = a band around 194 Hz (dull, thin repeats), see 11e. |
+| **DISENGAGE** of row 2/3/4 after you moved it with the fader | The value it had BEFORE your first fader press comes back (time and rate index, feedback, bandpass center), state PROJECT again; a second DISENGAGE does nothing. On a row you never touched DISENGAGE does nothing. Row 1 (send): off. |
+| Tap **REV** | Fader 1 reverb send of the selected tracks; 2 size, 3 damp, 4 predelay (0-100); jog wheel = low cut (highpass), Shift + jog = diffusion (v0.2.4, see 11e); the bottom strip shows it. DISENGAGE restores the value from before the fader touched it. |
 | Change PING / REV values, save the project, power off, open it | The values are saved with the project (same as changing them on the Master page); open the Master page: it shows the same values. The fader positions / latches / engaged state are NOT saved: after loading, the fader page is all DISENGAGED / PROJECT. |
 | No volume or panning on this page | Correct (owner decision). |
 
@@ -450,6 +450,34 @@ Setup: tracks 1 and 2 selected, a filter on slot 1, a volume FX on slot 2; latch
 | From the Pattern editor (FX kept) go on to File / Config / Sample pages | The kept FX follow the stock rule: they end at the pattern end while playing, at once when stopped; Master / Params / Song / Pattern / Performance keep or hand over as above. |
 | On the stock page hold Shift while pressing Performance (to the fader page), keep Shift down and press a pad / jog | Shift is ignored until you release it once (no accidental Shift + DISENGAGE or Shift jog). |
 | Leave the fader page while playing (any button) | No SD / config write at that moment; DISENGAGE of a stock pad row marks the perform data, written after Stop. Device test: moving a PING / REV fader 2-4 sets the project changed flag, so the stock 10 s autosave can run while playing (same as the Master page). Watch for stream hiccups. |
+
+## 11e. FX filters: delay bandpass, reverb low cut, reverb type "Plinky" (plan 007, v0.2.4)
+Listen on headphones or monitors, with a drum loop or a held noisy sound sent to the delay and the reverb (send faders up). Lower the
+return volumes first: a bandpass, a low cut or the other reverb type changes the level.
+
+| Check | Expected |
+|---|---|
+| **Delay bandpass.** PING page, ping-pong on, feedback about 60, a full-range loop in the delay. Turn the jog wheel left from the top (the bottom strip shows `[jog] center ...`, the fader 4 bar follows) | At the top ("open", 20 kHz) the delay sounds as before v0.2.4. A step down from there the repeats lose lows and highs; the further down, the more the repeats are a narrow band that moves with the wheel. Each click is one semitone; no clicks or zipper noise while turning fast, also with high feedback. |
+| Press fader 4 pads 1 .. 8 while repeats ring | The center jumps in octaves (194 Hz ... 20 kHz open) and the repeats follow smoothly (no click); the jog wheel then continues from that value, the Master page delay filter shows the same value in Hz (and the other way round). |
+| **Width.** Hold **Shift** and turn the jog wheel (the strip shows `[Shift+jog] width 1.0 oct`) | Right = wider (up to 3.0 oct, almost the whole spectrum), left = narrower (down to 0.3 oct, a ringing thin band). Default 1.0 oct. The value stops at both ends. No clicks while turning. |
+| Narrow (0.3 oct) with the center at about 1 kHz and feedback 80 | The repeats turn into a whistle-like band, they never get louder than the input (no runaway). |
+| Center to the top end again | The band widens to "open" without a click (the filter is faded out over a few milliseconds). |
+| **Saved.** Set center 800 Hz and width 2.0 oct, Save, power off, load the project | Same center and width after loading (the width is stored in `seqfx.bin` next to the project). A project made before v0.2.4 (no `seqfx.bin`) loads with the width 1.0 oct and its old center; if that was 20000 the delay sounds exactly as before. |
+| Turn the width while the transport plays, do not stop for 30 s | No SD write happens while playing (no stream hiccups); the file is written some moments after Stop (or on Save). |
+| **Reverb low cut.** REV page, a sound with plenty of bass (kick, bass line) in the reverb send | Jog wheel right: the low cut rises from off (strip shows `low cut off`, then 30 Hz ... 1.8 kHz in semitone steps); the rumble of the reverb leaves first, then the body. Left = lower, back to off at the left end. No clicks while turning, also while a tail rings. |
+| Low cut at about 500 Hz, then Shift + jog | Shift + jog now changes the diffusion (strip: `[Shift+jog] diffusion NN`), jog alone still the low cut. The REV fader 4 note shows both values (`jog = low cut ... Shift+jog = diffusion`). |
+| Low cut with the reverb type Stock and with Plinky | It works with both (it filters the reverb input); predelay and damp keep working as before. |
+| **Saved.** Set a low cut, Save, power off, load | The low cut is back; a project without `seqfx.bin` has no low cut. |
+| **Reverb type.** Master page > Reverb: the new last item **Type** (screen button 6): Stock / Plinky; the wheel changes it, the Default key (wheel press) sets Stock | Switching Stock -> Plinky while a tail rings: the tail fades out within about 3 ms, then about 30 ms of silence, then the new reverb fades in. No click, no noise burst, no sound stuck from the old reverb. Plinky -> Stock the same. Switch back and forth quickly (10 times): never a click or a hung sound. |
+| Plinky type: size 0 / 50 / 100 | No tail / medium (a few seconds) / long (more than 5 s, it still dies out). Level is about the same as Stock at the same send. |
+| Plinky type: damp 0 / 100 | Bright / dark (about 18 kHz down to 400 Hz). |
+| Plinky type: predelay 0 / 100 | Adds up to about 90 ms before the reverb starts (the Stock reverb: up to about 110 ms). On the Tracker Plus / Mini the Plinky type has only up to about 23 ms (memory), the pad / bar still spans 0-100. |
+| Plinky type: diffusion 0 / 68 / 85 | Few distinct echoes / the original sound (68 = default) / smoothest. |
+| Plinky type with 8+ voices and the delay playing at the same time (a dense pattern, ping-pong on, bandpass on, reverb sends up) for 5 minutes | No audio drop-outs, clicks or stutter; the UI stays responsive (device test of the CPU budget). |
+| **Saved.** Type Plinky, Save, power off, load. Then load an old project | Plinky after loading the project that was saved with it; the old project (no `seqfx.bin`) is Stock and sounds as it did before v0.2.4. |
+| Export (stems) with the Plinky type | The reverb stem contains the Plinky reverb. |
+
+Known (v0.2.4): the ping-pong and sync switches are two pads on the PING page now (the jog wheel changed its job); the stock 10 s autosave still writes while playing when the delay center is changed (a stock project value); width, low cut and type are written only after Stop.
 
 # Stock-behaviour checks (section 12) — run last, and after every change
 A project with no sequencer set and no Session use must behave exactly like stock CE.

@@ -182,6 +182,15 @@ class Reverb
         predelay_length_ = length * predelay_buffer_size_;
     }
 
+    // plan 007: filter / activity state only (the audio engine clears the delay memory itself, in small pieces)
+    inline void ResetState()
+    {
+        lp_decay_0_ = 0;
+        lp_decay_1_ = 0;
+        lp_decay_2_ = 0;
+        last_update_delta_ = sound_delta_threshold_;
+    }
+
     inline void Reset()
     {
         engine_.Reset();

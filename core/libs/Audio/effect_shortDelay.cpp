@@ -24,6 +24,7 @@ AUDIO_CORE_FLASH void AudioEffectShortDelay::begin(float feedback,
     setFeedback(feedback);
     setRate(syncRateIdx);
     setFilterFrequency(frequency);
+    bandpassControl.restart(); // the first block starts at the loaded value, no sweep from the defaults
 
     setBuffer(externalRamDelayBuff);
     unblockUpdate();
@@ -90,19 +91,17 @@ AUDIO_CORE_FLASH void AudioEffectShortDelay::setSyncEnable(bool syncEnabled)
 
 AUDIO_CORE_FLASH void AudioEffectShortDelay::setFilterFrequency(float frequency)
 {
-    float Qc = 2 * M_PI * frequency / 44100.0f;
-    float y = (cosf(Qc) / (1 + sinf(Qc)));
+    if (frequency < seqfx::kCenterMinHz)
+        frequency = seqfx::kCenterMinHz;
+    bandpassControl.targetOct = log2f(frequency);
+    bandpassControl.targetQ = seqfx::bwToQ(filterWidthOctaves);
+    bandpassControl.targetMix = frequency >= seqfx::kOpenHz ? 0.0f : 1.0f;
+}
 
-    filterCoeffs.a0 = kMaxFilterCoeff * ((1.0f - y) / 2.0f);
-    filterCoeffs.a1 = filterCoeffs.a0;
-    filterCoeffs.b1 = kMaxFilterCoeff * (-y);
-
-    lastFilterInLeft = 0;
-    lastFilterInRight = 0;
-    lastFilterInMono = 0;
-    lastFilterOutLeft = 0;
-    lastFilterOutRight = 0;
-    lastFilterOutMono = 0;
+AUDIO_CORE_FLASH void AudioEffectShortDelay::setFilterWidth(float octaves)
+{
+    filterWidthOctaves = octaves;
+    bandpassControl.targetQ = seqfx::bwToQ(octaves);
 }
 
 AUDIO_CORE_FLASH void AudioEffectShortDelay::clear()
@@ -110,12 +109,9 @@ AUDIO_CORE_FLASH void AudioEffectShortDelay::clear()
     blockUpdate();
     //    AudioNoInterrupts();
     headIdx = 0;
-    lastFilterInLeft = 0;
-    lastFilterInRight = 0;
-    lastFilterInMono = 0;
-    lastFilterOutLeft = 0;
-    lastFilterOutRight = 0;
-    lastFilterOutMono = 0;
+    bandpassLeft.clear();
+    bandpassRight.clear();
+    bandpassMono.clear();
     silentSamplesCount = MAX_DELAYLINE_LENGTH;
 
     memset(pingpongDelaylineRight, 0, MAX_DELAYLINE_LENGTH * sizeof(int16_t));
@@ -190,6 +186,18 @@ AUDIO_CORE_RAM bool AudioEffectShortDelay::process(int16_t input[],
     int32_t newDelayedSampleRight = 0;
     int32_t newDelayedSampleMono = 0;
 
+    // bandpass in the feedback loop: the control is smoothed once per block; out of the path (mix 0) it costs nothing
+    bandpassControl.blockUpdate();
+    const float filterMix = bandpassControl.mix();
+    const bool filterOn = filterMix > 0.0f;
+    const seqfx::SvfCoef bp = bandpassControl.coef();
+    if (!filterOn)
+    {
+        bandpassLeft.clear();
+        bandpassRight.clear();
+        bandpassMono.clear();
+    }
+
     for (int sample = 0; sample < sampleCount; sample++)
     {
         uint32_t delayedSampleIdx = (headIdx - timeInSamples) & delaylineLengthMask;
@@ -197,25 +205,19 @@ AUDIO_CORE_RAM bool AudioEffectShortDelay::process(int16_t input[],
         int16_t delayedSampleLeft = pingpongDelaylineLeft[delayedSampleIdx];
         int16_t delayedSampleMono = monoDelayline[delayedSampleIdx];
 
-        int32_t filteredSampleRight =
-          (filterCoeffs.a0 * delayedSampleRight + filterCoeffs.a1 * lastFilterInRight -
-           filterCoeffs.b1 * lastFilterOutRight) /
-          (1 << kFilterCoeffsShift);
-        int32_t filteredSampleLeft =
-          (filterCoeffs.a0 * delayedSampleLeft + filterCoeffs.a1 * lastFilterInLeft -
-           filterCoeffs.b1 * lastFilterOutLeft) /
-          (1 << kFilterCoeffsShift);
-        int32_t filteredSampleMono =
-          (filterCoeffs.a0 * delayedSampleMono + filterCoeffs.a1 * lastFilterInMono -
-           filterCoeffs.b1 * lastFilterOutMono) /
-          (1 << kFilterCoeffsShift);
-
-        lastFilterInRight = delayedSampleRight;
-        lastFilterInLeft = delayedSampleLeft;
-        lastFilterInMono = delayedSampleMono;
-        lastFilterOutRight = filteredSampleRight;
-        lastFilterOutLeft = filteredSampleLeft;
-        lastFilterOutMono = filteredSampleMono;
+        int32_t filteredSampleRight = delayedSampleRight;
+        int32_t filteredSampleLeft = delayedSampleLeft;
+        int32_t filteredSampleMono = delayedSampleMono;
+        if (filterOn)
+        {
+            float xr = (float)delayedSampleRight, xl = (float)delayedSampleLeft, xm = (float)delayedSampleMono;
+            float yr = xr + filterMix * (seqfx::bandpass(bandpassRight, bp, xr) - xr);
+            float yl = xl + filterMix * (seqfx::bandpass(bandpassLeft, bp, xl) - xl);
+            float ym = xm + filterMix * (seqfx::bandpass(bandpassMono, bp, xm) - xm);
+            filteredSampleRight = signed_saturate_rshift((int32_t)yr, 16, 0);
+            filteredSampleLeft = signed_saturate_rshift((int32_t)yl, 16, 0);
+            filteredSampleMono = signed_saturate_rshift((int32_t)ym, 16, 0);
+        }
 
         int16_t outL = isPingpong ? filteredSampleLeft : filteredSampleMono;
         int16_t outR = isPingpong ? filteredSampleRight : filteredSampleMono;
@@ -262,6 +264,13 @@ AUDIO_CORE_RAM bool AudioEffectShortDelay::process(int16_t input[],
         pingpongDelaylineLeft[headSampleIdx] = saturatedLeft;
         pingpongDelaylineRight[headSampleIdx] = saturatedRight;
         monoDelayline[headSampleIdx] = saturatedMono;
+    }
+
+    if (filterOn)
+    {
+        seqfx::svfFlush(bandpassLeft);
+        seqfx::svfFlush(bandpassRight);
+        seqfx::svfFlush(bandpassMono);
     }
 
     return true;
