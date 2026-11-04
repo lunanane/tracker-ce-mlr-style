@@ -13,7 +13,7 @@
 
 namespace seqsession {
 
-static_assert(seqcut::kScreenButtonSyncAll == kButtonLayer, "SYNC ALL sits on the layer's own screen button");
+static_assert((int)seqcut::kScreenButtonSyncAll == (int)kButtonLayer, "SYNC ALL sits on the layer's own screen button");
 
 class CutSessionLayer : public SessionLayer
 {
