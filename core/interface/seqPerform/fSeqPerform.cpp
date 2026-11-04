@@ -743,11 +743,11 @@ static void functPerformanceButton(uint8_t state)
                 break;
             }
         }
-        seqPerformTap.down(!othersHeld);
+        seqPerformTap.down(!othersHeld, seqNowMs());
     }
     else if (state == buttonRelease)
     {
-        if (seqPerformTap.up())
+        if (seqPerformTap.up(seqNowMs()))
             SP->leaveToStock();
     }
 }

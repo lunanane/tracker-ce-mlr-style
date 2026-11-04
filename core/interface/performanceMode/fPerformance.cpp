@@ -700,7 +700,7 @@ static void functPerformanceButton(uint8_t state)
                 break;
             }
         }
-        seqPerformTap.down(!othersHeld);
+        seqPerformTap.down(!othersHeld, seqNowMs());
         if (othersHeld)
             tapPending = false;
         functSwitchTracksPage();
@@ -708,7 +708,7 @@ static void functPerformanceButton(uint8_t state)
     else if (state == buttonRelease)
     {
 #ifndef TRACKER_MINI
-        if (!seqPerformTap.up())
+        if (!seqPerformTap.up(seqNowMs()))
         {
             tapPending = false;
         }
@@ -725,7 +725,7 @@ static void functPerformanceButton(uint8_t state)
             tapAge = 0;
         }
 #else
-        seqPerformTap.up();
+        seqPerformTap.up(seqNowMs());
 #endif
     }
 }
