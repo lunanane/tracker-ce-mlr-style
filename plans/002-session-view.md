@@ -96,3 +96,43 @@ A clip = one track's part in one pattern; a scene = a whole pattern.
 - **S2 firmware glue**: Session view page, per-track playhead override in `inc_uStep`/`switchRowStep`, retrigger
   with offset, sidecar save. Needs `make original` (owner OK).
 - **S3 cut cache** for streamed samples on the original Tracker.
+
+## C1 as built (2026-11-04, provisional where marked)
+- Code: pure logic `core/source/seqSessionLogic.h` (Launcher, Window, NoteCache, quantise, LED states, pad map; tests in
+  `core/seqtest/test_session.cpp`), firmware glue `core/source/seqLauncher.{h,cpp}`, module `core/interface/seqSession/`
+  (`seqSession.h`, `fSeqSession.cpp`, `gSeqSession.cpp`, `clipsLayer.*`, `sessionLayer.h`). Hooks: `inc_uStep` (after
+  `switchRowStep`), `play_microStep` (stopped check next to the takeover check), `switchRamPatternsNow` (pattern switched),
+  `Tracker::update`; `cFileManager::getPatternTracksWithNotes`; `eventActivateSeqSession`; Play mode's Pattern button.
+- Pattern tap cycle: Editor -> Play -> Session -> Editor. Pattern held combos in the editor are untouched.
+- Group select: screen button 1 = tracks 1-8, button 2 = tracks 9-16, Shift + any button = 9-16 (decided: simpler than 8 buttons).
+- Window: 4 patterns, jog wheel scrolls one pattern per detent (Shift = 4); on entering it shows the loaded pattern.
+- Launch: the main loop reads the clip at once (`loadPerformanceTrackToBuffer`, performance mode is switched on for the per-track
+  lengths); the audio path copies it (`switchPerformanceTrackNow`) at the track's step boundary when the quantise point hits:
+  next bar = global step % 16 == 0, pattern end = global step 0, immediate = the track's next step. Next bar / pattern end restart
+  the clip at its first step. Transport stopped: launches apply at once. File reads are refused ("Busy") while a pattern load or a
+  queued pattern switch uses the pattern buffer. SCENE = stock `sequencialSwitch` (pattern end, whatever QUANT says); stopped: at once.
+- Stop: per-track stopped mask checked in `play_microStep`; applies at the quantise point (closes the sounding note); a launch, a
+  scene / pattern switch or a transport stop clears it. An empty clip pad stops the track (Ableton) [provisional].
+- LEDs (PWM = level * 2): playing 15, queued blinks 15/0 (a pending stop blinks the playing clip), has notes 3, empty 0; the "has
+  notes" cache of the window is read one row per main-loop pass (Workspace files; the loaded pattern from RAM).
+
+### SessionLayer interface (for the CUT / MLR component)
+`core/interface/seqSession/sessionLayer.h`, namespace `seqsession`:
+```
+struct SessionLayer {
+  const char* name() const;                       // "CUT"
+  void enter(uint8_t firstTrack);                 // layer becomes visible (default: setGroup)
+  void leave();                                   // hidden / Session left: release held pads
+  void setGroup(uint8_t firstTrack);              // 0 (tracks 1-8) or 8 (tracks 9-16)
+  void pad(uint8_t col, uint8_t row, bool down);  // 0-based col 0..11, row 0..3; pad index = row * 12 + col
+  void leds(uint8_t out[48]);                     // 0..15 per pad
+  void update(uint32_t nowMs);                    // main loop, every pass while visible (optional)
+  bool jog(int16_t value, bool shift);            // true = handled (optional)
+  void info(char lines[4][48]);                   // four text lines under the title
+};
+```
+The module keeps the pads (col 11, rows 1 + 2, 1-based) as the CLIPS / CUT switch in every layer: they never reach the layer, and
+the module draws their LEDs. Everything else is the layer's. Plug in with `seqSession.setCutLayer(&myLayer)` (default
+`CutStubLayer`: "CUT - coming"). A layer runs on the main loop only; the audio side is reached through the existing `seqEngine`
+post calls or a new ring like `seqsession::Launcher`.
+
