@@ -154,6 +154,9 @@ Built around immediate playability; no separate Seq page, no Off/Live/Rec modes.
   monophonic (last chord note wins); MIDI tracks get every note. [provisional]
 - Type change while playing: applied on the first pulse of the next bar counted from Play (96 pulses). Per track one ChordArp
   and one Mono state live side by side (8.3 KB RAM for 16 tracks).
+- External clock: `Sequencer::tick` calls `Engine::blockTick` once per audio block for every clock source: it drains the command queue
+  and, while the transport is stopped or no clock pulse came for 500 ms, runs the stopped-transport logic (Mono silenced, recording
+  ended). Chord/Arp free-runs on the nano ticks only (with an external clock: only while clock pulses arrive).
 - Scale: the lowest-numbered Chord/Arp track is the scale source (`SeqContext.chord`); other Chord/Arp tracks use their own.
 - No jog-wheel parameter pages yet (play mode, swing, gate, lock, velocity pattern etc.); LCK gesture not mapped. Pad LED
   brightness = level * 2 on the single-colour pad LEDs.

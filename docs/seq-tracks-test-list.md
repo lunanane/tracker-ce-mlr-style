@@ -65,6 +65,9 @@ Use a MIDI track (9-16) with a synth/hardware on its channel, and a sample track
 | Two Chord/Arp tracks | The lower-numbered one supplies the scale to Mono tracks (C major if none). |
 | Reboot | Track types and sequencer settings come back (see section 8). |
 | Pattern playback timing with some tracks set to Mono/Chord | Pattern timing of the other tracks is steady (no hiccups). |
+| **External MIDI clock** (Config: clock source external, a drum machine as master). Transport stopped, hold a root pad on a Chord/Arp track, release it | The chord stops at the release, the pattern comes back. Pad releases never wait for a clock pulse. |
+| External clock: Mono plays, then the master stops (Stop, or just pull the clock) | Mono goes quiet within half a second (no hanging note). Starting the master again resumes it. |
+| External clock: start a punch-in Rec, then stop the master | The recording ends (info line clears). |
 
 Known limits of step A: no parameter editing on the jog wheel (only the pads). Recording and saving are step B (sections 7 and 8).
 

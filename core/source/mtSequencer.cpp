@@ -96,6 +96,8 @@ AUDIO_CORE_RAM void Sequencer::tick(float intervalSeconds)
     if (seqEngine.active())
     {
         seqEngine.advanceUs((uint32_t)(intervalSeconds * 1000000.0f));
+        // any clock source: queued pad releases, a stopped transport and a silent external clock are handled here
+        seqEngine.blockTick(player.isPlay != 0, (uint32_t)(intervalSeconds * 1000000.0f));
     }
 
     if (isSetInternalClock() || player.selectionMode)

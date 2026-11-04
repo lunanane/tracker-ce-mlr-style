@@ -67,7 +67,12 @@ class Engine
     bool active() const { return !loading_ && (activeCount_ != 0 || head_ != tail_ || rec_.active()); }
     bool isTakenOver(int row) const { return (takenMask_ >> row) & 1u; }
     void stepClock(uint16_t trackUStep); // transport running: once per uStep of track 0, before play_microStep
-    void idleTick();                     // transport stopped: once per nano tick
+    void idleTick();                     // transport stopped: once per nano tick (internal clock; external clock: only per clock pulse)
+    // Once per audio block, any clock source: drains the command queue (pad releases must not wait for a clock pulse) and,
+    // while the transport is stopped or the clock has been silent for kClockTimeoutUs, runs the stopped-transport logic
+    // (Mono silenced, recording ended).
+    void blockTick(bool transportPlaying, uint32_t us);
+    enum { kClockTimeoutUs = 500000 };
     void advanceUs(uint32_t us);         // wall time of one audio block (gate timers, blinking)
 
     // Direct (non-queued) variants, also used by the host tests.
@@ -103,6 +108,7 @@ class Engine
     bool push(const Cmd& c);
     void setPlaying(bool p);
     void pulseAll();
+    void idleLogic();
     void refresh(uint8_t track);
     void releaseAll(uint8_t track);
     void applyPending();
@@ -128,6 +134,7 @@ class Engine
     uint8_t barPulse_;
     uint8_t idleCount_;
     uint32_t usAcc_;
+    uint32_t clockSilentUs_;
 
     // record: planner + queue audio -> main
     enum { kRecRing = 32 };

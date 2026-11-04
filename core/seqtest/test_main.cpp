@@ -217,6 +217,59 @@ static void test_mono_follows_transport()
     delete e;
 }
 
+// External MIDI clock: with the transport stopped no idleTick / stepClock runs; blockTick (once per audio block) must still
+// drain queued pad releases and silence a stopped transport.
+static void test_block_tick_without_clock()
+{
+    MockHost h;
+    Engine* e = mk(h);
+    e->postType(2, TYPE_CHORDARP);
+    e->blockTick(false, 3000);
+    CHECK(e->type(2) == TYPE_CHORDARP);
+    e->postPad(2, 0, true);
+    e->blockTick(false, 3000);
+    CHECK(e->takenOver(2) && h.count('+', 2) >= 1);
+    e->postPad(2, 0, false); // release without any clock pulse
+    e->blockTick(false, 3000);
+    e->advanceUs(125000);
+    e->blockTick(false, 3000);
+    CHECK(!e->takenOver(2));
+    CHECK(h.count('+', 2) == h.count('-', 2));
+    // recording ends when the transport is stopped, also without clock pulses
+    e->postRec(2, Engine::REC_PUNCH);
+    e->blockTick(true, 3000);
+    CHECK(e->recState() == seqrec::Planner::PUNCH);
+    e->blockTick(false, 3000);
+    CHECK(e->recState() == seqrec::Planner::IDLE);
+    delete e;
+}
+
+// Playing, then the (external) clock goes silent: Mono is silenced like on a transport stop and starts again with the clock.
+static void test_clock_timeout_silences_mono()
+{
+    MockHost h;
+    Engine* e = mk(h);
+    e->postType(8, TYPE_MONO);
+    e->blockTick(false, 3000);
+    e->postPad(8, 0 + 3 * 12, true);
+    e->postPad(8, 0 + 3 * 12, false);
+    e->blockTick(false, 3000);
+    int u = 1;
+    playUSteps(*e, 48 * 2, u);
+    CHECK(e->takenOver(8) && h.count('+', 8) >= 1);
+    e->blockTick(true, 100000); // short gaps are fine
+    CHECK(e->takenOver(8));
+    for (int i = 0; i < 5; i++)
+        e->blockTick(true, 100000);
+    e->blockTick(true, 100000); // > 500 ms without a clock pulse
+    CHECK(!e->takenOver(8));
+    CHECK(h.count('+', 8) == h.count('-', 8));
+    u = 1;
+    playUSteps(*e, 48 * 2, u); // the clock returns
+    CHECK(e->takenOver(8));
+    delete e;
+}
+
 static void test_type_change_next_bar()
 {
     MockHost h;
@@ -923,6 +976,8 @@ int main()
     test_chord_takeover_stopped();
     test_chord_takeover_playing_and_pattern_returns();
     test_mono_follows_transport();
+    test_block_tick_without_clock();
+    test_clock_timeout_silences_mono();
     test_type_change_next_bar();
     test_type_change_releases_notes_and_pads();
     test_muted_track_is_silent();

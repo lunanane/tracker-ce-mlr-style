@@ -14,7 +14,7 @@ enum
 };
 
 Engine::Engine()
-  : host_(0), head_(0), tail_(0), takenMask_(0), activeCount_(0), playing_(false), barPulse_(0), idleCount_(0), usAcc_(0),
+  : host_(0), head_(0), tail_(0), takenMask_(0), activeCount_(0), playing_(false), barPulse_(0), idleCount_(0), usAcc_(0), clockSilentUs_(0),
     rHead_(0), rTail_(0), recState_(seqrec::Planner::IDLE), recTrack_(0), recHints_(0), recEnds_(0), loading_(false)
 {
     memset(ring_, 0, sizeof(ring_));
@@ -350,6 +350,7 @@ void Engine::pulseAll()
 
 void Engine::stepClock(uint16_t trackUStep)
 {
+    clockSilentUs_ = 0;
     if (activeCount_ == 0)
         playing_ = true; // keep the transport flag in step while no track runs
     drain();
@@ -368,7 +369,7 @@ void Engine::stepClock(uint16_t trackUStep)
     recPulseEnd();
 }
 
-void Engine::idleTick()
+void Engine::idleLogic()
 {
     if (activeCount_ == 0)
         playing_ = false;
@@ -380,12 +381,29 @@ void Engine::idleTick()
     }
     if (activeCount_ == 0)
         return;
-    setPlaying(false);
+    setPlaying(false); // Mono silenced (Chord/Arp keeps its free-running clock)
+}
+
+void Engine::idleTick()
+{
+    clockSilentUs_ = 0;
+    idleLogic();
+    if (activeCount_ == 0)
+        return;
     if (++idleCount_ >= 96)
     {
         idleCount_ = 0;
         pulseAll();
     }
+}
+
+void Engine::blockTick(bool transportPlaying, uint32_t us)
+{
+    drain();
+    if (clockSilentUs_ < 0xFFFFFFFFu - us)
+        clockSilentUs_ += us;
+    if (!transportPlaying || clockSilentUs_ > (uint32_t)kClockTimeoutUs)
+        idleLogic();
 }
 
 void Engine::advanceUs(uint32_t us)
