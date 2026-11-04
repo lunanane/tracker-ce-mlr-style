@@ -90,6 +90,8 @@ class audioEngine
     void setDelayFilterWidth(uint8_t twelfthsOfAnOctave);
     void setReverbHighpass(uint8_t index);
     void setReverbType(uint8_t type);
+    float getReverbCpuPercent();     // CPU of the reverb block in the audio interrupt, % of the block period (average)
+    float getReverbCpuPeakPercent(); // ... and its slowly decaying peak
     void setDelayParams(uint8_t value);
     void setLimiterAttack(uint16_t attack);
     void setLimiterRelease(float release);

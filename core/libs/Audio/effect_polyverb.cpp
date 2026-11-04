@@ -7,6 +7,17 @@
 #include <string.h>
 
 extern uint16_t externalRamReverbBuff[];
+
+// Cortex-M DWT cycle counter (M4 and M7 share the registers). Enabled here, harmless if the platform already did.
+static inline uint32_t cycleCounter()
+{
+    return *(volatile uint32_t*)0xE0001004;
+}
+#ifdef PLATFORM_IMX
+static constexpr float kBlockCycles = 600000000.0f * AUDIO_BLOCK_SAMPLES / 44100.0f;
+#else
+static constexpr float kBlockCycles = 180000000.0f * AUDIO_BLOCK_SAMPLES / 44100.0f;
+#endif
 // The ring reverb of the reverb type "Plinky" (plan 007 F3). Original Tracker: 64 KB ring + 16 KB stereo pre-delay in one block of
 // external RAM (80 KB). Tracker Plus / Mini (external RAM is full there): the ring lives in the two buffers of the stock reverb
 // (idle while this type runs) and only a 4 KB pre-delay line is added. Cleared in pieces (clearStep) every time the type is entered.
@@ -33,6 +44,8 @@ AudioEffectPolyverb::AudioEffectPolyverb()
 #else
     ring.init(ringverb::PlainRing{ ringReverbMemory }, ringReverbMemory + ringverb::kRingSize);
 #endif
+    *(volatile uint32_t*)0xE000EDFC |= (1u << 24); // DEMCR.TRCENA
+    *(volatile uint32_t*)0xE0001000 |= 1u;         // DWT_CTRL.CYCCNTENA
     reverb.SetInputGain(0.1f);
     reverb.SetDiffusion(0.625f);
     setTime(0.7f);
@@ -67,13 +80,16 @@ AUDIO_CORE_RAM void AudioEffectPolyverb::update(void)
     int16_t* r = block_right->data;
 
     // F2: highpass on the reverb input (both types). Smoothed centre, out of the path (mix 0) it costs nothing.
+    const uint32_t cycleStart = cycleCounter();
     hpControl.blockUpdate();
-    const float hpMix = hpControl.mix();
-    if (hpMix > 0.0f)
+    const float hpPrev = hpControl.prevMix();
+    const float hpCur = hpControl.mix();
+    if (hpPrev > 0.0f || hpCur > 0.0f)
     {
         const seqfx::SvfCoef hc = hpControl.coef();
         for (int s = 0; s < AUDIO_BLOCK_SAMPLES; s++)
         {
+            const float hpMix = seqfx::mixAt(hpPrev, hpCur, s, AUDIO_BLOCK_SAMPLES); // linear ramp: off <-> on never steps
             float xl = (float)l[s], xr = (float)r[s];
             l[s] = (int16_t)signed_saturate_rshift((int32_t)(xl + hpMix * (seqfx::highpass(hpLeft, hc, xl) - xl)), 16, 0);
             r[s] = (int16_t)signed_saturate_rshift((int32_t)(xr + hpMix * (seqfx::highpass(hpRight, hc, xr) - xr)), 16, 0);
@@ -122,6 +138,13 @@ AUDIO_CORE_RAM void AudioEffectPolyverb::update(void)
             }
             break;
         default: runType(l, r); break;
+    }
+
+    // CPU of this block (DWT cycle counter): average and slowly decaying peak, in percent of the block period
+    {
+        const float pct = (float)(cycleCounter() - cycleStart) * (100.0f / kBlockCycles);
+        cpuAvg += (pct - cpuAvg) * (1.0f / 32.0f);
+        cpuPeak = pct > cpuPeak ? pct : cpuPeak * 0.999f;
     }
 
     transmit(block_left, 0);

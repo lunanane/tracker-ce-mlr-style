@@ -7,6 +7,7 @@
 #include <cmath>
 #include <masterParams/masterParams.h>
 #include "seqFx.h"
+#include "mtAudioEngine.h"
 
 static const uint16_t framesPlaces[8][4] = {
     { 0 + 1, 31, 800 / 8 - 3, 391 },
@@ -377,7 +378,7 @@ void cMasterParams::showReverbScreen()
     display.setControlText(label[4], "Line in");
     display.setControlText(label[5], "Type");
     display.setControlText2(label[5], " ");
-    display.setControlText(label[6], " ");
+    display.setControlText(label[6], "Reverb CPU");
     display.setControlText2(label[6], " ");
     display.setControlText(label[7], "Back");
     display.setControlText2(label[7], " ");
@@ -410,6 +411,7 @@ void cMasterParams::showReverbScreen()
     showReverbDiffusion();
     showLineInReverbSend();
     showReverbType();
+    showReverbCpu();
 
     frameData.placesCount = 6;
     frameData.startPlace = selectedPlaceReverb;
@@ -437,8 +439,8 @@ void cMasterParams::showReverbScreen()
     }
 
     // empty space covers
-    display.setControlPosition(blankSpaceCover[0], (800 / 8) * 5 + 2, -1);
-    display.setControlSize(blankSpaceCover[0], (800 / 8) * 3 - 3, -1);
+    display.setControlPosition(blankSpaceCover[0], (800 / 8) * 6 + 2, -1); // places 0-5 are in use (5 = Type)
+    display.setControlSize(blankSpaceCover[0], (800 / 8) * 2 - 3, -1);
     display.setControlShow(blankSpaceCover[0]);
     display.refreshControl(blankSpaceCover[0]);
 
@@ -568,6 +570,16 @@ void cMasterParams::showDelayScreen()
 }
 
 // plan 007 F3: the reverb type is a text value (no bar)
+// plan 007 F3: CPU of the reverb in the audio interrupt (average, and the slowly decaying peak), % of the 128 sample block period.
+// Compare Stock and Plinky with the same material.
+void cMasterParams::showReverbCpu()
+{
+    snprintf(reverbCpuVal, sizeof(reverbCpuVal), "%d%% pk %d%%", (int)(engine.getReverbCpuPercent() + 0.5f),
+             (int)(engine.getReverbCpuPeakPercent() + 0.5f));
+    display.setControlText2(label[6], reverbCpuVal);
+    display.refreshControl(label[6]);
+}
+
 void cMasterParams::showReverbType()
 {
     snprintf(reverbTypeVal, sizeof(reverbTypeVal), "%s", seqfx::reverbTypeName(seqFxReverbType()));
@@ -1344,7 +1356,11 @@ void cMasterParams::showDelayTime()
 
 void cMasterParams::showDelayFilterFrequency()
 {
-    sprintf(delayFilterFreqVal, "%d Hz", mtProject.values.delayFilterFrequency);
+    // plan 007: the top of the range is "open" = the bandpass is out of the signal path
+    if (seqfx::centerOpen(mtProject.values.delayFilterFrequency))
+        sprintf(delayFilterFreqVal, "open");
+    else
+        sprintf(delayFilterFreqVal, "%d Hz", mtProject.values.delayFilterFrequency);
 
     int displayedValue = map<int>(
       mtProject.values.delayFilterFrequency, DELAY_FILTER_FREQ_MIN, DELAY_FILTER_FREQ_MAX, 0, 100);

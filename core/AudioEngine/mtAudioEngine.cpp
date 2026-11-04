@@ -1035,7 +1035,7 @@ void audioEngine::setInterpolationEnable(bool value)
 
 void audioEngine::setDelayFeedback(uint8_t value)
 {
-    delay->setFeedback(value / 100.0);
+    delay->setFeedback(seqfx::capDelayFeedback(value) / 100.0);
 }
 
 void audioEngine::setDelayTime(uint16_t value)
@@ -1061,7 +1061,7 @@ AUDIO_CORE_RAM void audioEngine::setDelayParams(uint8_t value)
 }
 void audioEngine::setReverbSize(float value)
 {
-    polyverb->setTime(value);
+    polyverb->setTime(seqfx::capReverbSize(value)); // projects saved above the cap (0.9) play at the cap
 }
 void audioEngine::setReverbDamp(float value)
 {
@@ -1086,6 +1086,14 @@ void audioEngine::setReverbHighpass(uint8_t index)
 void audioEngine::setReverbType(uint8_t type)
 {
     polyverb->setType(type);
+}
+float audioEngine::getReverbCpuPercent()
+{
+    return polyverb->cpuPercent();
+}
+float audioEngine::getReverbCpuPeakPercent()
+{
+    return polyverb->cpuPeakPercent();
 }
 
 void audioEngine::setLimiterAttack(uint16_t attack)

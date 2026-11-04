@@ -13,6 +13,7 @@
 // The stock project struct (strMtValues) is NOT changed: the new values live in the sidecar, like the clip modes.
 #pragma once
 #include "ring_reverb.h"
+#include "seqFxCaps.h"
 #include "seqFxDsp.h"
 #include "seqSidecarLogic.h"
 #include <stddef.h>
@@ -26,6 +27,16 @@ constexpr uint16_t kCenterMinHz = 100, kCenterMaxHz = 20000;        // = DELAY_F
 constexpr uint16_t kOpenHz = 19000;                                 // centre >= this: filter bypassed
 
 inline bool centerOpen(uint16_t hz) { return hz >= kOpenHz; }
+// How much of the band shows over the top octave of the range: 1 at 9.5 kHz and below, 0 ("open") at kOpenHz and above, linear in
+// octaves in between. Leaving "open" by one jog click fades the band in instead of switching it on (centre 18.9 kHz is still almost
+// the unfiltered signal).
+inline float bandMix(float hz)
+{
+    if (hz >= (float)kOpenHz)
+        return 0.0f;
+    float m = log2f((float)kOpenHz / (hz < 1.0f ? 1.0f : hz));
+    return m > 1.0f ? 1.0f : m;
+}
 inline uint8_t clampBw(int v) { return (uint8_t)(v < kBwMin ? kBwMin : (v > kBwMax ? kBwMax : v)); }
 
 // Bandwidth (octaves) -> Q of the 2-pole bandpass: Q = sqrt(2^bw) / (2^bw - 1)

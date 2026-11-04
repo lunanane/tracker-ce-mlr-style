@@ -106,7 +106,7 @@ static void test_params()
     CHECK(paramValue(P_RATE, 1) == 0);
     CHECK(paramValue(P_RATE, 8) == 18);
     CHECK(paramValue(P_FEEDBACK, 1) == 0);
-    CHECK(paramValue(P_FEEDBACK, 8) == 99);
+    CHECK(paramValue(P_FEEDBACK, 8) == seqfx::kDelayFeedbackCap); // plan 007: the top step is the cap (88), it crackled at 99
     CHECK(paramValue(P_FILTER, 1) == 194);
     CHECK(paramValue(P_FILTER, 8) == 20000);
     CHECK(paramValue(P_SIZE, 1) == 0.0);
@@ -135,7 +135,9 @@ static void test_nearest()
     CHECK(nearestStep(P_TIME, 500) == 3);     // project default 500 ms
     CHECK(nearestStep(P_FEEDBACK, 50) == 5);  // default 50 (57 is nearer than 42)
     CHECK(nearestStep(P_FILTER, 20000) == 8); // default
-    CHECK(nearestStep(P_SIZE, 0.45) == 4 && nearestStep(P_SIZE, 0.55) == 5); // default 0.5 sits between
+    // size steps run 0 .. 0.9 (plan 007 cap): 0, .129, .257, .386, .514, .643, .771, .9; the default 0.5 is step 5
+    CHECK(nearestStep(P_SIZE, 0.44) == 4 && nearestStep(P_SIZE, 0.5) == 5 && nearestStep(P_SIZE, 1.0) == 8);
+    CHECK(paramValue(P_SIZE, 8) == seqfx::kReverbSizeCap && paramValue(P_SIZE, 8) < 1.0);
     CHECK(nearestStep(P_TIME, 1) == 1);
     CHECK(nearestStep(P_TIME, 99999) == 8);
 }
