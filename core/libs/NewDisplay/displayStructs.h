@@ -174,6 +174,14 @@ typedef enum enControlId
     controlIdSimpleBox,
     controlIdNotesKeyboardLabel,
 
+    // sequencer tracks mod (plan 005): one custom control per complex view; each id belongs to one later step
+    controlIdSeqPlayLegend,  // R1 Play overlay: pad legend / type list
+    controlIdSeqClipGrid,    // R2 clip launcher: 16 x 12 clip grid
+    controlIdSeqClipMarks,   // R2 clip launcher: progress bars and blinking (second, small control)
+    controlIdSeqFaderView,   // R3 fader page
+    controlIdSeqLanes,       // R4 MLR screen: static lanes
+    controlIdSeqPlayheads,   // R4 MLR screen: playheads
+
     /*
      *
     : cDisplayControl(controlId)

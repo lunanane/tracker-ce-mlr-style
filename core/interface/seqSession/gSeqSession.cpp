@@ -49,4 +49,14 @@ void cSeqSession::initDisplayControls()
         prop3.h = 32;
         infoLabel[i] = display.createControl<cLabel>(&prop3);
     }
+
+    // each layer adds its own controls (hidden until shown) on top
+    for (uint8_t i = 0; i < 2; i++)
+        layers[i]->createControls();
+}
+
+void cSeqSession::destroyDisplayControls()
+{
+    for (uint8_t i = 0; i < 2; i++)
+        layers[i]->destroyControls();
 }
