@@ -498,6 +498,10 @@ void cDisplay::step1()
     if (refreshQueue[refreshQueueBott] < 0 || refreshQueue[refreshQueueBott] >= controlsCount ||
         controlsTable[refreshQueue[refreshQueueBott]] == nullptr)
     {
+        // an entry of a control that is gone must not block the queue for good: drop it
+        refreshQueueBott++;
+        if (refreshQueueBott >= controlsRefreshQueueSize)
+            refreshQueueBott = 0;
         return;
     }
 

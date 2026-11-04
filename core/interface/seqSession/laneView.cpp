@@ -190,7 +190,8 @@ void laneViewCreate()
 // Never display.destroyControl() at runtime (plan 007 B1): it frees the slot while the control may still sit in the display's refresh
 // queue (laneViewShow(false) queues it), and the queue then stalls on the empty slot for good - nothing on the screen is drawn again
 // ("stuck in MLR"); it also shifts the slots (and so the handles and the cached display lists) of every control above it. The controls
-// are created once per module start and only shown / hidden; the display frees them when the module stops.
+// are created once per module start and only shown / hidden; the display frees them when the module stops (display.destroyModulesControls;
+// this function is only reached through destroyControls(), which nothing calls today - laneViewCreate resets the handles at every start).
 void laneViewForget()
 {
     s_hLanes = s_hHeads = -1;

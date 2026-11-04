@@ -187,6 +187,7 @@ bool cFileManager::continuePatternProcess()
 
 bool cFileManager::loadWorkspacePatternNow(uint8_t index)
 {
+    seqLauncher.setSceneReady(false); // this overwrites the next-pattern buffer: an early-read scene is no longer ready
     bool status = false;
     char patternToLoad[PATCH_SIZE]{ 0 };
 

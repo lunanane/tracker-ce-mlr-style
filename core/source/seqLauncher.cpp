@@ -654,13 +654,16 @@ bool seqSessionLaunchSceneQ(uint8_t pattern, uint8_t quant)
 {
     if (pattern < 1)
         return false;
-    const seqsession::Quant q = quant == seqsession::kQuantGlobal ? seqLauncher.quant() : (seqsession::Quant)quant;
+    seqsession::Quant q = quant == seqsession::kQuantGlobal ? seqLauncher.quant() : (seqsession::Quant)quant;
+    if (sequencer.isRec())
+        q = seqsession::Q_PATTERN; // recording writes the pattern: no early swap, the stock switch at the pattern end
     if (sequencer.isPlay() && q != seqsession::Q_PATTERN && q != seqsession::Q_CLIPEND)
     {
         // bar / now: read the pattern into the next-pattern buffer now (asynchronous, the main loop never blocks), the audio side swaps
         // it in at the quantise boundary once the read is done (seqSessionSceneBoundary)
-        if (!newFileManager.isIdleForScratch() || sequencer.sequencialSwitch_IsLoaded() || sequencer.isLastPatternStep())
-            return false; // a read is running, or the stock switch is about to happen
+        if (!newFileManager.isIdleForScratch() || sequencer.sequencialSwitch_IsLoaded() || sequencer.isLastPatternStep() ||
+            (uint16_t)(seqLauncher.globalPosition() + 2) >= seqLauncher.globalLength())
+            return false; // a read is running, or the stock switch is about to happen (the last two steps belong to it)
         if (seqLauncher.scenePending() && seqLauncher.scenePattern() == pattern && seqLauncher.sceneQuant() == q)
             return true;
         seqLauncher.setSceneReady(false); // an earlier scene must not swap while the buffer is read again
@@ -720,6 +723,10 @@ bool seqSessionTakeUndoCleared()
 }
 
 // A quantised scene (plan 007 B2): tell the audio side when the next-pattern buffer holds the scene's pattern.
+// Edits made while the scene waits would be lost at the swap (the stock switch saves nothing): the change flag of the playing pattern
+// makes the read start again, and that read saves the pattern first - the same save the stock pattern switch does while playing (the
+// "no SD writes while playing" rule of plan 005/006 is about the mod's own sidecar and perform data, not this stock save). Recording
+// turns the scene into the stock pattern-end switch. The last two steps are left to the stock switch (no new read there).
 static void sceneHousekeeping()
 {
     if (!seqLauncher.scenePending())
@@ -733,11 +740,32 @@ static void sceneHousekeeping()
         seqLauncher.cancelScene();
         return;
     }
+    if (newFileManager.getStatus() >= fmError)
+    {
+        // the read failed: never count it as ready; the scene is given up
+        sequencer.sequencialSwitch_Reset();
+        seqLauncher.cancelScene();
+        return;
+    }
+    if (sequencer.isRec())
+    {
+        seqLauncher.cancelScene(); // pattern-end scene: the stock switch takes it from here
+        sequencer.sequencialSwitch_SetReady();
+        return;
+    }
     const bool idle = newFileManager.isIdleForScratch();
-    const bool ready = idle && newFileManager.getLoadedPatternIndex() == pattern;
-    if (idle && !ready && !sequencer.sequencialSwitch_IsArmed())
-        newFileManager.loadWorkspacePattern(pattern); // somebody else used the buffer meanwhile: read again
-    seqLauncher.setSceneReady(ready);
+    const bool nearEnd = (uint16_t)(seqLauncher.globalPosition() + 2) >= seqLauncher.globalLength();
+    const bool loaded = idle && newFileManager.getLoadedPatternIndex() == pattern;
+    const bool edited = newFileManager.isPatternStructChanged(seqSessionOwnPattern());
+    static uint32_t s_nextRead = 0;
+    if (idle && !nearEnd && !sequencer.sequencialSwitch_IsArmed() && (!loaded || edited) && (int32_t)(seqNowMs() - s_nextRead) >= 0)
+    {
+        seqLauncher.setSceneReady(false);
+        if (newFileManager.loadWorkspacePattern(pattern)) // saves the edited pattern first, then reads
+            s_nextRead = seqNowMs() + 300;
+        return;
+    }
+    seqLauncher.setSceneReady(loaded && !edited);
 }
 
 void seqSessionUpdate()

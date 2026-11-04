@@ -814,6 +814,7 @@ class Sequencer
     void seqSessionApplyStop(uint8_t track);
     void seqSessionPatternSwitched();
     void seqSessionSceneSwap();
+    uint16_t seqLoopLength(uint8_t row);
     void seqSessionEnterPerformance();
     void continueSong(uint8_t songPos);
     void loopCurrentPattern(uint8_t songPos);
