@@ -762,6 +762,8 @@ class Sequencer
     void sequencialSwitch_SetReadyNow();
     void sequencialSwitch_Reset();
     uint16_t sequencialSwitch_GetNext();
+    bool sequencialSwitch_IsLoaded() { return player.sequencialSwitch_loaded; } // sequencer tracks mod (plan 006)
+    bool globalStepIsSetReady();                                                // the global-step slot holds the scene arm callback
 
     void playPattern();
     void playPattern(uint8_t fromPos);

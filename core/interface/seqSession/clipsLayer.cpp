@@ -200,8 +200,6 @@ bool ClipsLayer::button(uint8_t i, bool down)
             stopHeld_ = down;
             dirty_ = true;
             return true;
-        case kBtnBackToSong: // plan 006: unused (the song loops its slot, no LIVE freeze to leave)
-            return true;
         default: return false;
     }
 }
@@ -221,9 +219,7 @@ bool ClipsLayer::buttonLabel(uint8_t i, char out[12])
         case kBtnStop:
             snprintf(out, 12, "%s", stopHeld_ ? "[STOP]" : "STOP");
             return true;
-        case kBtnBackToSong:
-            out[0] = 0;
-            return true;
+        case 3:
         case 4:
         case 5:
             out[0] = 0;

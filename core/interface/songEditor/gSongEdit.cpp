@@ -1,4 +1,5 @@
 #include "songEditor/songEditor.h"
+#include "seqTracks.h"
 
 #include "Platform.h"
 #include "mtSequencer.h"
@@ -341,6 +342,19 @@ void cSongEditor::refreshButtonsLabels()
             display.refreshControl(label[1]);
             playButtonsState = 5;
         }
+    }
+
+    // sequencer tracks mod (plan 006): a hint under the Stop label: browsing the slots while the song plays, or a refused queue
+    const char* hint = nullptr;
+    if ((int32_t)(busyUntil - seqNowMs()) > 0 && busyUntil != 0)
+        hint = "Busy";
+    else if (browsing)
+        hint = "Ins: queue";
+    if (hint != nullptr || hintShown)
+    {
+        display.setControlText2(label[1], hint != nullptr ? hint : "");
+        display.refreshControl(label[1]);
+        hintShown = hint != nullptr;
     }
 }
 

@@ -7,7 +7,6 @@
 // ---- play modes (main loop) ----
 uint8_t seqClipMode(uint8_t pattern, uint8_t track);                // seqclips::CLIP_LOOP / CLIP_PLAY1X
 void seqClipSetMode(uint8_t pattern, uint8_t track, uint8_t mode);  // marks the sidecar dirty when it changed
-void seqClipSetRowMode(uint8_t pattern, uint8_t mode);              // every track of the pattern (kept for the host tests; the launcher no longer uses it)
 
 // ---- scene flag "play next" (plan 006): per pattern, shown on the launcher's scene column and the Song page's slot list ----
 // seqClipPlayNext is also read from the sequencer interrupt at the song's pattern end (one table lookup).

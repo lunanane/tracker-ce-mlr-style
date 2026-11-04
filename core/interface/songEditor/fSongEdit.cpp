@@ -77,13 +77,18 @@ void cSongEditor::update()
         refreshButtonsLabels();
 
         Sequencer::enSeqState seqState = sequencer.getSeqState();
+        if (browsing && (seqState == Sequencer::SEQ_STATE_STOP || lastSeenPos != mtProject.song.playlistPos))
+        {
+            browsing = false; // Stop, or the song moved (a queued slot took over): the cursor follows the song again
+        }
+        lastSeenPos = mtProject.song.playlistPos;
         if (seqState == Sequencer::SEQ_STATE_PLAY_SONG)
         {
             if (lastSongListPos != mtProject.song.playlistPos ||
                 selectedSongPosition != mtProject.song.playlistPos)
             {
                 lastSongListPos = mtProject.song.playlistPos;
-                if (!editMode)
+                if (!editMode && !browsing)
                 {
                     selectedSongPosition = mtProject.song.playlistPos;
                     refreshPatternsList();
@@ -105,14 +110,14 @@ void cSongEditor::update()
         else if (seqState == Sequencer::SEQ_STATE_PLAY_PATTERN ||
                  seqState == Sequencer::SEQ_STATE_PLAY_PERFORMANCE)
         {
-            if (sequencer.isPlay() && !editMode)
+            if (sequencer.isPlay() && !editMode && !browsing)
             {
                 lastSongListPos = mtProject.song.playlistPos;
             }
 
             if (lastSongListPos != selectedSongPosition)
             {
-                if (!editMode)
+                if (!editMode && !browsing)
                 {
                     selectedSongPosition = lastSongListPos;
                     display.setControlValue(songPlayerControl, selectedSongPosition);
@@ -152,6 +157,10 @@ void cSongEditor::start(uint32_t options)
     exitOnButtonRelease = 0;
     flagHeld = false;
     flagWheelUsed = false;
+    browsing = false;
+    hintShown = false;
+    busyUntil = 0;
+    lastSeenPos = mtProject.song.playlistPos;
 
     newFileManager.updateActualPatternBitmask();
     readSong();
@@ -960,7 +969,7 @@ void cSongEditor::changeSongPositionSelection(int16_t value)
     {
         if (!sequencer.isStop())
         {
-            return;
+            SE->browsing = true; // plan 006: browse the slots while the song plays (update() would snap the cursor back otherwise)
         }
     }
 
@@ -1691,9 +1700,17 @@ static void functInsert()
     else if (!SE->isBusy)
     {
         // sequencer tracks mod (plan 006): Insert (it had no plain function here) queues the selected slot while the song plays: it takes
-        // over at the pattern end like a scene pad; Insert on the playing slot cancels a queued one. Move the selection while playing in
-        // the red edit mode (Rec), as stock.
-        seqSongQueueSlot(SE->selectedSongPosition);
+        // over at the pattern end like a scene pad; Insert on the playing slot cancels a queued one. While the song plays, Up / Down and
+        // the wheel browse the slots without the red edit mode (the cursor stays until the queued slot lands).
+        bool wasPlaying = !sequencer.isStop();
+        if (!seqSongQueueSlot(SE->selectedSongPosition) && wasPlaying && SE->selectedSongPosition != mtProject.song.playlistPos)
+        {
+            SE->busyUntil = seqNowMs() + 1500; // the pattern end is here or a switch is already loaded: press again
+        }
+        if (SE->selectedSongPosition == mtProject.song.playlistPos)
+        {
+            SE->browsing = false; // back on the playing slot: the cursor follows the song again
+        }
         display.refreshControl(SE->songPlayerControl);
     }
 }

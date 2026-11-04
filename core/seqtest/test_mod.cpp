@@ -207,12 +207,6 @@ static void test_clip_modes()
     // neighbours are not touched, ends of the table work
     CHECK(m.mode(1, 1) == CLIP_LOOP && m.mode(2, 0) == CLIP_LOOP);
     CHECK(m.setMode(255, 15, CLIP_PLAY1X) && m.mode(255, 15) == CLIP_PLAY1X && m.mode(255, 14) == CLIP_LOOP);
-    // scene row
-    CHECK(m.setRow(7, CLIP_PLAY1X));
-    for (uint8_t t = 0; t < seqclips::kTracks; t++)
-        CHECK(m.mode(7, t) == CLIP_PLAY1X);
-    CHECK(!m.setRow(7, CLIP_PLAY1X));
-    CHECK(m.setRow(7, CLIP_LOOP) && m.mode(7, 3) == CLIP_LOOP);
 
     // save / load round trip
     uint8_t buf[kFileMax + 16];
@@ -276,7 +270,6 @@ static void test_scene_flags()
     // the scene flag does not touch the clip modes and the other way round
     CHECK(m.setPlayNext(7, true) && m.mode(7, 0) == CLIP_LOOP);
     CHECK(m.setMode(7, 0, CLIP_PLAY1X) && m.playNext(7));
-    CHECK(m.setRow(7, CLIP_LOOP) && m.playNext(7)); // the row setter is a clip thing only
 
     // round trip (version 2)
     m.clear();
@@ -313,6 +306,17 @@ static void test_scene_flags()
     // ... and saves as version 2 from then on
     n = v1.save(buf, sizeof(buf));
     CHECK(n == (size_t)kFileMax && buf[4] == 2 && r.load(buf, n) && r.mode(1, 0) == CLIP_PLAY1X && !r.playNext(3));
+    // reserved mode values in a version 2 frame are cleaned to Loop too, the scene flags beside them survive
+    memset(payload, 0, sizeof(payload));
+    payload[0] = 0x0E;                 // clip (1,0) = 2, clip (1,1) = 3 (reserved)
+    payload[1] = 0x01;                 // clip (1,4) = Play 1x
+    payload[kPayload + 0] = 0x04;      // scene flag of pattern 3
+    sn = seqsidecar::frameWrite(fb, sizeof(fb), kMagic, kVersion, payload, kPayloadV2);
+    CHECK(sn == (size_t)kFileMax && q.load(fb, sn));
+    CHECK(q.mode(1, 0) == CLIP_LOOP && q.mode(1, 1) == CLIP_LOOP && q.mode(1, 4) == CLIP_PLAY1X && q.playNext(3) && !q.playNext(1));
+    n = q.save(buf, sizeof(buf));
+    ClipModes q3;
+    CHECK(q3.load(buf, n) && q3.hash() == q.hash() && q3.playNext(3));
     // a version 2 file with the unused bit 255 set: the bit is dropped, the other flags stay
     memset(payload, 0, sizeof(payload));
     payload[kPayload + 31] = 0x80 | 0x01; // bit 255 (no pattern) + pattern 249
@@ -332,28 +336,27 @@ static void test_scene_flags()
 static void test_song_advance()
 {
     using namespace seqsong;
-    // not flagged: the slot plays again, whatever the position
-    CHECK(advance(false, false, false, false) == ADV_STAY);
-    CHECK(advance(false, true, false, false) == ADV_STAY);
-    // flagged: the song goes on to the next slot
-    CHECK(advance(true, false, false, false) == ADV_NEXT);
+    // (playNext, lastSlot, exporting)
+    // not flagged: the slot plays again, whatever the position (a pattern break effect is a shortened pass of the same loop, owner: loop
+    // by default, so it uses this rule too)
+    CHECK(advance(false, false, false) == ADV_STAY);
+    CHECK(advance(false, true, false) == ADV_STAY);
+    // flagged: the song goes on to the next slot (also when a break effect shortens the pass)
+    CHECK(advance(true, false, false) == ADV_NEXT);
     // flagged on the last slot: the song does not end, the slot loops
-    CHECK(advance(true, true, false, false) == ADV_STAY);
-    // a pattern break effect asks for the next pattern (already loading): it advances, flagged or not
-    CHECK(advance(false, false, true, false) == ADV_NEXT && advance(true, false, true, false) == ADV_NEXT && advance(false, true, true, false) == ADV_NEXT);
+    CHECK(advance(true, true, false) == ADV_STAY);
     // audio export: the stock song (and its end)
-    CHECK(advance(false, false, false, true) == ADV_NEXT && advance(true, true, false, true) == ADV_NEXT && advance(false, true, false, true) == ADV_NEXT);
+    CHECK(advance(false, false, true) == ADV_NEXT && advance(true, true, true) == ADV_NEXT && advance(false, true, true) == ADV_NEXT);
 
     // latch: the answer of the last step (where the next pattern is loaded) is the one the pattern end acts on
     Latch l;
-    CHECK(l.resolve(ADV_STAY, false) == ADV_STAY && l.v == 0);          // no last-step answer: the live decision
-    CHECK(l.resolve(ADV_NEXT, false) == ADV_NEXT && l.v == 0);
+    CHECK(l.resolve(false) == ADV_STAY && l.v == 0);                    // no answer = nothing was loaded: stay (never an unloaded buffer)
+    CHECK(l.resolve(true) == ADV_NEXT && l.v == 0);                     // ... except the audio export: stock
     CHECK(l.decide(ADV_STAY) == ADV_STAY && l.v == 1);
-    CHECK(l.resolve(ADV_NEXT, false) == ADV_STAY && l.v == 0);          // the flag flipped after the last step: nothing was loaded, stay
+    CHECK(l.resolve(false) == ADV_STAY && l.v == 0);                    // the flag flipped after the last step: nothing was loaded, stay
     CHECK(l.decide(ADV_NEXT) == ADV_NEXT && l.v == 2);
-    CHECK(l.resolve(ADV_STAY, false) == ADV_NEXT && l.v == 0);          // flipped back: the next pattern was loaded, take it
-    CHECK(l.decide(ADV_STAY) == ADV_STAY);
-    CHECK(l.resolve(ADV_STAY, true) == ADV_NEXT && l.v == 0);           // a break effect loaded the next pattern on its own
+    CHECK(l.resolve(false) == ADV_NEXT && l.v == 0);                    // the next pattern was loaded (last step or break effect): take it
+    CHECK(l.decide(ADV_STAY) == ADV_STAY && l.resolve(true) == ADV_STAY); // an answer beats the export default
     l.decide(ADV_NEXT);
     l.clear();
     CHECK(l.v == 0);
@@ -365,6 +368,8 @@ static void test_song_advance()
     CHECK(queueOp(true, 4, 0, 6, 4) == QOP_QUEUE);       // another slot moves the queue
     CHECK(queueOp(true, 0, 0, 5, 0) == QOP_NONE);        // the playing slot: nothing to queue
     CHECK(queueOp(true, 0, 0, 5, 4) == QOP_CANCEL);      // ... but it cancels a pending queue
+    // a slot that holds the loaded pattern needs no pattern switch (the position moves at the pattern end)
+    CHECK(!queueNeedsSwitch(5, 5) && queueNeedsSwitch(6, 5));
     // shown only while the stock switch is armed for that slot's pattern
     CHECK(queuedShown(4, 6, 6) == 4);
     CHECK(queuedShown(4, 6, 7) == 0 && queuedShown(4, 6, 0) == 0 && queuedShown(0, 6, 6) == 0 && queuedShown(4, 0, 0) == 0);

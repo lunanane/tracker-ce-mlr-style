@@ -603,6 +603,16 @@ void cSongPlayer::drawIcon(int pos, int row, int x, int y, int h)
         uint8_t m = list->slotMarks((uint16_t)pos);
         int16_t cy = y + (row * h);
         int16_t mx = x + 160;
+        if (m)
+        {
+            // the pattern name is drawn before: a list-coloured patch keeps the marks readable over a long name
+            API_COLOR(colors[3]);
+            API_LINE_WIDTH(16);
+            API_BEGIN(RECTS);
+            API_VERTEX2F(mx - 18, cy - 11);
+            API_VERTEX2F(mx + 22, cy + 11);
+            API_END();
+        }
         if (m & 2)
         {
             API_COLOR(colors[5]);

@@ -55,14 +55,6 @@ class ClipModes
         bits_[b] = (uint8_t)((bits_[b] & ~(3u << sh)) | ((unsigned)m << sh));
         return true;
     }
-    // Shift + button 1 on a scene: the mode of every clip in the row (pattern). true: something changed.
-    bool setRow(uint8_t pattern, uint8_t m)
-    {
-        bool changed = false;
-        for (uint8_t t = 0; t < kTracks; t++)
-            changed |= setMode(pattern, t, m);
-        return changed;
-    }
     // ---- scene flag "play next" (plan 006). Read from the sequencer interrupt too: one byte read, no loops.
     bool playNext(uint8_t pattern) const
     {

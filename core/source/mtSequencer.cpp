@@ -400,8 +400,7 @@ AUDIO_CORE_FLASH void Sequencer::play_microStep(int row)
             }
         }
         else if (((stockPos == patternRow.length)) && player.songMode &&
-                 !seqSongStayAtLastStep(player.breakPattern,
-                                        player.onSongEnd == cbkSetCurrentExporterOnLastStep)) // sequencer tracks mod (plan 006): a slot that loops loads nothing
+                 !seqSongStayAtLastStep(player.onSongEnd == cbkSetCurrentExporterOnLastStep)) // sequencer tracks mod (plan 006): a slot that loops loads nothing
         {
             loadNextPattern(newFileManager.getNextSongPattern());
         }
@@ -819,7 +818,10 @@ AUDIO_CORE_FLASH void Sequencer::play_microStep(int row)
             }
         }
 
-        if (setBreakPattern && player.songMode)
+        // sequencer tracks mod (plan 006): in song mode a break is a shortened pass; it only goes on to the next slot when the slot would
+        // advance anyway (the answer is latched: the pattern end acts on what was loaded here)
+        if (setBreakPattern && player.songMode &&
+            !seqSongStayAtLastStep(player.onSongEnd == cbkSetCurrentExporterOnLastStep))
         {
             loadNextPattern(newFileManager.getNextSongPattern());
         }
@@ -1497,6 +1499,7 @@ void Sequencer::playSongFromPosition(uint8_t fromPos)
 
 void Sequencer::loopCurrentPattern(uint8_t songPos)
 {
+    seqSongUserMode(); // plan 006: a deliberate loop is respected
     if (player.isPlay == 0)
     {
         playSongFromPosition(songPos);
@@ -1510,6 +1513,7 @@ void Sequencer::loopCurrentPattern(uint8_t songPos)
 
 void Sequencer::continueSong(uint8_t songPos)
 {
+    seqSongUserMode();
     if (player.isPlay == 0)
     {
         playSongFromPosition(songPos);
@@ -1927,7 +1931,6 @@ void Sequencer::switchRowStep(uint8_t row) // przełączamy stepy w zależności
     {
         bool isNextPatternAvailable = 0; // jeśli 0 to song sie skonczyl
         bool patternSwitched = false;
-        const bool breakFx = player.breakPattern; // sequencer tracks mod (plan 006)
         player.breakPattern = 0;
 
         if (player.sequencialSwitch_isArmed && player.sequencialSwitch_loaded)
@@ -1943,7 +1946,7 @@ void Sequencer::switchRowStep(uint8_t row) // przełączamy stepy w zależności
             sequencialSwitch_Reset();
         }
         else if (player.songMode &&
-                 !seqSongStayAtEnd(breakFx, player.onSongEnd == cbkSetCurrentExporterOnLastStep))
+                 !seqSongStayAtEnd(player.onSongEnd == cbkSetCurrentExporterOnLastStep))
         {
             isNextPatternAvailable = newFileManager.switchNextPatternInSong();
 
@@ -3414,9 +3417,17 @@ void Sequencer::switchRamPatternsNow()
     {
         mtProject.song.playlistPos = (uint8_t)newSlotMaybe;
     }
-    else if (newSlotMaybe == -1 && player.songMode)
+    if (newSlotMaybe == -1)
     {
-        player.songMode = 0; // plan 006: a pattern outside the song loops by itself (the stock switch always ended the song mode)
+        if (player.songMode)
+        {
+            player.songMode = 0; // plan 006: a pattern outside the song loops by itself (the stock switch always ended the song mode)
+            seqSongModeDropped();
+        }
+    }
+    else if (!player.songMode && player.isPlay && seqSongModeRestore())
+    {
+        player.songMode = 1; // back in the song after a scene outside it (only when the mod dropped the mode, not a deliberate loop)
     }
 
     seqSessionPatternSwitched(); // clip launcher: every track follows the new pattern again
@@ -3554,6 +3565,11 @@ AUDIO_CORE_RAM void Sequencer::sequencialSwitch_Reset()
 }
 
 // getuje nastepny pattern, jesli 0 to nie ma zmiany
+bool Sequencer::globalStepIsSetReady()
+{
+    return player.onGlobalStep == cbkSequencialSwitch_SetReady;
+}
+
 uint16_t Sequencer::sequencialSwitch_GetNext()
 {
     return player.sequencialSwitch_pattern;

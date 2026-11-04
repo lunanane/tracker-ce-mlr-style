@@ -355,9 +355,9 @@ static void test_pad_gestures()
     SCHECK(padOp(scene, true, false, true) == OP_FOCUS && padOp(clip, true, true, true) == OP_FOCUS && padOp(scene, true, true, true) == OP_FOCUS);
     SCHECK(padOp(PK_NONE, false, false, true) == OP_NONE && padOp(PK_NONE, true, true, false) == OP_NONE);
 
-    // screen buttons of the CLIPS layer: 1 mode, 2 quantise, 3 stop, 4 back to song; 7 / 8 stay the layer buttons of the host
-    SCHECK(kBtnMode == 0 && kBtnQuant == 1 && kBtnStop == 2 && kBtnBackToSong == 3);
-    SCHECK((int)kBtnBackToSong < (int)kButtonLayer);
+    // screen buttons of the CLIPS layer: 1 mode, 2 quantise, 3 stop; 7 / 8 stay the layer buttons of the host
+    SCHECK(kBtnMode == 0 && kBtnQuant == 1 && kBtnStop == 2);
+    SCHECK((int)kBtnStop < (int)kButtonLayer);
 
     // pad LEDs: follow action armed = steady medium, the dim light of an empty pad of a sounding track
     SCHECK(clipState(true, true, true, true) == CS_FOLLOW && clipState(true, true, true, false) == CS_QUEUED);
@@ -376,15 +376,11 @@ static void test_play_mode_wheel()
     SCHECK(stepClipMode(seqclips::CLIP_LOOP, 0) == seqclips::CLIP_LOOP && stepClipMode(seqclips::CLIP_PLAY1X, 0) == seqclips::CLIP_PLAY1X);
     SCHECK(clipModeName(seqclips::CLIP_LOOP)[0] == 'L' && clipModeName(seqclips::CLIP_PLAY1X)[0] == 'P');
 
-    // wheel + focus: one clip, or Shift = the whole row (per-clip data, other rows untouched)
+    // wheel + focus: one clip (per-clip data, other rows untouched; the scene flag is its own value since plan 006)
     seqclips::ClipModes cm;
     SCHECK(cm.mode(7, 3) == seqclips::CLIP_LOOP); // default playback is loop
     SCHECK(cm.setMode(7, 3, stepClipMode(cm.mode(7, 3), 1)));
     SCHECK(cm.mode(7, 3) == seqclips::CLIP_PLAY1X && cm.mode(7, 4) == seqclips::CLIP_LOOP && cm.mode(8, 3) == seqclips::CLIP_LOOP);
-    SCHECK(cm.setRow(9, stepClipMode(cm.mode(9, 0), 1)));
-    for (uint8_t t = 0; t < 16; t++)
-        SCHECK(cm.mode(9, t) == seqclips::CLIP_PLAY1X && cm.mode(10, t) == seqclips::CLIP_LOOP);
-    SCHECK(cm.setRow(9, seqclips::CLIP_LOOP) && cm.mode(9, 5) == seqclips::CLIP_LOOP && cm.mode(7, 3) == seqclips::CLIP_PLAY1X);
 }
 
 static void test_clip_end_quant()
@@ -555,23 +551,6 @@ static void test_follow_action()
     SCHECK(launches == 2 && stops == 1 && l.stopped(1) && l.current(1) == 7);
 }
 
-static void test_live_state()
-{
-    LiveState s;
-    SCHECK(!s.on && !s.active(true, false));
-    // a launch while the song plays freezes it; while the transport is stopped or the song is not running nothing freezes
-    SCHECK(LiveState::needsFreeze(true, true));
-    SCHECK(!LiveState::needsFreeze(true, false) && !LiveState::needsFreeze(false, true) && !LiveState::needsFreeze(false, false));
-    SCHECK(LiveState::armAfterFreeze(true, true));
-    SCHECK(!LiveState::armAfterFreeze(false, true) && !LiveState::armAfterFreeze(true, false) && !LiveState::armAfterFreeze(false, false));
-    s.freeze(4);
-    SCHECK(s.on && s.slot == 4 && s.active(true, false));
-    SCHECK(!s.active(false, false));   // Stop ends LIVE for the display
-    SCHECK(!s.active(true, true));     // back in the song (BACK TO SONG, or the performer started it): no LIVE
-    s.clear();
-    SCHECK(!s.on && !s.active(true, false));
-}
-
 static void test_panic()
 {
     Launcher l;
@@ -638,7 +617,7 @@ static void test_grid_geometry()
             SCHECK(progressPx(pos, u, 128) <= kCellW);
 
     // the structs are compared with memcmp: no padding allowed
-    SCHECK(sizeof(View) == 12 + 2 * kVisRows * kTracks + 2 * kVisRows);
+    SCHECK(sizeof(View) == 11 + 2 * kVisRows * kTracks + 2 * kVisRows);
     SCHECK(sizeof(Marks) == 4 * kTracks + 4);
     SCHECK(msgText(MSG_NONE)[0] == 0 && msgText(MSG_BUSY)[0] != 0 && msgText(MSG_UNDO_CLEARED)[0] != 0);
 }
@@ -752,7 +731,7 @@ static void test_grid_budget()
     SCHECK(planGrid(v).help);
     v.stopHeld = 0;
 
-    // worst case: every cell armed, every clip Play 1x, every empty cell marked, LIVE, a message, a button held
+    // worst case: every cell armed, every clip Play 1x, every empty cell marked, a message, a button held
     View w;
     memset(&w, 0, sizeof(w));
     for (uint8_t r = 0; r < kVisRows; r++)
@@ -764,7 +743,6 @@ static void test_grid_budget()
         }
         w.sceneFlags[r] = F_ONEX;
     }
-    w.live = 1;
     w.msg = MSG_UNDO_CLEARED;
     w.modeHeld = 1;
     GridPlan worst = planGrid(w);
@@ -807,7 +785,6 @@ int sessionTests(int& checks)
     test_play_mode_wheel();
     test_clip_end_quant();
     test_follow_action();
-    test_live_state();
     test_panic();
     test_grid_geometry();
     test_undrained_tap_vs_follow();

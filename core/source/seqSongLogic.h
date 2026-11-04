@@ -11,12 +11,12 @@ enum Advance : uint8_t { ADV_STAY = 0, ADV_NEXT = 1 };
 
 //  playNext   the playing slot's pattern is flagged "play next"
 //  lastSlot   there is no slot behind the playing one (the song would wrap to slot 1: the song end)
-//  breakFx    a pattern break effect asked for the next pattern (its load is already under way)
 //  exporting  the song is being rendered to audio: the stock song (and its end) is wanted
 // Stay = the slot plays again (same as a pattern loop). A flagged last slot also stays: the song never ends in a live set.
-inline Advance advance(bool playNext, bool lastSlot, bool breakFx, bool exporting)
+// A pattern break effect (a shortened pass) follows the same rule: it does not advance a looping slot (owner: loop by default).
+inline Advance advance(bool playNext, bool lastSlot, bool exporting)
 {
-    if (exporting || breakFx)
+    if (exporting)
         return ADV_NEXT;
     if (playNext && !lastSlot)
         return ADV_NEXT;
@@ -34,17 +34,19 @@ struct Latch
         v = (uint8_t)(a == ADV_NEXT ? 2 : 1);
         return a;
     }
-    // at the pattern end: the latched answer wins; no answer yet (no last-step hook ran): the live decision; a break effect loaded
-    // the next pattern by itself, so it always advances. Clears the latch.
-    Advance resolve(Advance live, bool breakFx)
+    // at the pattern end: the latched answer wins. No answer (no last-step hook ran, so nothing was loaded): stay - switching would
+    // take an unloaded buffer - except for the audio export, which keeps the stock behaviour. Clears the latch.
+    Advance resolve(bool exporting)
     {
-        Advance r = breakFx ? ADV_NEXT : (v == 0 ? live : (v == 2 ? ADV_NEXT : ADV_STAY));
+        Advance r = v == 2 ? ADV_NEXT : (v == 1 ? ADV_STAY : (exporting ? ADV_NEXT : ADV_STAY));
         v = 0;
         return r;
     }
 };
 
 // ---- Song page queue (main loop) ----
+// A slot whose pattern is the loaded one needs no pattern switch (nothing to load): the song position just moves at the pattern end.
+inline bool queueNeedsSwitch(uint8_t patternAtSlot, uint8_t actualPattern) { return patternAtSlot != actualPattern; }
 enum QueueOp : uint8_t { QOP_NONE = 0, QOP_QUEUE = 1, QOP_CANCEL = 2 };
 // Press on the selected slot (0-based) while the song page shows the transport:
 //  - stopped, or the slot holds no pattern: nothing

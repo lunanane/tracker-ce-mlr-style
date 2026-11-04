@@ -140,6 +140,10 @@ class cSongEditor : public ModuleBase
 
     bool flagHeld = false;      // sequencer tracks mod (plan 006): screen button 1 is held (wheel = scene "play next" flag)
     bool flagWheelUsed = false; // the wheel was turned while it was held: the release is not a tap
+    bool browsing = false;      // plan 006: the cursor was moved while the song plays (not in edit mode): it stays where it is until a queue lands
+    uint8_t lastSeenPos = 0;    // playlist position seen by update(): a change ends browsing
+    uint32_t busyUntil = 0;     // "Busy" shown on screen button 2 until then (seqNowMs)
+    bool hintShown = false;
 
     uint8_t isDeletingInProgress = 0;
     uint8_t deleteElementMax;

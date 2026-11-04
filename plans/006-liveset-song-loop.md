@@ -63,3 +63,25 @@ length, bit 255, newer version, bad CRC), `test_song_advance` (advance decision 
 slot after switch). One existing check of `test_clip_modes` (reserved mode values read back as Loop) builds a **version 1** frame by hand: it now writes it with
 `kVersionV1` and its length expectation `== kFileMax` reads `== kPayload + kOverhead` (the v1 frame size). A direct consequence of the version
 bump; same frame, same remaining expectations (and v1 loading is now tested explicitly).
+
+### Review round (v0.2.3 final), lead decisions
+- **Break effect (M1):** in song mode a pattern break is a shortened pass; it advances only a slot that would advance anyway (flagged and not the last
+  slot) or the audio export. `seqsong::advance(playNext, lastSlot, exporting)` lost its break parameter; the break's own load goes through the same
+  latched decision, so the pattern end acts on what was loaded. Test change: the "break advances" expectations became "break uses the loop rule"
+  (3-argument calls, equally strict).
+- **Song mode dropped by a scene outside the song (M2):** the mod remembers that it dropped it (`seqSongModeDropped`) and puts `songMode` back when a
+  switch lands on a pattern of the song while playing; a deliberate loop / continue (`loopCurrentPattern`, `continueSong`) and Stop forget the memory.
+- **Browse cursor (M3):** while the song plays and the edit mode is off, Up / Down / wheel move the cursor and set `browsing`; the cursor then stays
+  until Stop, the song moving to another slot, or Insert on the playing slot. The label under `Stop` shows `Ins: queue`; a refused Insert shows `Busy`.
+  No new key.
+- **Latch (m1):** with no last-step answer the pattern end stays (nothing was loaded), except for the audio export. `resolve(exporting)`.
+- **Queue of the loaded pattern (m2):** a slot that holds the loaded pattern arms no switch; the position moves at the pattern end (`s_same`). In a
+  plain pattern loop the position moves at once.
+- **Races (m3):** queue / cancel are refused (Busy) on the last pattern step or when the armed switch is already loaded; the global-step slot is only
+  cleared when it still holds the scene arm callback.
+- **Marks (m5):** a list-coloured patch behind the marks. **seqclips.bin (m6):** a file of a newer version is flagged and never overwritten or removed.
+- **Performance reload (m7):** armed in song mode too (a flag can change before the pattern end); a flagged slot plays one more time before it advances.
+- **Dead code (m9):** `LiveState`, `View.live`, `kBtnBackToSong`, `ClipModes::setRow` / `seqClipSetRowMode` and their tests were removed with the
+  feature they served (`test_live_state`, the row-setter checks in `test_mod` / `test_session`, the BackToSong button constants); the `View` size test now
+  expects 11 header bytes instead of 12 (the removed `live` byte), nothing else about it changed. **m10:** reserved mode values in a version 2 frame are
+  cleaned to Loop too (new check).

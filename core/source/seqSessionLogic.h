@@ -176,8 +176,8 @@ inline uint8_t alignGroup(uint8_t first, uint8_t groupSize) { return (uint8_t)(f
 // Host layout (plan 005 decision): 0-3 belong to the layer (groups or gestures), 5 (button 6) to the active layer too (CUT: SYNC ALL),
 // 6 (button 7) is an empty gap, 7 (button 8) switches CLIPS <-> CUT and is labelled with the other layer.
 enum { kButtonLayer = 5, kButtonGap = 6, kButtonSwitch = 7 };
-// CLIPS layer screen buttons (0-based): 0 = MODE (hold + wheel), 1 = QUANT (tap cycles), 2 = STOP (hold + pad), 3 = BACK TO SONG.
-enum { kBtnMode = 0, kBtnQuant = 1, kBtnStop = 2, kBtnBackToSong = 3 };
+// CLIPS layer screen buttons (0-based): 0 = MODE (hold + wheel), 1 = QUANT (tap cycles), 2 = STOP (hold + pad); 3 and 4 are empty.
+enum { kBtnMode = 0, kBtnQuant = 1, kBtnStop = 2 };
 
 // ---- play mode of a clip (plan 005 R2: per clip = pattern x track, stored in seqclips.bin) --------------------------
 // Wheel while screen button 1 is held: one detent = one mode step, clamped (Loop <-> Play 1x), no wrap.
@@ -230,25 +230,6 @@ class FollowArms
     uint32_t key_[kTracks];
 };
 
-// ---- LIVE (plan 005 C2): a launch while the song plays freezes the song on its slot; BACK TO SONG resumes it -------------------
-struct LiveState
-{
-    bool on = false;
-    uint8_t slot = 0; // playlist slot (0-based) the song was frozen on
-    void freeze(uint8_t s)
-    {
-        on = true;
-        slot = s;
-    }
-    void clear() { on = false; }
-    // shown while the transport plays and the song is not running (another way back to the song ends it too)
-    bool active(bool playing, bool songMode) const { return on && playing && !songMode; }
-    // a launch must freeze the song first
-    static bool needsFreeze(bool playing, bool songMode) { return playing && songMode; }
-    // after the freeze the global-step callback arms the queued scene (it holds the slot the scene's own arm callback needs)
-    static bool armAfterFreeze(bool armRequested, bool sceneQueued) { return armRequested && sceneQueued; }
-};
-
 // ---- grid screen (clipGrid.*): geometry and the data the controls draw ----------------------------------------------
 // 800 x 480 screen, content y 29-422 (stock title bar above, screen-button labels below). 12 pattern rows x 16 tracks, a gap
 // after track 8, the scene cell after track 16, an info column on the right. All numbers in pixels.
@@ -298,7 +279,6 @@ struct View
     uint8_t focusTrack;
     uint8_t focusMode;    // play mode of the focused clip
     uint8_t quant;        // Quant
-    uint8_t live;         // unused since plan 006 (the LIVE freeze is gone); kept so the layout and the worst-case test stay as they were
     uint8_t focusScene;   // the focused row's scene is flagged "play next" (plan 006; the slot of the old LIVE line)
     uint8_t modeHeld;     // screen button 1 held
     uint8_t stopHeld;     // screen button 3 held

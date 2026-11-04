@@ -21,12 +21,15 @@ bool s_hadFile = false;          // a seqclips.bin was loaded or written for thi
 uint16_t s_savedHash = 0;        // hash of the table last written / loaded
 uint32_t s_loadedId = 0;         // project folder whose sidecar was loaded (valid or not)
 bool s_loadedValid = false;
+bool s_newerFile = false;        // the loaded sidecar was written by a newer mod version: it is left alone (no downgrade, nothing written)
 
 const char kWorkspaceFile[] = "Workspace/seqclips.bin";
 const char kFileName[] = "seqclips.bin";
 
 bool writeTable(const char* path)
 {
+    if (s_newerFile)
+        return false;
     uint8_t* buf = seqsidecar::ioBuffer();
     uint16_t h = s_modes.hash();
     size_t n = s_modes.save(buf, seqsidecar::ioCapacity());
@@ -48,12 +51,6 @@ void seqClipSetMode(uint8_t pattern, uint8_t track, uint8_t mode)
         s_dirty.mark();
 }
 
-void seqClipSetRowMode(uint8_t pattern, uint8_t mode)
-{
-    if (s_modes.setRow(pattern, mode))
-        s_dirty.mark();
-}
-
 bool seqClipPlayNext(uint8_t pattern)
 {
     return s_modes.playNext(pattern);
@@ -68,7 +65,7 @@ void seqClipSetPlayNext(uint8_t pattern, bool on)
 void seqClipsUpdate()
 {
     // never ask for a write while the transport plays: the dirty flag waits for the stop
-    if (!s_wsWritePending && s_dirty.take(sequencer.isPlay()))
+    if (!s_newerFile && !s_wsWritePending && s_dirty.take(sequencer.isPlay()))
     {
         if (s_modes.hash() != s_savedHash)
         {
@@ -84,13 +81,18 @@ void seqClipsLoadWorkspace()
     s_modes.clear();
     s_hadFile = false;
     s_loadedValid = false;
+    s_newerFile = false;
     if (seqsidecar::exists(kWorkspaceFile))
     {
         size_t n = seqsidecar::readFile(kWorkspaceFile, seqsidecar::ioBuffer(), seqsidecar::ioCapacity());
-        if (n && s_modes.load(seqsidecar::ioBuffer(), n))
+        bool newer = false;
+        if (n && s_modes.load(seqsidecar::ioBuffer(), n, &newer))
             s_hadFile = true;
         else
+        {
             s_modes.clear(); // short, corrupt or newer file: defaults, the file itself is left alone
+            s_newerFile = newer;
+        }
         s_loadedValid = true;
     }
     s_loadedId = seqlogic::projectId(newFileManager.getCurrentProjectPath(), newFileManager.getCurrentProjectName());
@@ -115,6 +117,8 @@ void seqClipsSaveWorkspace()
 
 void seqClipsSaveProject(const char* path, const char* name)
 {
+    if (s_newerFile)
+        return; // plan 006: a file of a newer mod version stays as it is
     char file[PATCH_SIZE];
     seqsidecar::projectFilePath(file, sizeof(file), path, name, kFileName);
     uint32_t id = seqlogic::projectId(path, name);

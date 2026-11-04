@@ -255,26 +255,30 @@ The song no longer runs away: **at the pattern end the playing slot plays again*
 |---|---|
 | Song page, **Play** (song) with no flags set | Slot 1 plays, at its end **it plays again**, endlessly. The song position does not move; the play icon stays on slot 1. |
 | Hold screen button **1** (play pattern) and turn the wheel clockwise (any page position, nothing in edit mode needed) | The selected slot gets an **arrow** at the right end of its line: the scene of that slot is flagged **play next**. Every other slot with the same pattern shows the arrow too. Wheel back: arrow gone. Releasing button 1 after a wheel turn does **not** toggle song / pattern mode. |
-| Tap button 1 without the wheel (stock: song <-> loop toggle) | Works as stock but on **release** of the button. |
+| Tap button 1 without the wheel (stock: song <-> loop toggle) | Works as stock but on **release** of the button (a tap is a press and release without a wheel turn; **Shift is sampled at the release**, so Shift + Play still works but Shift must be down when button 1 comes up). |
 | Flag slot 1 while the song plays on it | At its pattern end the song goes on to slot 2, which loops (unless it is flagged). The flag also works when set just before the pattern end (the last step decides: set it a step earlier to be sure). |
 | Flag the **last** slot only, play the song from the last slot | The song does **not** end or wrap to slot 1: the last slot loops (a flag on the last slot changes nothing). |
 | Play the song with **no** flag on the last slot, slot 1 flagged, slot 2 flagged ... the last one flagged | Slots advance in order, the last slot then loops forever. |
-| **Rec** (red edit mode) on, select slot 3 with Up / Down while the song plays slot 1, press **Insert** | Slot 3 gets a **red square** at the right end of its line (queued). At slot 1's pattern end the song switches to slot 3 (loading is the stock scene mechanism, no stall), the square disappears, slot 3 loops. The cursor and play icon follow slot 3. |
+| While the song plays slot 1 (edit mode **off**), move the cursor with **Up / Down** or the wheel to slot 3, then press **Insert** | The cursor stays on slot 3 (it does not snap back to the playing slot) and the label under `Stop` reads `Ins: queue` until Stop or the song moves to another slot. Slot 3 gets a **red square** at the right end of its line (queued). At slot 1's pattern end the song switches to slot 3 (loading is the stock scene mechanism, no stall), the square disappears, slot 3 loops. The cursor and play icon follow slot 3. |
 | Queue slot 3, then queue slot 4 before the pattern end | The red square moves to slot 4; only slot 4 is played next. |
 | Queue slot 3, select the **playing** slot, press Insert | The queue is cancelled (square gone), the song stays on the playing slot. Insert on the playing slot with nothing queued does nothing. |
 | Queue a slot that holds the same pattern as another slot | The queued slot is the one that plays next (the song position goes to it, not to the first slot with that pattern). |
+| Queue a slot that holds the **loaded** pattern (e.g. slots 2 and 4 are both pattern 2, playing slot 2, queue slot 4) | Red square on slot 4; no reload or switch happens; at the pattern end the song position (and the play icon) moves to slot 4. |
+| Press Insert exactly at the end of the pattern (the last step) or while the switch is already loaded | Nothing is queued and `Busy` shows under `Stop` for a moment: press again. |
+| Play the song, tap a scene pad of a pattern that is **not** in the song, then a scene pad of a pattern that is | The first switch makes the pattern loop (song mode off, as stock); switching back to a pattern of the song puts the song mode back, and the slot loops / advances again. A deliberate loop (button 1 `Loop Pattern`) stays a loop. |
 | Queue a slot, then tap a **scene pad** in the launcher / press Stop | The queue is dropped (the square disappears); the scene / stop wins. |
 | Insert while the transport is stopped | Nothing (select a slot and press Play to start there as stock). |
 | Launcher: hold button 1, tap a scene pad (or clip pad of the row), **Shift** held, wheel clockwise | Right column: `Scene P: PLAY NEXT`, bar along the top of the scene cell; on the Song page the slots with pattern P show the arrow. Both screens always show the same flag. |
 | Launcher: hold button 1 and turn the wheel **without** Shift | Sets the focused clip's Loop / Play 1x only (section 9b); the scene flag is unchanged. |
-| Save the project, power cycle, open it | The scene flags are still set (`seqclips.bin` next to the project). A project from v0.2 has no flags (all loop). |
+| Save the project, power cycle, open it | The scene flags are still set (`seqclips.bin` next to the project). A project from v0.2 has no flags (all loop). A `seqclips.bin` written by a **newer** mod version is left untouched (not loaded, not overwritten): no downgrade. |
 | Song page: edit the playlist (Add / Delete slot, + / - pattern, copy / paste) | Works as stock; the marks follow the pattern numbers (they belong to the pattern, not the slot). |
-| Pattern break effect (jump to next pattern) on a looping slot | Goes on to the next slot (an explicit break wins over the loop). |
-| Export audio of the song (Master / Export) | The song plays through once as stock (loop and flags are ignored while exporting). |
+| Pattern break effect (jump to next pattern) on a looping slot | The pass is shortened and the slot plays again (a break is a short loop in a live set); on a slot flagged play next it goes on to the next slot. |
+| Export audio of the song (Master / Export) | The song plays through once as stock (loop and flags are ignored while exporting); as stock the export renders the **whole playlist**. |
 | Song page: use the stock "loop <-> song" toggle (button 1 tap / Shift + Play) | Stock: song mode off = the pattern loops with no flags; on = song mode with the loop-by-default rule. |
-| Pattern page: Pattern + Right / Left while the song plays | The pattern switches at its end; the song mode goes on (it only ends when the new pattern is not in the song). |
+| Pattern page: Pattern + Right / Left while the song plays | The pattern switches at its end; **the song mode goes on** (v0.2.3; stock ended it): it only ends when the new pattern is not in the song. |
+| Performance page with per-track patterns changed, leave it while the song plays | At the pattern end the pattern is reloaded (the changed tracks are put back), also in song mode; a slot flagged play next then plays one more time before it advances. |
 
-Known limits (plan 006): moving the cursor while the song plays needs the red edit mode (Rec) as in stock; outside it the cursor follows the playing slot. The play-next flag and the queue use the cursor slot; marks of long pattern names can overlap the names. A slot queued at the very last step of a pattern is taken one pattern later (the stock scene arm rule).
+Known limits (plan 006): the play-next flag and the queue use the cursor slot; marks of long pattern names can overlap the names. A slot queued at the very last step of a pattern is taken one pattern later (the stock scene arm rule).
 
 ## 10. Session CUT (MLR playhead, plan 002 S2)
 Open it with a double tap of Song (launcher) > screen button 8 (CUT). Title "Session: CUT   tracks 1-4"; screen buttons 1-4 choose the four tracks shown (1-4, 5-8, 9-12, 13-16); the CUT layer draws its own lane screen (no info lines). Use a project with: track 1 = ONE long
