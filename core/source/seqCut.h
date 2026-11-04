@@ -62,12 +62,13 @@ class Cut
   private:
     struct Rt
     {
-        bool stopped, resync, hold, has2, jumped2, retrig;
+        bool stopped, resync, hold, has2, jumped2, retrig, snap; // snap: SYNC ALL is pending / done (cleared by any later gesture)
         uint8_t pos2, noteStep, elapsed, heldCols;
         uint16_t held;
         View view;
     };
     void activate(uint8_t t);
+    void syncAll();
     void deactivate(uint8_t t);
     void planJump(uint8_t t, int steps, uint8_t pos, StepPlan& p);
     void publish(uint8_t t);

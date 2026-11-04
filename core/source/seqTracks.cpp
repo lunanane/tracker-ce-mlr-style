@@ -544,6 +544,7 @@ void seqTracksUpdate()
     if (s_autosaveGate.take(sequencer.isPlay()))
         newFileManager.autosaveProjectStruct_ASAP();
     seqClipsUpdate();
+    seqCutUpdate();
 
     if (s_pendingRel.any())
         s_pendingRel.retry([](uint8_t t, uint8_t p) { return seqEngine.postPad(t, p, false); });

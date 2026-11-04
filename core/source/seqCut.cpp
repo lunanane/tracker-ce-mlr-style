@@ -110,10 +110,42 @@ View Cut::view(uint8_t track) const
     return views_[track];
 }
 
+// SYNC ALL: one pass over all tracks (so they all switch in the same audio block). Every active track drops what keeps it off the
+// grid: held pads, a recorded loop or open take, rate, reverse, STOP, a queued second half-step / retrigger. Its next step boundary
+// aligns it to the global position (r.resync) and, being plain then, hands it back to the stock sequencer (boundary()).
+void Cut::syncAll()
+{
+    for (uint8_t i = 0; i < kCutTracks; i++)
+    {
+        if (!((activeMask_ >> i) & 1u)) continue;
+        Playhead& p = ph_[i];
+        Rt& r = rt_[i];
+        for (int col = 0; col < kPosCols; col++)
+            if ((r.held >> col) & 1u) p.release(col); // the held pads (and with them a two-pad loop gesture) end
+        r.held = 0;
+        p.clearRecording();
+        p.setRate(Playhead::RATE_NORMAL);
+        p.setReverse(false);
+        r.stopped = false;
+        setStopped(i, false);
+        setHold(i, false);
+        r.has2 = false;
+        r.retrig = false;
+        r.resync = true;
+        r.snap = true;
+        publish(i);
+    }
+}
+
 void Cut::apply(uint8_t t, uint8_t arg)
 {
     if (argSub(arg) == SUB_RESET)
     {
+        if (argIsSyncAll(arg))
+        {
+            syncAll();
+            return;
+        }
         for (uint8_t i = 0; i < kCutTracks; i++)
             if ((activeMask_ >> i) & 1u) deactivate(i);
         return;
@@ -130,6 +162,7 @@ void Cut::apply(uint8_t t, uint8_t arg)
     activate(t);
     Playhead& p = ph_[t];
     Rt& r = rt_[t];
+    if (down && sub != SUB_RESYNC) r.snap = false; // a new gesture after SYNC ALL: the track is wanted off the grid again (a late release is not one)
     switch (sub)
     {
         case SUB_PAD:
@@ -218,6 +251,7 @@ StepPlan Cut::boundary(uint8_t t, int steps, int globalPos, bool frozen)
     if (r.resync)
     {
         r.resync = false;
+        r.snap = false;
         r.stopped = false;
         setStopped(t, false);
         r.held = 0;
@@ -305,6 +339,11 @@ void Cut::transportStart(int fromPos)
     for (uint8_t t = 0; t < kCutTracks; t++)
     {
         if (!((activeMask_ >> t) & 1u)) continue;
+        if (rt_[t].snap)
+        {
+            deactivate(t); // SYNC ALL while stopped (or Stop = panic): no boundary came, Play starts the track on the grid
+            continue;
+        }
         Rt& r = rt_[t];
         ph_[t].restart((uint32_t)(fromPos + 1)); // the stock sequencer plays step fromPos right now
         stock_[t] = (int16_t)fromPos;

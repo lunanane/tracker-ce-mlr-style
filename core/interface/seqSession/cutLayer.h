@@ -11,11 +11,19 @@
 // closes all takes and the tracks replay them. Recorded loops and loops of tracks outside the shown group keep running.
 // LEDs: playhead position bright, loop range / other positions dim, RESYNC pad: blinking = recording, bright = a
 // recorded loop is replaying, medium = the track is off the global grid.
+// SYNC ALL (screen button 6, or Shift + any RESYNC pad): every track of all 16 snaps back onto the global playhead (loops,
+// jams, recorded replays, reverse, rate and STOP are dropped) at its next step boundary, in one audio-context pass.
 #pragma once
 #include <stdint.h>
 
-void cutPad(uint8_t col, uint8_t row, bool down);
+void cutPad(uint8_t col, uint8_t row, bool down, bool shift = false); // shift: Shift held on the press (RESYNC pad = SYNC ALL)
 void cutLeds(uint8_t* out48);        // 48 levels 0..15, index = row * 12 + col
 void cutSetGroup(uint8_t firstTrack); // 0, 4, 8 or 12 (anything else rounds down to a multiple of 4)
 void cutRec(bool down);
-void cutReleaseAll();                // leaving the layer: lets go of every held pad (loops stop, recording ends)
+void cutReleaseAll();                // leaving the layer: lets go of every held pad and ends open takes; running jams, recorded loops,
+                                     // reverse / rate / STOP of the tracks are NOT touched (plan 005 M5)
+void cutSyncAll();                   // SYNC ALL: forgets held pads / takes, queues the command (kept and retried until accepted)
+void cutPanic();                     // transport Stop: release holds and takes, then SYNC ALL (the next Play starts on the grid)
+void cutUpdate();                    // once per main loop pass, any view: retries lost releases and a SYNC ALL that did not fit
+bool cutRecHeld();                   // the Rec button is held in the CUT layer
+bool cutSyncPending();               // a SYNC ALL is waiting for room in the command queue

@@ -6,13 +6,13 @@ SEQ = ../../seqgen/chordarp.cpp ../../seqgen/mono.cpp ../../seqgen/playhead.cpp
 GLUE = ../source/seqTracksCore.cpp ../source/seqCut.cpp ../interface/seqSession/cutLayer.cpp
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
 
-.PHONY: test clean
+.PHONY: test clean preview
 test: build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE)
 	build/seq_glue_tests$(EXE)
 	build/seq_perform_tests$(EXE)
 	build/seq_mod_tests$(EXE)
 
-build/seq_glue_tests$(EXE): test_main.cpp test_session.cpp test_cut.inc ../source/seqSessionLogic.h ../source/seqCut.h ../source/seqCutLogic.h ../interface/seqSession/cutLayer.h ../source/seqTracksCore.h ../source/seqTracksLogic.h ../source/seqTracksRec.h $(GLUE) $(SEQ)
+build/seq_glue_tests$(EXE): test_main.cpp test_session.cpp test_cut.inc ../source/seqSessionLogic.h ../source/seqCut.h ../source/seqCutLogic.h ../interface/seqSession/cutLayer.h ../interface/seqSession/cutSessionLayer.h ../interface/seqSession/laneDraw.h ../interface/seqSession/laneView.h ../source/seqTracksCore.h ../source/seqTracksLogic.h ../source/seqTracksRec.h $(GLUE) $(SEQ)
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) test_main.cpp test_session.cpp $(GLUE) $(SEQ) -o $@
 
@@ -23,6 +23,12 @@ build/seq_perform_tests$(EXE): test_perform.cpp ../source/seqPerformLogic.h
 build/seq_mod_tests$(EXE): test_mod.cpp ../source/seqModLogic.h ../source/seqSidecarLogic.h ../source/seqClipsLogic.h ../source/seqTracksLogic.h
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) test_mod.cpp -o $@
+
+# PNG previews of the CUT lane screen (plan 005 R4): draw ops from the host test, rasterised by lane_preview.py (needs Pillow)
+preview: build/seq_glue_tests$(EXE)
+	mkdir -p build/preview
+	SEQ_LANE_PREVIEW=build/preview build/seq_glue_tests$(EXE) > /dev/null
+	python lane_preview.py build/preview
 
 clean:
 	rm -rf build
