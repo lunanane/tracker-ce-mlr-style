@@ -431,6 +431,51 @@ TEST(hr_bass_record_stores_the_preset_and_serialize_keeps_it) {
   CHECK(!b.s->deserialize(buf, n));
 }
 
+// ======================= Euclid Trigger =======================
+TEST(hr_euclid_rows_are_drums_tap_again_mutes_and_chance_gates_the_hits) {
+  HrRig r(HR_EUCLID);
+  r.tap(0, 0);   // row 1 (bass drum, kit "bd sd oh ch" = note 36): E(1,8)
+  r.tap(2, 1);   // row 2 (snare, 38): E(3,8)
+  r.s->start();  // step 1: both rows have an onset
+  CHECK_EQ(countOn(), 2); CHECK_EQ(g_ev[0].note, 36); CHECK_EQ(g_ev[1].note, 38); CHECK_EQ(g_ev[0].vel, 100);
+  CHECK_EQ(r.led(0, 0), 15); CHECK_EQ(r.led(2, 1), 15); CHECK_EQ(r.led(1, 0), 1);
+  clearEv();
+  r.pulses(6);   // step 2: nothing hits, both notes end
+  CHECK_EQ(countOff(), 2); CHECK_EQ(countOn(), 0);
+  CHECK_EQ(r.led(0, 0), 6);
+  r.tap(0, 0);   // the lit preset again: the row is off
+  CHECK_EQ(r.led(0, 0), 3);
+  r.s->setParam(HrEuclid::P_CHANCE, 0);
+  clearEv();
+  r.pulses(6 * 8);
+  CHECK_EQ(countOn(), 0);  // chance 0: nothing sounds (snare row included)
+  r.s->setParam(HrEuclid::P_GROUPING, 4);  // "bd toms": row 2 = low tom 41
+  CHECK_EQ(r.s->getParam(HrEuclid::P_NOTE2), 41);
+  r.s->stop();
+  CHECK_EQ(r.led(2, 1), 1);
+}
+TEST(hr_euclid_record_and_serialize_per_row) {
+  HrRig a(HR_EUCLID), b(HR_EUCLID);
+  a.tap(3, 2);                 // row 3: E(4,8)
+  a.s->start();
+  a.s->pad(7, 2, true);        // hold Rec of row 3
+  a.pulses(6 * 8);             // one chain
+  a.s->pad(7, 2, false);
+  a.s->stop();
+  uint8_t buf[HrScript::kMaxSerial];
+  size_t n = a.s->serialize(buf, sizeof buf);
+  CHECK_EQ(n, HrEuclid::kSerialSize);
+  CHECK(b.s->deserialize(buf, n));
+  clearEv();
+  b.s->start();                // the stored pattern of row 3 plays (step 1 of E(4,8) is an onset): row 3 of the default kit = open hat 46
+  CHECK_EQ(countOn(), 1); CHECK_EQ(g_ev[0].note, 46);
+  uint8_t buf2[HrScript::kMaxSerial];
+  CHECK_EQ(b.s->serialize(buf2, sizeof buf2), n);
+  for (size_t i = 0; i < n; ++i) CHECK_EQ(buf[i], buf2[i]);
+  buf[1] = 9;
+  CHECK(!b.s->deserialize(buf, n));
+}
+
 // ======================= helpers, bus, slots, legends =======================
 TEST(hr_euclid_and_velocity_helpers) {
   uint8_t o[16];

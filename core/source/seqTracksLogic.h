@@ -6,7 +6,7 @@
 namespace seqlogic {
 
 // Types 3.. are the ported HYPER_RASP pad scripts (seqgen/hr.h, HrType order); kHrScripts must equal seqgen::HR_COUNT (static_assert in seqTracksCore.cpp).
-enum { kHrScripts = 5 };
+enum { kHrScripts = 6 };
 enum TrackType : uint8_t { TYPE_OFF = 0, TYPE_CHORDARP = 1, TYPE_MONO = 2, TYPE_HR_FIRST = 3, TYPE_COUNT = TYPE_HR_FIRST + kHrScripts };
 inline bool isHrType(uint8_t type) { return type >= TYPE_HR_FIRST && type < TYPE_COUNT; }
 enum { kTracks = 16, kPads = 48, kPadCols = 12 };

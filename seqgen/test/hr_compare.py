@@ -33,6 +33,8 @@ function current_scale() if BS==nil then return nil end local c={} for i,v in ip
 function set_root_note(n) BR=n end
 function current_root_note() return BR end
 function metro(...) return {start=function() end, stop=function() end} end
+RS=1
+math.random=function(n) RS=(RS*1664525+1013904223)&0xFFFFFFFF; return ((RS>>16)%n)+1 end  -- the stand-in the port (HrEuclid::rollsUnder) uses too
 function pset_init() end
 function pset_read() return nil end
 function call_opt(name, ...) local f=_G[name]; if f then return f(...) end end
@@ -319,12 +321,31 @@ def gen_bass(rng, n):
     return cmds
 
 
+def gen_euclid(rng, n):
+    cmds = []
+    for _ in range(n):
+        r = rng.random()
+        if r < 0.30: cmds += tap(rng.randint(1, 7), rng.randint(1, 4)) if rng.random() < 0.9 else ["grid %d %d 1" % (rng.randint(1, 8), rng.randint(1, 4))]
+        elif r < 0.38: y = rng.randint(1, 4); cmds += ["grid 8 %d 1" % y, "pulse %d" % rng.choice([6, 12, 48, 100, 400]), "grid 8 %d 0" % y]
+        elif r < 0.62: cmds.append("pulse %d" % rng.choice([1, 1, 2, 3, 5, 6, 6, 12, 24, 40, 100]))
+        elif r < 0.67: cmds.append("param grouping %d" % rng.randint(1, 8))
+        elif r < 0.72: cmds.append("param vel %d" % rng.randint(1, 127))
+        elif r < 0.78: cmds.append("param chance %d" % rng.choice([0, 100, 100, 50, 25, 75, rng.randint(0, 100)]))
+        elif r < 0.81: cmds.append("param swing %d" % rng.randint(0, 60))
+        elif r < 0.85: cmds.append("param note%d %d" % (rng.randint(1, 4), rng.randint(24, 96)))
+        elif r < 0.92: cmds.append(rng.choice(["start", "start", "stop"]))
+        else: cmds.append("sync")
+    cmds.append("sync")
+    return cmds
+
+
 SCRIPTS = {
     "arp_lines": ("arp_lines.lua", lambda rng, n: gen_stab(rng, n, True)),
     "chord_stabs": ("chord_stabs.lua", lambda rng, n: gen_stab(rng, n, False)),
     "arp_seq": ("arp_seq.lua", gen_arpseq),
     "chord_arp": ("chord_arp.lua", gen_chordarp),
     "bassline_seq": ("bassline_seq.lua", gen_bass),
+    "euclid_trigger": ("euclid_trigger.lua", gen_euclid),
 }
 
 
