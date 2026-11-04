@@ -53,12 +53,44 @@ A jump to position X re-plays the track **as if its playhead had been at X**:
   windows × 4 tracks × 8 KB ≈ 256–384 KB of the ~1.1 MB free SDRAM. Samples that fit in RAM (7.5 MB mono pool on
   the original) need nothing.
 
+## Clip launcher — "like Ableton Live" (owner 2026-11-04)
+The Session view gets two layers on the pads: **CLIPS** (launch pad, default) and **CUT** (the MLR layer above).
+A clip = one track's part in one pattern; a scene = a whole pattern.
+```
+        1  2  3  4  5  6  7  8 |  9      10      11     12
+  r1    clips: 8 tracks ×      |  SCENE  STOP-T  CLIPS  QUANT
+  r2    4 patterns (window)    |  SCENE  —       CUT    —
+  r3                           |  SCENE  —       —      —
+  r4                           |  SCENE  STOP-A  —      —
+```
+- Columns 1–8 = tracks of the current group (screen buttons / Shift as elsewhere: tracks 1–8 or 9–16), rows =
+  4 patterns; the **jog wheel scrolls** the pattern window.
+- **Tap a clip** → that track plays its part from that pattern (queued, launched at the quantise point).
+  LEDs: bright = playing, blinking = queued, dim = has notes, off = empty.
+- **SCENE** (column 9) → launch the whole pattern (all tracks), stock pattern switch, quantised.
+- **STOP-T** held + clip pad → stop that track (it goes silent until a clip is launched); **STOP-A** → stop all
+  clips at the quantise point. [provisional]
+- **CLIPS / CUT** switch the pad layer; CUT = the MLR page (jumps, two-pad loops, playhead recording) for the
+  same group. Recorded playhead loops keep running in both layers.
+- **QUANT** cycles launch quantise: next bar / next pattern end / immediate [provisional; default next bar].
+- Screen: pattern numbers of the window, per-track "now playing pattern" and queued pattern.
+
+### Firmware basis
+- The stock Performance mode already plays a track from another pattern: `Sequencer::setTrackToLoadOnSwitch` /
+  `setTrackToLoadNow` → `cFileManager::loadPerformanceTrackToBuffer` (reads that pattern file, copies one track
+  into `fileManagerPerformancePatternBuffer`) → `switchPerformanceTrackNow` at the track's loop end.
+- Gaps to fill: launch at a bar instead of the track's loop end; a per-track "stopped" state; the pattern file read
+  is synchronous on the main loop (fine with quantised launch, must not happen in audio context); per-track
+  lengths follow the source pattern's length. Check `kPerformanceTracks` covers all 16 tracks (MIDI tracks).
+- Scene launch = stock pattern switch (`sequencialSwitch`) so behaviour matches the Pattern page.
+
 ## Open questions
 - 8 columns + 4 control columns, or 12 position columns with controls on the screen buttons?
 - Quantise default (next step / next beat).
 - Does a retriggered track return to sync at pattern end, or stay offset until re-synced?
 
 ## Phases
+- **S0 clip launcher** (CLIPS layer, on top of the Performance-mode track loading) — first, it reuses the most.
 - **S1 library** (DONE 2026-11-04: `seqgen/playhead.*`, 24 host tests, 99 total green; press-over-recording rule = override while held, resume in phase, see seqgen/README "Playhead") (`seqgen/playhead.*`, host tests, no hardware): quantised jumps, two-pad loop ranges, playhead
   recording + looping, the "as if at X" note/offset lookup, rate ½/2×, reverse.
 - **S2 firmware glue**: Session view page, per-track playhead override in `inc_uStep`/`switchRowStep`, retrigger

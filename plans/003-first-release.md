@@ -13,7 +13,7 @@ Order is sequential (one implementation agent at a time, lead reviews + builds b
    pattern back instantly; next-bar type change while playing.
 2. **B — Record** (plan 001 P3): Rec punch-in (replace), Shift + Rec one exact loop, one undo step; sidecar
    `seqtracks.bin` save/load with the project.
-3. **C — Session view** (plan 002 S2): Pattern tap cycle Editor → Play → Session; 4 tracks × columns, jumps,
+3. **C — Session view** (plan 002): C1 clip launcher (CLIPS layer: launch track clips and scenes, Ableton-style), then C2 (S2): Pattern tap cycle Editor → Play → Session; 4 tracks × columns, jumps,
    two-pad loops, playhead recording with seqgen::Playhead; retrigger with sample offset. Cut cache (S3) → v0.2.
 4. **D — Alt Performance page** (plan 004): Performance tap toggles; 4 horizontal 8-step faders, 8 function
    groups (stock perform FX, sends, ping-pong, reverb). In v0.1 only if solid in time.
