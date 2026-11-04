@@ -6,6 +6,7 @@
 #include "fileManagerDefs.h"
 #include "fileTransfer.h"
 #include "elapsedMillis.h"
+#include <cr_section_macros.h>
 #include <stdio.h>
 
 extern Sequencer sequencer;
@@ -128,6 +129,13 @@ void Sequencer::seqWriteStep(uint8_t track, uint8_t stepIdx, uint8_t kind, uint8
     if (track >= kAllTracks || stepIdx > MAXSTEP)
         return;
     strPattern::strTrack::strStep* step = &currentPattern->track[track].step[stepIdx];
+    if (kind == seqrec::OP_OFF_SOFT)
+    {
+        // end of a recording: a note-off only where the pattern holds no note (stock rule)
+        if (step->isNoteEmpty())
+            step->note = STEP_NOTE_OFF_DEFAULT;
+        return;
+    }
     clearStep(step);
     if (kind == seqrec::OP_NOTE)
     {
@@ -174,10 +182,14 @@ void projectSidecarPath(char* out, size_t cap, const char* path, const char* nam
     snprintf(out, cap, "%s/%s/%s", path, name, kSidecarName);
 }
 
+// One shared buffer for all sidecar file steps (main thread, one at a time). Kept in external RAM: the MK66 stack is only
+// 4 KB and on the Plus SRAM_DTC is nearly full.
+__NOINIT(EXTERNAL_RAM) uint8_t s_io[seqtracks::Engine::kSidecarMax];
+
 bool writeSidecar(const char* path)
 {
-    uint8_t buf[seqtracks::Engine::kSidecarMax];
-    size_t n = seqEngine.saveState(buf, sizeof(buf));
+    uint8_t* buf = s_io;
+    size_t n = seqEngine.saveState(buf, seqtracks::Engine::kSidecarMax);
     if (!n)
         return false;
     return fileTransfer.saveMemoryToFile(buf, path, (uint32_t)n) == fileTransferEnd;
@@ -186,9 +198,9 @@ bool writeSidecar(const char* path)
 // Reads a sidecar into the engine. Missing or invalid file: every track Off (stock behaviour).
 bool readSidecar(const char* path)
 {
-    uint8_t buf[seqtracks::Engine::kSidecarMax];
-    uint8_t st = fileTransfer.loadFileToMemory(path, buf, sizeof(buf), fileWholeOnce);
-    if (st == fileTransferEnd && seqEngine.loadState(buf, sizeof(buf)))
+    uint8_t* buf = s_io;
+    uint8_t st = fileTransfer.loadFileToMemory(path, buf, seqtracks::Engine::kSidecarMax, fileWholeOnce);
+    if (st == fileTransferEnd && seqEngine.loadState(buf, seqtracks::Engine::kSidecarMax))
         return true;
     seqEngine.resetState();
     return false;
@@ -298,9 +310,9 @@ void seqTracksSaveProject(const char* path, const char* name)
 
 void seqTracksImportProject(const char* path, const char* name)
 {
-    uint8_t buf[seqtracks::Engine::kSidecarMax];
+    uint8_t* buf = s_io;
     char file[PATCH_SIZE];
     projectSidecarPath(file, sizeof(file), path, name);
-    if (fileTransfer.loadFileToMemory(file, buf, sizeof(buf), fileWholeOnce) == fileTransferEnd)
-        fileTransfer.saveMemoryToFile(buf, kWorkspaceSidecar, sizeof(buf));
+    if (fileTransfer.loadFileToMemory(file, buf, seqtracks::Engine::kSidecarMax, fileWholeOnce) == fileTransferEnd)
+        fileTransfer.saveMemoryToFile(buf, kWorkspaceSidecar, seqtracks::Engine::kSidecarMax);
 }

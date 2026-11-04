@@ -76,12 +76,26 @@ Prepare: a project with an empty pattern (or any pattern, you will see it being 
 hardware on its channel and one **sample track** (1-8). In Play mode give the MIDI track Chord/Arp and the sample track Mono.
 All recording happens on the **current track** of Play mode (the bracketed one). Stock Rec outside Play mode is unchanged.
 
+## 6b. How to get a 3- or 4-note chord (default is ONE note)
+A new Chord/Arp track starts in the c31 default: chord type 1 = a single note (the root), size 5. Holding a root pad therefore sounds
+one note until you pick a chord type. In the panel (columns 7-10, TYPES panel is the default; counting columns from 1 and rows from 1
+at the top-left pad of the screen) press once, before or while holding a root:
+| Pad (column, row) | Chord |
+|---|---|
+| 8, 1 | two-note (1-2) |
+| 9, 1 | triad (1-3-5): **press this one for a 3-note chord** |
+| 10, 1 | sus-like triad (1-4-5) |
+| 7, 2 | 1-3-5-6 (four notes) |
+| 8, 2 | 1-3-5-7 (**4-note chord**) |
+| 9, 2 | 1-3-5-7-9 (five notes, needs size 5; the recorder keeps the first four that match the Tracker chord table) |
+Then hold a root pad in columns 1-6. The selection stays when you release (it is saved with the project).
+
 ## 7. Record in Play mode
 | Press | Expected |
 |---|---|
 | Rec on a track whose type is Off | Info line "Pick a sequencer type first (Instr + jog wheel)". Nothing records, the transport does not start. |
 | Transport stopped, Chord/Arp track: press **Rec** | The transport starts at step 1 and recording starts at once. Info line "REC track N: punch-in (Rec = end)". |
-| Hold a root pad for a few steps, release | The chord keeps sounding while held (Live). Press **Rec** again: the info line clears. Leave Play mode (tap Pattern): the pattern page shows a note with the chord FX (`MIDI chord`) on the first step of the chord, steps you passed with no chord are empty, **even where the pattern had notes before** (replace). |
+| (Triad chosen, see 6b) Hold a root pad for a few steps, release | The chord keeps sounding while held (Live). Press **Rec** again: the info line clears. Leave Play mode (tap Pattern): the pattern page shows a note with the chord FX (`MIDI chord`) on the first step of the chord, steps you passed with no chord are empty, **even where the pattern had notes before** (replace). |
 | Quantise | A note that starts in the first half of a step (before the middle) lands on that step, in the second half on the next step (like stock live record). With rec microtiming ON in the Config the note stays on its step and gets a micromove value instead. |
 | Velocity | With rec velocity ON in the Config the step volume follows the sequencer velocity (the c31 groove), otherwise the volume stays default. |
 | Undo | In the pattern editor press the stock **Undo**: the whole recording disappears in **one** step and the previous pattern is back. Redo brings it back. |
@@ -89,6 +103,7 @@ All recording happens on the **current track** of Play mode (the bracketed one).
 | Chord on a **sample** track (Chord/Arp type on tracks 1-8) | Only the lowest chord note is written. Info line "Chords need a MIDI track (lowest note recorded)". |
 | Chord that is not in the Tracker chord table (a 5-note chord, wide voicing) on a MIDI track | The highest notes are dropped until the table matches, the step gets the shorter chord FX. Info line "Chord reduced to fit the Tracker chord table". |
 | Stop the transport while recording | Recording ends by itself. Steps written so far stay, one undo step. |
+| End of a recording (Rec, loop end, stop) while the last note is still held/open | A note-off is written on the next step that holds no note, so the last note does not ring into the old pattern content; a step that already has a note is left alone. |
 | Change the pattern (Song mode) while recording | Recording ends; nothing is written into the new pattern. |
 | Set the recorded track to Off (Instr + jog) while recording | Recording ends when the change applies (next bar). |
 | Rec held in other pages | Outside Play mode Rec is the stock Rec (edit mode). Recording started in Play mode keeps running when you leave; come back to Play mode and press Rec to end it. |

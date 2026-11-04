@@ -680,6 +680,122 @@ static void test_engine_rec_loop_and_stop()
     delete e;
 }
 
+
+static void test_planner_punch_out_note_off()
+{
+    // punch-out while the last note is open: a soft note-off on the next step without a note
+    OpLog log;
+    seqrec::Planner pl;
+    pl.setSink(&OpLog::sink, &log);
+    pl.begin(0, false, 0);
+    pl.enter(1);
+    pl.noteOn(60, 90, TP(1, 1), P());
+    pl.flush();
+    pl.enter(2);
+    pl.stop();
+    CHECK(log.at(2)->kind == seqrec::OP_OFF_SOFT && log.count(seqrec::OP_OFF_SOFT) == 1);
+    // note on the very step where it stops: the off goes one step later
+    OpLog l2;
+    seqrec::Planner p2;
+    p2.setSink(&OpLog::sink, &l2);
+    p2.begin(0, false, 0);
+    p2.enter(4);
+    p2.noteOn(60, 90, TP(4, 1), P());
+    p2.flush();
+    p2.stop();
+    CHECK(l2.at(5)->kind == seqrec::OP_OFF_SOFT);
+    // already closed by a note-off: nothing extra
+    OpLog l3;
+    seqrec::Planner p3;
+    p3.setSink(&OpLog::sink, &l3);
+    p3.begin(0, false, 0);
+    p3.enter(1);
+    p3.noteOn(60, 90, TP(1, 1), P());
+    p3.flush();
+    p3.noteOff(TP(1, 10), P());
+    p3.enter(2);
+    p3.stop();
+    CHECK(l3.count(seqrec::OP_OFF_SOFT) == 0);
+    // nothing recorded: nothing written
+    OpLog l4;
+    seqrec::Planner p4;
+    p4.setSink(&OpLog::sink, &l4);
+    p4.begin(0, false, 3);
+    p4.stop();
+    CHECK(l4.ops.empty());
+    // end of a one-loop recording: the last note is closed at the end of the loop
+    OpLog l5;
+    seqrec::Planner p5;
+    p5.setSink(&OpLog::sink, &l5);
+    p5.begin(0, true, 0);
+    p5.enter(0);
+    for (uint8_t s = 1; s <= 15; s++)
+    {
+        p5.enter(s);
+        if (s == 14)
+        {
+            p5.noteOn(60, 90, TP(14, 1), P());
+            p5.flush();
+        }
+    }
+    p5.enter(0);
+    CHECK(p5.state() == seqrec::Planner::IDLE);
+    CHECK(l5.count(seqrec::OP_OFF_SOFT) == 1 && l5.at(15)->kind == seqrec::OP_OFF_SOFT);
+}
+
+// a real multi-note chord through the engine: panel TYPES pad "triad" (pad 8), then a root pad
+static void test_engine_rec_chord()
+{
+    MockHost h;
+    Engine* e = mk(h);
+    e->postType(2, TYPE_CHORDARP);
+    e->idleTick();
+    e->postPad(2, 8, true); // panel TYPES, 3rd pad of the first row: triad
+    e->postPad(2, 8, false);
+    Head hd;
+    playRec(*e, h, hd, 5);
+    e->postRec(2, Engine::REC_PUNCH);
+    playRec(*e, h, hd, 1);
+    e->postPad(2, 0, true); // root pad: chord of three notes
+    playRec(*e, h, hd, 48 * 3);
+    std::vector<seqrec::Op> ops = drainOps(*e);
+    int chords = 0;
+    for (size_t i = 0; i < ops.size(); i++)
+        if (ops[i].kind == seqrec::OP_NOTE && ops[i].chord != seqrec::kNoChord)
+        {
+            chords++;
+            CHECK(ops[i].instrument == 3);
+            // the written note is the lowest sounding note and the chord FX matches the intervals
+            int notes = 0;
+            for (size_t k = 0; k < h.log.size(); k++)
+                if (h.log[k].kind == '+' && h.log[k].track == 2)
+                    notes++;
+            CHECK(notes == 3);
+            CHECK(ops[i].chord >= 1 && ops[i].chord <= MAX_CHORD);
+        }
+    CHECK(chords == 1);
+    CHECK(e->recHints() == 0);
+    // the same on a sample track: lowest note only plus the hint
+    e->postRec(2, Engine::REC_STOP);
+    playRec(*e, h, hd, 1);
+    h.sample = true;
+    e->postRec(2, Engine::REC_PUNCH);
+    e->postPad(2, 0, false);
+    playRec(*e, h, hd, 48);
+    e->postPad(2, 0, true);
+    playRec(*e, h, hd, 48 * 3);
+    ops = drainOps(*e);
+    int single = 0;
+    for (size_t i = 0; i < ops.size(); i++)
+        if (ops[i].kind == seqrec::OP_NOTE)
+        {
+            single++;
+            CHECK(ops[i].chord == seqrec::kNoChord);
+        }
+    CHECK(single >= 1 && (e->recHints() & seqrec::HINT_NEED_MIDI));
+    delete e;
+}
+
 // ---------------------------------------------------------------- sidecar
 static uint16_t testCrc(const uint8_t* b, size_t n)
 {
@@ -809,6 +925,8 @@ int main()
     test_planner_chord_groups();
     test_engine_rec_punch();
     test_engine_rec_loop_and_stop();
+    test_planner_punch_out_note_off();
+    test_engine_rec_chord();
     test_sidecar_roundtrip_and_corruption();
     test_state_change_detection();
     printf("%d checks, %d failures\n", g_checks, g_fail);

@@ -14,7 +14,8 @@ enum OpKind : uint8_t
 {
     OP_CLEAR = 0, // whole step cleared (a step passed without a sequencer note)
     OP_NOTE = 1,  // whole step replaced by a note (+ optional chord FX, volume, micromove)
-    OP_OFF = 2    // whole step replaced by a note-off
+    OP_OFF = 2,   // whole step replaced by a note-off
+    OP_OFF_SOFT = 3 // note-off only if the step in the pattern holds no note (end of a recording)
 };
 enum { kNoChord = 0xFF, kNoMicro = -1, kNoVolume = -1, kMaxGroup = 8, kMaxSteps = 128 };
 
@@ -124,6 +125,19 @@ class Planner
     {
         if (state_ == IDLE)
             return;
+        flush();
+        if (open_)
+        {
+            // the last note is still sounding: close it on the next step without a note (stock rule), so it
+            // does not ring into the old pattern content
+            unsigned span = span_ ? span_ : (unsigned)kMaxSteps;
+            unsigned d = haveEntered_ ? entered_ : 0u;
+            if (d == lastOn_)
+                d = (d + 1u) % span;
+            if (d < (unsigned)kMaxSteps && stateOf((uint8_t)d) == 0)
+                emit(OP_OFF_SOFT, (uint8_t)d, 0, 0, kNoChord, kNoVolume, kNoMicro);
+            open_ = false;
+        }
         pending_ = 0;
         state_ = IDLE;
         ends_++;
@@ -160,6 +174,7 @@ class Planner
     {
         if (state_ != PUNCH && state_ != LOOP)
             return;
+        span_ = (uint16_t)(p.last + 1u);
         uint8_t d = destStep(p, prm.quantize, false);
         int8_t mm = micro(p, prm.quantize);
         if (state_ == LOOP && d == 0 && haveEntered_ && entered_ != 0)
@@ -222,6 +237,7 @@ class Planner
         }
         claim(gDest_, 2);
         lastOn_ = gDest_;
+        open_ = true;
         emit(OP_NOTE, gDest_, gNotes_[0], instrument, chord, gVol_, gMicro_);
     }
 
@@ -238,12 +254,14 @@ class Planner
         if (state_ != PUNCH && state_ != LOOP)
             return;
         flush();
+        span_ = (uint16_t)(p.last + 1u);
         uint8_t d = destStep(p, prm.quantize, true);
         if (state_ == LOOP && d == 0 && haveEntered_ && entered_ != 0)
             return;
         if (stateOf(d) != 0)
             return; // a note (or an off) already owns that step
         claim(d, 1);
+        open_ = false;
         emit(OP_OFF, d, 0, 0, kNoChord, kNoVolume, micro(p, prm.quantize));
     }
 
@@ -259,6 +277,8 @@ class Planner
         haveEntered_ = false;
         stepsSeen_ = 0;
         lastOn_ = 0xFF;
+        open_ = false;
+        span_ = 0;
         pending_ = 0;
         gDest_ = 0;
         gMicro_ = kNoMicro;
@@ -319,6 +339,8 @@ class Planner
     bool haveEntered_;
     uint16_t stepsSeen_;
     uint8_t lastOn_;
+    bool open_;      // a note was written and no note-off yet
+    uint16_t span_;  // steps of the recorded track
     uint8_t pending_;
     uint8_t gNotes_[kMaxGroup];
     uint8_t gDest_;

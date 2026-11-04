@@ -507,9 +507,8 @@ void Engine::onEvent(const seqgen::Event& e)
 }
 
 // ------------------------------------------------------------------ project sidecar
-static uint16_t crc16(const uint8_t* b, size_t n)
+static uint16_t crc16Update(uint16_t c, const uint8_t* b, size_t n)
 {
-    uint16_t c = 0xFFFF;
     for (size_t i = 0; i < n; i++)
     {
         c = (uint16_t)(c ^ ((uint16_t)b[i] << 8));
@@ -517,6 +516,10 @@ static uint16_t crc16(const uint8_t* b, size_t n)
             c = (uint16_t)((c & 0x8000) ? ((c << 1) ^ 0x1021) : (c << 1));
     }
     return c;
+}
+static uint16_t crc16(const uint8_t* b, size_t n)
+{
+    return crc16Update(0xFFFF, b, n);
 }
 
 size_t Engine::saveState(uint8_t* buf, size_t cap) const
@@ -552,9 +555,20 @@ size_t Engine::saveState(uint8_t* buf, size_t cap) const
 
 uint16_t Engine::stateHash() const
 {
-    uint8_t buf[kSidecarMax];
-    size_t n = saveState(buf, sizeof(buf));
-    return n ? crc16(buf, n) : 0;
+    // incremental: no full-size buffer (the MK66 stack is 4 KB)
+    uint8_t blk[seqgen::Mono::kSerialSize];
+    uint16_t c = 0xFFFF;
+    for (int i = 0; i < kTracks; i++)
+    {
+        const Track& t = t_[i];
+        blk[0] = t.type;
+        c = crc16Update(c, blk, 1);
+        size_t n = t.ca.serialize(blk, sizeof(blk));
+        c = crc16Update(c, blk, n);
+        n = t.mo.serialize(blk, sizeof(blk));
+        c = crc16Update(c, blk, n);
+    }
+    return c;
 }
 
 void Engine::resetState()
@@ -590,8 +604,6 @@ bool Engine::loadState(const uint8_t* buf, size_t len)
 
     // pass 1: every block must be valid before anything changes
     {
-        seqgen::ChordArp ca;
-        seqgen::Mono mo;
         size_t p = 8;
         for (int i = 0; i < kTracks; i++)
         {
@@ -599,12 +611,24 @@ bool Engine::loadState(const uint8_t* buf, size_t len)
                 return false;
             p++;
             size_t n = buf[p++];
-            if (p + n + 1 > end || (n != 0 && !ca.deserialize(buf + p, n)))
+            if (p + n + 1 > end)
                 return false;
+            if (n != 0)
+            {
+                seqgen::ChordArp ca; // one temporary at a time (stack)
+                if (!ca.deserialize(buf + p, n))
+                    return false;
+            }
             p += n;
             n = buf[p++];
-            if (p + n > end || (n != 0 && !mo.deserialize(buf + p, n)))
+            if (p + n > end)
                 return false;
+            if (n != 0)
+            {
+                seqgen::Mono mo;
+                if (!mo.deserialize(buf + p, n))
+                    return false;
+            }
             p += n;
         }
         if (p != end)
