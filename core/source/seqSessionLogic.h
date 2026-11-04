@@ -245,6 +245,8 @@ struct LiveState
     bool active(bool playing, bool songMode) const { return on && playing && !songMode; }
     // a launch must freeze the song first
     static bool needsFreeze(bool playing, bool songMode) { return playing && songMode; }
+    // after the freeze the global-step callback arms the queued scene (it holds the slot the scene's own arm callback needs)
+    static bool armAfterFreeze(bool armRequested, bool sceneQueued) { return armRequested && sceneQueued; }
 };
 
 // ---- grid screen (clipGrid.*): geometry and the data the controls draw ----------------------------------------------

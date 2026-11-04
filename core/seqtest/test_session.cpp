@@ -562,6 +562,8 @@ static void test_live_state()
     // a launch while the song plays freezes it; while the transport is stopped or the song is not running nothing freezes
     SCHECK(LiveState::needsFreeze(true, true));
     SCHECK(!LiveState::needsFreeze(true, false) && !LiveState::needsFreeze(false, true) && !LiveState::needsFreeze(false, false));
+    SCHECK(LiveState::armAfterFreeze(true, true));
+    SCHECK(!LiveState::armAfterFreeze(false, true) && !LiveState::armAfterFreeze(true, false) && !LiveState::armAfterFreeze(false, false));
     s.freeze(4);
     SCHECK(s.on && s.slot == 4 && s.active(true, false));
     SCHECK(!s.active(false, false));   // Stop ends LIVE for the display

@@ -1957,13 +1957,16 @@ void Sequencer::switchRowStep(uint8_t row) // przełączamy stepy w zależności
         if (!isNextPatternAvailable)
             player.onSongEnd();
 
-        if (patternSwitched && (mtInterface.isPerformanceModeScreenActive() || mtInterface.isSeqPerformScreenActive()))
+        if (patternSwitched)
         {
+            // full-pattern switch (every track changes): keep the per-track patterns in step on every screen, so
+            // isPerformancePatternChanged() is not left stale for kept fader FX
             for (uint8_t a = 0; a < kPerformanceTracks; a++)
             {
                 mtProject.perfTracksPatterns[a] = mtProject.values.actualPattern;
             }
-            PM->refreshTrackPattern = 1;
+            if (mtInterface.isPerformanceModeScreenActive() || mtInterface.isSeqPerformScreenActive())
+                PM->refreshTrackPattern = 1;
         }
     }
 }

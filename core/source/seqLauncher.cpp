@@ -33,6 +33,7 @@ uint8_t s_refusal = seqsession::REFUSE_NONE; // why the last launch was refused
 // every step until the sequencer is not changing pattern, so a tap on the last step is not refused)
 volatile bool s_wantFreeze = false;
 volatile bool s_wantBack = false;
+volatile bool s_wantArm = false; // a queued scene is to be armed (SetReadyNow) once cbkLive is done: the callback slot is shared
 
 // Play 1x follow actions: at most one attempt per step, hard read errors count towards giving up
 uint16_t s_lastTry = 0xFFFF;
@@ -243,6 +244,13 @@ void cbkLive()
             sequencer.continueSong(mtProject.song.playlistPos); // at the pattern end the song goes on with the next slot
         s_live.clear();
     }
+    if (s_wantArm)
+    {
+        s_wantArm = false;
+        // the scene arm callback this one replaced: arm now, after the freeze (the pattern is not at its last step here)
+        if (seqsession::LiveState::armAfterFreeze(true, sequencer.sequencialSwitch_GetNext() != 0))
+            sequencer.sequencialSwitch_SetReadyNow();
+    }
     sequencer.setOnGlobalStep(nullCallback);
 }
 
@@ -250,6 +258,9 @@ void requestFreezeIfNeeded()
 {
     if (!seqsession::LiveState::needsFreeze(sequencer.isPlay(), sequencer.isSongMode()))
         return;
+    // taking the shared slot would drop a queued scene's arm callback: cbkLive arms it instead
+    if (sequencer.sequencialSwitch_GetNext() != 0)
+        s_wantArm = true;
     s_wantFreeze = true;
     sequencer.setOnGlobalStep(cbkLive);
 }
@@ -684,6 +695,7 @@ void seqSessionPanic()
 {
     s_wantFreeze = false;
     s_wantBack = false;
+    s_wantArm = false;
     DISABLE_AUDIO_INTERRUPTS(); // the launcher and the player state are audio-side data
     seqLauncher.panic();
     ENABLE_AUDIO_INTERRUPTS();
@@ -716,6 +728,7 @@ bool seqSessionLaunchScene(uint8_t pattern)
         // stock pattern switch: queued, happens at the end of the pattern (like Pattern + left / right)
         if (newFileManager.isPatternLoading())
             return false;
+        const bool freezing = seqsession::LiveState::needsFreeze(sequencer.isPlay(), sequencer.isSongMode());
         requestFreezeIfNeeded(); // the song would pick the next pattern itself
         uint16_t base = sequencer.sequencialSwitch_GetNext();
         if (base == 0)
@@ -727,7 +740,10 @@ bool seqSessionLaunchScene(uint8_t pattern)
             sequencer.sequencialSwitch_changeNextPattern((int8_t)step);
             delta -= step;
         } while (delta != 0);
-        sequencer.sequencialSwitch_SetReady();
+        if (freezing)
+            s_wantArm = true; // cbkLive owns the slot: SetReady would overwrite it and the song would never go live
+        else
+            sequencer.sequencialSwitch_SetReady();
         return true;
     }
     // transport stopped: switch at once, like the Pattern page does

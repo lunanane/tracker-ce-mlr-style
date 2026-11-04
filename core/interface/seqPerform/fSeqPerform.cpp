@@ -124,6 +124,13 @@ void cSeqPerform::start(uint32_t options)
         memset(stockVal, 0, sizeof(stockVal));
         stockOn = 0;
         page = PAGE_FX1;
+        if (!handedOver)
+        {
+            // nothing handed over: every track plays the actual pattern, so a stale per-track pattern cannot make
+            // isPerformancePatternChanged() reload the pattern from SD
+            for (uint8_t a = 0; a < kPerformanceTracks; a++)
+                mtProject.perfTracksPatterns[a] = mtProject.values.actualPattern;
+        }
         if (entered && !handedOver)
         {
             // as the stock page does when it starts with nothing handed over: no rows selected, no track affected

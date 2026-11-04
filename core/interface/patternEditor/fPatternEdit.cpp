@@ -1236,7 +1236,8 @@ void cPatternEditor::changeActualPattern(int16_t value)
     sequencer.sequencialSwitch_Reset();
     sequencer.setOnGlobalStep(nullCallback);
 
-    if (value && (sequencer.getSeqState() != sequencer.SEQ_STATE_PLAY_PERFORMANCE || seqSessionOwnsPerformance()))
+    if (value && (sequencer.getSeqState() != sequencer.SEQ_STATE_PLAY_PERFORMANCE || seqSessionOwnsPerformance() ||
+         !sequencer.isPerformancePatternChanged()))
     {
         newFileManager.saveWorkspacePatternNow(mtProject.values.actualPattern);
         if (seqSessionSaveFailed())
@@ -1268,7 +1269,8 @@ void cPatternEditor::changeActualPattern(int16_t value)
 
 void cPatternEditor::setActualPattern(int16_t value)
 {
-    if (sequencer.getSeqState() != sequencer.SEQ_STATE_PLAY_PERFORMANCE || seqSessionOwnsPerformance())
+    if (sequencer.getSeqState() != sequencer.SEQ_STATE_PLAY_PERFORMANCE || seqSessionOwnsPerformance() ||
+         !sequencer.isPerformancePatternChanged())
     {
         newFileManager.saveWorkspacePatternNow(mtProject.values.actualPattern);
         if (seqSessionSaveFailed())

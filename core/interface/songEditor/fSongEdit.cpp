@@ -343,7 +343,8 @@ void playSongFromSelectedPattern_stop()
     SE->lastSongListPos = -1;
     sequencer.stop();
     SE->hideIcon();
-    if (performanceMode.turnOff())
+    const bool reload = sequencer.isPerformancePatternChanged();
+    if (performanceMode.turnOff() && reload)
     {
         newFileManager.loadWorkspacePatternNow(mtProject.values.actualPattern);
         sequencer.switchRamPatternsNow();

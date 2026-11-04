@@ -12,19 +12,19 @@ enum PerfOwner : uint8_t { PERF_OWNER_LAUNCHER = 1, PERF_OWNER_FX = 2 };
 
 struct PerfOwners
 {
-    volatile uint8_t mask = 0; // read from the audio interrupt, written from both contexts (single byte)
+    volatile uint8_t mask = 0; // read from the audio interrupt, written from both contexts (atomic RMW)
     // true: this claim switched the flag on (nobody owned it before)
     bool claim(uint8_t owner)
     {
-        bool first = mask == 0;
-        mask = (uint8_t)(mask | owner);
-        return first;
+        // atomic read-modify-write: main loop and sequencer interrupt both claim / release
+        uint8_t before = __atomic_fetch_or(&mask, owner, __ATOMIC_SEQ_CST);
+        return before == 0;
     }
     // true: no owner is left, performance mode may be switched off now
     bool release(uint8_t owner)
     {
-        mask = (uint8_t)(mask & ~owner);
-        return mask == 0;
+        uint8_t before = __atomic_fetch_and(&mask, (uint8_t)~owner, __ATOMIC_SEQ_CST);
+        return (uint8_t)(before & ~owner) == 0;
     }
     bool has(uint8_t owner) const { return (mask & owner) != 0; }
     bool othersThan(uint8_t owner) const { return (mask & ~owner) != 0; }
