@@ -370,7 +370,7 @@ void ChordArp::lockButton(bool down) {
 // ---- pads -------------------------------------------------------------------------------------
 // Pad map (col, row), row 0 = top. Cols 0..5 = the 24 roots (always; c34 x1-4 / y1-6 turned: row = x-1, col = y-1).
 // Cols 6..11 = the visible page (Page). PLAY page: cols 6-7 chord types 1..8 (hold Root + pad = types 9..15), row 0 cols 8-10
-// Chord / Arp / Arp+Oct, row 1 speed, row 2 direction, row 3 Inv- Inv+ Oct- Oct+, (0,11) = Page (opens the last edit page).
+// Chord / Arp / Arp+Oct, row 1 speed, row 2 direction, row 3 Inv- Inv+ Oct- Oct+, (11,0) = Page (opens the last edit page).
 // Edit pages: col 11 = tabs Play / Groove / Feel / Setup (rows 0..3). See README "Chord/Arp pads" for the whole table.
 void ChordArp::setPage(int p) {
   page_ = (uint8_t)p;

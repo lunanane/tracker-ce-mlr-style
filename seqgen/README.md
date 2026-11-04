@@ -57,19 +57,19 @@ Every gesture below is plain pad events (`pad(col,row,down)`): the differential 
 
 ### Chord/Arp pads
 
-The 24 roots (cols 0-5) are on every page. Cols 6-11 show one page; `Page` is `(0,11)` on Play, the tab column `(11,0..3)` on the others.
+The 24 roots (cols 0-5) are on every page. Cols 6-11 show one page; `Page` is `(11,0)` on Play, the tab column `(11,0..3)` on the others.
 `P_PAGE` is the visible page, the Shift legend shows it.
 
 | Page | Pads | Function | c34 region |
 |---|---|---|---|
 | all | cols 0-5, rows 0-3 | roots: row = grid x-1 (rows 0, 2 major, rows 1, 3 minor), col = grid y-1; held = chord sounds; Grid mode: scale degrees | x1-4 y1-6 |
-| Play | cols 6-7, rows 0-3 | chord type 1..8 = `(col-6)*4 + row + 1`: Root Sus2 Triad Sus4 / 5th 6th 7th 9th; **hold pad 1 (Root) + pad 2..8 = extended types 9..15** (Dom7 Maj7 Dim Aug 7b5 7#5 b9) | x1-4 y7-8, mod_held |
+| Play | cols 6-7, rows 0-3 | chord type 1..8 = `(col-6)*4 + row + 1`: Root Sus2 Triad Sus4 / 5th 6th 7th 9th; **hold pad 1 (Root) + pad 2..8 = extended types 9..15** (Dom7 Maj7 Dim Aug 7b5 7#5 b9; as in c34, pressing Root itself selects type 1 at once) | x1-4 y7-8, mod_held |
 | Play | `(8..10, 0)` | Chord / Arp / Arp+Oct (queued to the bar) | x5-7 y1 |
 | Play | `(8..11, 1)` | speed 1/8 1/8T 1/16 1/16T; two fingers = pair (1/4, 1/4T, 1/32, 1/32T, 1/2, 1/2T) | x5-8 y2 |
 | Play | `(8..11, 2)` | direction Up Down UpDn Zigzag; two fingers = pair (more directions) | x5-8 y3 |
 | Play | `(8,3) (9,3)` | Inv- Inv+ (both held = reset) | x15 y5-7 |
 | Play | `(10,3) (11,3)` | Oct- Oct+ (both held = 0) | x16 y5-7 |
-| Play | `(0,11)` | Page: opens the last edit page | - |
+| Play | `(11,0)` | Page: opens the last edit page | - |
 | Groove | cols 6-9, rows 0-3 | 16 groove patterns (queued); with Param on: rows 0-2 = tier weights 0..3, row 3 = archetype (re-tap = new seed) | x5-8 y5-8 |
 | Groove | `(10,0)` `(10,1)` | Param (parametric groove on/off), Gate (normal / short / legato) | (15,8) (14,8) |
 | Groove | `(10,2)` `(10,3)` | Swing - / + (0..3 pulses) | x13-16 y3 |
