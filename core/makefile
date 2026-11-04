@@ -23,17 +23,22 @@ CPP_SRCS 	+= $(shell find ./AudioEngine/ -name *.cpp)
 CPP_SRCS 	+= $(shell find ./synth/ -name *.cpp)
 C_SRCS 	 	+= $(shell find ./libs/ -name *.c)
 
+# sequencer tracks mod: the pure C++ library in ../seqgen is built into the core (objects under obj/seqgen/)
+SEQGEN_DIR	?= ../seqgen
+SEQGEN_SRCS	:= chordarp mono
+
 _CPP_OBJS	= $(patsubst ./%.cpp, %.o, $(CPP_SRCS))
 _C_OBJS		= $(patsubst ./%.c, %.o, $(C_SRCS))
 
 OBJS		+= $(addprefix $(OBJ_DIR)/, $(_CPP_OBJS))
 OBJS		+= $(addprefix $(OBJ_DIR)/, $(_C_OBJS))
+OBJS		+= $(addprefix $(OBJ_DIR)/seqgen/, $(addsuffix .o, $(SEQGEN_SRCS)))
 
 OBJS_SORTED := $(sort $(OBJS))
 OBJ_DIRS	:= $(dir $(OBJS_SORTED))
 DEPS		:= $(OBJS_SORTED:.o=.d)
 
-INCLUDES=-I./include -I./config -I./source -I./synth -I./libs -I./libs/Audio -I./libs/ElapsedMillis -I./libs/SerialFlash -I./libs/SPI -I./libs/Audio/utility -I./libs/FT812 -I./libs/fonts -I./libs/NewDisplay -I./interface -I./effector -I./FileManager -I./Exporter -I./AudioEngine -I./libs/Audio/Polyverb -I./AudioEngine/ConstantValues -I./AudioEngine/MasterEnhancer -I${POLYUTIL_DIR}/include -I${POLYUTIL_DIR}/3rdparty -I${POLYSYNTH_DIR}/include  
+INCLUDES=-I./include -I./config -I./source -I./synth -I./libs -I./libs/Audio -I./libs/ElapsedMillis -I./libs/SerialFlash -I./libs/SPI -I./libs/Audio/utility -I./libs/FT812 -I./libs/fonts -I./libs/NewDisplay -I./interface -I./effector -I./FileManager -I$(SEQGEN_DIR) -I./Exporter -I./AudioEngine -I./libs/Audio/Polyverb -I./AudioEngine/ConstantValues -I./AudioEngine/MasterEnhancer -I${POLYUTIL_DIR}/include -I${POLYUTIL_DIR}/3rdparty -I${POLYSYNTH_DIR}/include  
 COMPILER_OPTIONS=-MMD -MP -fno-common -g -mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -fstack-usage -specs=nano.specs -Wall -Wextra -c -ffunction-sections -fdata-sections -ffreestanding -fno-builtin 
 ifdef DEBUG
 COMPILER_OPTIONS+=-Og -DDEBUG
@@ -73,6 +78,9 @@ endif
 # Build rules
 
 $(OBJ_DIR)/%.o: %.cpp
+	$(TOOLCHAIN)c++ $(DEFINES) $(INCLUDES) $(CPP_OPTIONS) $(COMPILER_OPTIONS) -o "$@" "$<"
+
+$(OBJ_DIR)/seqgen/%.o: $(SEQGEN_DIR)/%.cpp
 	$(TOOLCHAIN)c++ $(DEFINES) $(INCLUDES) $(CPP_OPTIONS) $(COMPILER_OPTIONS) -o "$@" "$<"
 
 $(OBJ_DIR)/%.o: %.c

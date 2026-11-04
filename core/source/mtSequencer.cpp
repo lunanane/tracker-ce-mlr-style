@@ -24,6 +24,8 @@
 
 #include "polyassert.h"
 
+#include "seqTracks.h"
+
 #include <cr_section_macros.h>
 
 Sequencer sequencer;
@@ -90,6 +92,11 @@ AUDIO_CORE_RAM void Sequencer::tick(float intervalSeconds)
 {
 
     updateExternalClockTempo((seqtimesec_t)intervalSeconds);
+
+    if (seqEngine.active())
+    {
+        seqEngine.advanceUs((uint32_t)(intervalSeconds * 1000000.0f));
+    }
 
     if (isSetInternalClock() || player.selectionMode)
     {
@@ -235,6 +242,14 @@ AUDIO_CORE_RAM void Sequencer::tick_uStep(void)
         player.extRecMetronomeStep = 0;
     }
 
+    if (!player.isPlay)
+    {
+        if (seqEngine.active())
+        {
+            seqEngine.idleTick();
+        }
+    }
+
     if (player.isPlay)
     {
         timerTicks++;
@@ -242,6 +257,10 @@ AUDIO_CORE_RAM void Sequencer::tick_uStep(void)
         if (timerTicks % 12 == 1)
         {
             inc_uStepGlobal();
+            if (seqEngine.active())
+            {
+                seqEngine.stepClock(player.track[0].uStep);
+            }
             for (int trackIdx = 0; trackIdx < kAllTracks; trackIdx++)
             {
                 play_microStep(trackIdx);
@@ -385,6 +404,8 @@ AUDIO_CORE_FLASH void Sequencer::play_microStep(int row)
     //			to reszta sie nie wykonuje
     // ************************************
 
+    if (seqEngine.isTakenOver(row))
+        return; // sequencer tracks mod: a sequencer plays this track, the pattern step is ignored
     if (!playerRow.isActive)
         return;
     if (isTrackEngineMuted(row))

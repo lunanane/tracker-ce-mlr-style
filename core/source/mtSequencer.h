@@ -764,6 +764,13 @@ class Sequencer
     void recEnable(bool enable);
     void stop(void);
     void stopManualNotes(void);
+
+    // sequencer tracks mod (seqTracks.cpp)
+    uint8_t seqPickInstrument(uint8_t track);
+    void seqTakeoverBegin(uint8_t track);
+    void seqNoteOn(uint8_t track, uint8_t note, uint8_t instrument, int8_t volume);
+    void seqNoteOff(uint8_t track, uint8_t note, uint8_t instrument);
+    bool seqTrackMuted(uint8_t track) { return isTrackEngineMuted(track); }
     void continueSong(uint8_t songPos);
     void loopCurrentPattern(uint8_t songPos);
     int16_t findSlotWithPattern();
