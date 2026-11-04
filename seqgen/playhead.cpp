@@ -91,6 +91,14 @@ void Playhead::resync(uint32_t globalStep) {
   recording_ = false; recActive_ = false; recCount_ = 0;
 }
 
+void Playhead::restart(uint32_t nextStep) {
+  const int target = (int)(nextStep % length_);
+  gstep_ = nextStep;
+  pos_ = (int16_t)(rev_ ? (target + 1) % length_ : (target + length_ - 1) % length_);
+  holdLeft_ = 0; forceJump_ = false; ovr_ = false;
+  if (recActive_) recIdx_ = (uint16_t)(nextStep % recLen_);
+}
+
 Playhead::StepOut Playhead::step() {
   const int len = length_;
   const uint32_t g = gstep_++;

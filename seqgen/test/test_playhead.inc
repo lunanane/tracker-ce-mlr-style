@@ -328,3 +328,26 @@ TEST(playhead_settings_clamp) {
   p.setLength(1); CHECK_EQ(stp(p).pos, 0); CHECK_EQ(stp(p).pos, 0);
   p.setLength(16); steps(p, 10); p.setLength(4); CHECK(p.position() < 4);
 }
+
+TEST(playhead_restart_continues_without_jump_and_keeps_gestures) {
+  Playhead p; p.setLength(16); steps(p, 3);
+  p.restart(9);                       // next step is 9, natural
+  p.press(0);                         // queued jump to 0 survives a restart
+  Playhead::StepOut o = stp(p); CHECK_EQ(o.pos, 0); CHECK(o.jumped);
+  Playhead q; q.setLength(16); q.restart(9);
+  o = stp(q); CHECK_EQ(o.pos, 9); CHECK(!o.jumped);
+  o = stp(q); CHECK_EQ(o.pos, 10); CHECK(!o.jumped);
+  Playhead r; r.setLength(8); r.setReverse(true); r.restart(3);
+  o = stp(r); CHECK_EQ(o.pos, 3);
+  o = stp(r); CHECK_EQ(o.pos, 2);
+}
+
+TEST(playhead_restart_keeps_recorded_loop_and_rewinds_it) {
+  Playhead p; p.setLength(16); steps(p, 2);
+  p.recDown(); p.press(4); steps(p, 3); p.recUp();  // take of 3 steps: 8 9 10
+  CHECK(p.recorded());
+  p.release(4);
+  p.restart(1);                                      // loop index 1 % 3
+  Playhead::StepOut o = stp(p); CHECK_EQ(o.pos, 9);
+  o = stp(p); CHECK_EQ(o.pos, 10); CHECK(p.recorded());
+}
