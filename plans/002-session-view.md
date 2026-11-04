@@ -96,3 +96,23 @@ A clip = one track's part in one pattern; a scene = a whole pattern.
 - **S2 firmware glue**: Session view page, per-track playhead override in `inc_uStep`/`switchRowStep`, retrigger
   with offset, sidecar save. Needs `make original` (owner OK).
 - **S3 cut cache** for streamed samples on the original Tracker.
+
+## S2 CUT layer as built (c2-mlr, 2026-11-04, provisional where marked)
+- Code: `core/source/seqCut.*` (16 Playheads + per-track runtime, no Polyend includes), `seqCutLogic.h` (pure helpers: command packing,
+  group/column mapping, Position FX value, LED fill), `core/interface/seqSession/cutLayer.*` (pad layer: `cutPad`, `cutLeds`,
+  `cutSetGroup`, `cutRec`, `cutReleaseAll`), glue in `seqTracks.cpp` (`Sequencer::seqCut*`), hooks in `mtSequencer.cpp`. Tests: `core/seqtest`.
+- Hooks (mtSequencer.cpp): `inc_uStep` -> `seqCutBoundary(row)` after `switchRowStep` (Playhead decides `actual_pos`); tick loop ->
+  `seqCutMicroStep(row)` (rate 2: at uStep 25 the second half-step is played as a step of its own, uStep temporarily 1);
+  `play_microStep`: `holding(row)` early return (stopped track / second half of a rate-1/2 position, same place as the takeover
+  return), `seqCutRetrigger` after the step copy (replaces the step by the last note step before the position and adds the Position FX);
+  `play()` -> `cutPlayStarted()` (restart the playheads at step 1 on the first tick, recorded loops kept).
+- A track is "cut-active" from its first pad/Rec/STOP/REVERSE/RATE command; the playhead starts at the track's current position (no jump).
+  RESYNC (and START after STOP) aligns to the global position at the next step and, when nothing special is left (rate 1, forward,
+  no loop/recording), hands the track back to the stock sequencer.
+- Retrigger: sample tracks get `FX_TYPE_POSITION` = elapsed steps * step time / sample length (percent, 0..100), added to a Position FX the
+  note step already has; a free FX slot is used, else slot 2 is overwritten. Slice / beat-slice / granular / wavetable instruments and MIDI
+  tracks: the note is replayed without offset. Jump to a position behind a note-off or on a track without notes: the sounding note stops.
+- Threads: pads -> `Engine::postCut` -> ring (CMD_CUT) -> `Cut::apply` in `drain()`; every Playhead mutation is in audio context; views for the
+  LEDs are 4-byte snapshots read by the main loop. Playheads (5.8 KB) live in `.noinit.$EXTERNAL_RAM`, constructed by `seqCutInit()`.
+- Saving: **not in v0.1.** `seqtracks.bin` (version 1, fixed `kSidecarMax` read buffer) is left alone; a separate optional `seqcut.bin`
+  (`Playhead::serialize`, 296 B x 16) can follow in v0.2.
