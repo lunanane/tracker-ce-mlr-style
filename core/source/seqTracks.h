@@ -6,9 +6,8 @@
 extern seqtracks::Engine seqEngine;
 extern seqlogic::TapDetector seqPatternTap; // Pattern button tap detection (interface inputs + pattern editor)
 extern seqlogic::TapDetector seqPerformTap; // Performance button tap detection (interface inputs + Performance pages)
-extern seqlogic::TapDetector seqSongTap;    // Song button tap detection (interface inputs + Song page)
-extern seqlogic::DoubleTap seqSongDouble; // Song key double tap, fed by Interface::buttonChange (any page)
-extern bool seqSongDoubleNow;             // set for the duration of the Song release that completed a double tap
+extern seqlogic::SongToggle seqSongToggle; // Song button: plain press + release (no hold) on the Song page opens the launcher (Interface::buttonChange)
+extern bool seqSongToggleNow;              // set for the duration of the Song release that completed a plain press
 extern uint8_t seqPadsHeld; // pads currently held (any page); informational, held pads do not block a tap (plan 005 M4)
 
 uint32_t seqNowMs(); // free-running milliseconds (tap timing)
@@ -22,7 +21,7 @@ inline void seqNoteButtonInput(bool isPattern, bool isPerformance, bool isSong)
     if (!isPerformance)
         seqPerformTap.other();
     if (!isSong)
-        seqSongTap.other();
+        seqSongToggle.other();
 }
 
 // Release of a mode button: true = it was a tap. A quick press that was refused (another button interfered) sets the

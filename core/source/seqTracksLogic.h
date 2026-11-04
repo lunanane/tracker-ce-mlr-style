@@ -42,10 +42,6 @@ struct TapDetector
     bool refusedLast() const { return refused; } // the last up() was a quick press that is not a tap
 };
 
-// Song key double tap (opens the clip launcher from any page): two short Song taps whose PRESSES are at most kGapMs apart. Feed
-// every Song press with press() and every release with release(isTap) (isTap = TapDetector result: short, plain, no other
-// button). A long hold or a refused press breaks the sequence, so a hold never opens the launcher. release() is true on the
-// release of the second tap.
 // Performance key (owner 2026-11-04, plan 005 / 007 B3): the one place that decides where the key goes.
 //   any other page:      plain -> fader page,            Shift -> stock Performance page
 //   fader page (ours):   plain -> nothing (stays),       Shift -> stock Performance page
@@ -60,28 +56,33 @@ inline PerformRoute performKeyRoute(bool onFaderPage, bool onStockPage, bool shi
     return shift ? PERFORM_STOCK_SWITCH : PERFORM_TO_FADER; // the stock switch of the Performance key goes to the stock page
 }
 
-struct DoubleTap
+// Song key toggle (owner 2026-11-04, replaces the v0.2.2 double tap): on the stock Song page a plain Song press + release opens the
+// clip launcher; in the launcher Song goes back to the Song page; from any other page Song is stock. No timing window: a press is
+// "plain" when no other button was held at the press and none was used before the release, and it was not held (the stock hold, a
+// momentary peek, is decided by the hold event the keys driver sends, not by a time).
+struct SongToggle
 {
-    enum { kGapMs = 350 };
-    bool have = false; // a first tap is waiting for its partner
-    uint32_t t1 = 0;   // press time of the first tap
-    uint32_t tNow = 0; // press time of the press in progress
-    void press(uint32_t nowMs) { tNow = nowMs; }
-    bool release(bool isTap)
+    bool armed = false;
+    bool pressed = false;
+    bool held = false;
+    uint32_t activity = 0;
+    uint32_t atDown = 0;
+    void other() { activity++; }
+    void down(bool plainPress)
     {
-        if (!isTap)
-        {
-            have = false;
-            return false;
-        }
-        if (have && (uint32_t)(tNow - t1) <= (uint32_t)kGapMs)
-        {
-            have = false;
-            return true;
-        }
-        have = true;
-        t1 = tNow;
-        return false;
+        armed = plainPress;
+        pressed = true;
+        held = false;
+        atDown = activity;
+    }
+    void hold() { held = true; }
+    bool up()
+    {
+        bool toggle = pressed && armed && !held && activity == atDown;
+        armed = false;
+        pressed = false;
+        held = false;
+        return toggle;
     }
 };
 

@@ -4,7 +4,7 @@
 // fill their own file and do not edit the shared callers again. Every hook is a no-op / "not handled" until its step fills it.
 //
 //   R1 Play overlay   interface/seqPlay/seqPlayHooks.cpp        seqPlayRoute*, seqPanicPlay
-//   R2 clip launcher  interface/seqSession/seqClipsHooks.cpp    seqClipsSongTap, seqPanicClips
+//   R2 clip launcher  interface/seqSession/seqClipsHooks.cpp    seqPanicClips
 //   R3 fader page     interface/seqPerform/seqFaderHooks.cpp    seqFaderShiftFrom*, seqPanicFx
 //   R4 MLR screen     interface/seqSession/seqCutHooks.cpp      seqPanicCut
 #pragma once
@@ -15,10 +15,6 @@
 bool seqPlayRouteButton(uint8_t button, uint8_t state); // state: buttonPress / buttonHold / buttonRelease
 bool seqPlayRoutePad(uint8_t pad, uint8_t state, uint8_t velo); // state 1 press, 0 release, 2 hold
 bool seqPlayRoutePot(uint8_t pot, int16_t value);
-
-// ---- R2: Song tap on the Song page (fSongEdit.cpp, a plain press+release of Song while the slot list was not focused).
-// true = the launcher should open (the caller then sends eventActivateSeqSession). ----
-bool seqClipsSongTap();
 
 // ---- R3: fader page = Performance key, stock Performance page = Shift + Performance (owner change 2026-11-04). ----
 // On the stock Performance page (fPerformance.cpp functPerformanceButton, Shift held on the press): true = open the fader page
