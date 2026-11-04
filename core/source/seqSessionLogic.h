@@ -3,17 +3,22 @@
 // Threads: the Launcher is written by the main loop through a ring buffer (post*), consumed in the audio
 // context (drain / onStep). The getters are safe to call from the main loop (single bytes / masks).
 #pragma once
+#include "seqClipsLogic.h"
 #include <stdint.h>
 
 namespace seqsession {
 
-enum { kTracks = 16, kWinRows = 4, kPatternMax = 255, kCols = 12, kRows = 4, kPads = 48 };
+enum { kTracks = 16, kWinRows = 4, kPatternMax = 255, kCols = 12, kRows = 4, kPads = 48, kVisRows = 12 };
 
 // ---- launch quantise -------------------------------------------------------------------------
-enum Quant : uint8_t { Q_BAR = 0, Q_PATTERN = 1, Q_NOW = 2, Q_COUNT = 3 };
+// Q_BAR / Q_PATTERN / Q_NOW are the global setting (screen button 2 taps through them). Q_CLIPEND is never global: it is the
+// quantise of a follow action (plan 005 R2, Play 1x): the command applies when the clip that plays on the track has run once.
+enum Quant : uint8_t { Q_BAR = 0, Q_PATTERN = 1, Q_NOW = 2, Q_COUNT = 3, Q_CLIPEND = 4 };
+enum { kQuantGlobal = 0xFF }; // command quantise byte: "use the global setting"
 
 inline Quant nextQuant(Quant q) { return (Quant)((q + 1) % Q_COUNT); }
-inline const char* quantName(Quant q) { return q == Q_BAR ? "next bar" : q == Q_PATTERN ? "pattern end" : "immediate"; }
+inline const char* quantName(Quant q) { return q == Q_BAR ? "next bar" : q == Q_PATTERN ? "pattern end" : q == Q_CLIPEND ? "clip end" : "immediate"; }
+inline const char* quantShort(Quant q) { return q == Q_BAR ? "bar" : q == Q_PATTERN ? "pattern" : q == Q_CLIPEND ? "clip end" : "now"; }
 
 // globalPos = position (0-based step) of the global playhead. A bar = 16 steps; pattern end = the wrap to 0.
 // Called at a step boundary, so Q_NOW fires at the next step of the track (never mid-step).
@@ -25,6 +30,19 @@ inline bool quantHit(Quant q, uint16_t globalPos)
         case Q_PATTERN: return globalPos == 0;
         default: return true;
     }
+}
+
+// Steps until the next launch point of a global quantise, counted from the current step `pos` of a pattern of `len` steps
+// (>= 1: the current step is over). The wrap of the pattern is a launch point of every quantise.
+inline uint16_t stepsToQuant(Quant q, uint16_t pos, uint16_t len)
+{
+    if (len == 0) len = 1;
+    if (pos >= len) pos = 0;
+    uint16_t toEnd = (uint16_t)(len - pos);
+    if (q == Q_NOW) return 1;
+    if (q == Q_PATTERN) return toEnd;
+    uint16_t toBar = (uint16_t)(16 - (pos & 15u));
+    return toBar < toEnd ? toBar : toEnd;
 }
 
 // ---- pattern window (4 rows) ------------------------------------------------------------------
@@ -55,30 +73,62 @@ inline int jogToScroll(int16_t value, bool shift)
     return shift ? d * kWinRows : d;
 }
 
-// ---- clip pad states and LEDs -----------------------------------------------------------------
-enum ClipState : uint8_t { CS_EMPTY = 0, CS_NOTES = 1, CS_QUEUED = 2, CS_PLAYING = 3 };
+// Arrow keys: Up / Down move the pad window one pattern (Shift: a whole window), clamped like the jog wheel.
+inline int arrowToScroll(bool down, bool shift) { return (down ? 1 : -1) * (shift ? (int)kWinRows : 1); }
 
-inline ClipState clipState(bool hasNotes, bool playing, bool queued)
+// Left / Right: the group of tracks (8 at a time: 1-8, 9-16). Clamped, no wrap.
+inline uint8_t stepGroup(uint8_t first, bool right, uint8_t groupSize)
 {
-    if (queued) return CS_QUEUED;
+    if (groupSize == 0 || groupSize > kTracks) return first;
+    int f = (int)first - (int)(first % groupSize);
+    f += right ? (int)groupSize : -(int)groupSize;
+    if (f < 0) f = 0;
+    if (f > kTracks - (int)groupSize) f = kTracks - (int)groupSize;
+    return (uint8_t)f;
+}
+
+// The grid shows kVisRows patterns; the pad window (kWinRows rows from `winFirst`) must stay inside. `top` = first shown pattern.
+inline uint8_t viewTop(uint8_t top, uint8_t winFirst)
+{
+    int t = top;
+    int bottom = (int)winFirst + kWinRows - 1;
+    if ((int)winFirst < t) t = winFirst;
+    if (bottom > t + kVisRows - 1) t = bottom - (kVisRows - 1);
+    if (t > kPatternMax - kVisRows + 1) t = kPatternMax - kVisRows + 1;
+    if (t < 1) t = 1;
+    return (uint8_t)t;
+}
+
+// ---- clip pad states and LEDs -----------------------------------------------------------------
+// CS_FOLLOW = a follow action (Play 1x) is armed for this clip: shown steady, not blinking (nothing the performer did).
+enum ClipState : uint8_t { CS_EMPTY = 0, CS_NOTES = 1, CS_QUEUED = 2, CS_PLAYING = 3, CS_FOLLOW = 4 };
+
+inline ClipState clipState(bool hasNotes, bool playing, bool queued, bool follow = false)
+{
+    if (queued) return follow ? CS_FOLLOW : CS_QUEUED;
     if (playing) return CS_PLAYING;
     return hasNotes ? CS_NOTES : CS_EMPTY;
 }
-// 0..15. bright = playing, blinking = queued, dim = has notes, off = empty.
+// 0..15. bright = playing, blinking = queued, medium = follow armed, dim = has notes, off = empty.
 inline uint8_t clipLevel(ClipState s, bool blinkOn)
 {
     switch (s)
     {
         case CS_PLAYING: return 15;
         case CS_QUEUED: return blinkOn ? 15 : 0;
+        case CS_FOLLOW: return 8;
         case CS_NOTES: return 3;
         default: return 0;
     }
 }
+// An empty pad of a track that plays a clip is dimly lit: pressing it stops the track (plan 005 m9, the rule is visible).
+inline uint8_t emptyPadLevel(bool trackSounds) { return trackSounds ? 1 : 0; }
 inline bool blinkPhase(uint32_t ms) { return ((ms / 150u) & 1u) == 0; } // ~3.3 Hz
 
 // ---- pad map (0-based col 0..11, row 0..3; pad index = row * 12 + col) ---------------------------
-enum PadKind : uint8_t { PK_NONE = 0, PK_CLIP, PK_SCENE, PK_STOP_T, PK_STOP_ALL, PK_QUANT };
+// Plan 005 R2: columns 1-8 = clips of the 8 tracks of the window, column 9 = empty gap, column 10 = scene launch, columns 11-12
+// empty. STOP / QUANT / MODE are screen buttons now (hold 3 + pad = stop, tap 2 = quantise, hold 1 = play mode).
+enum PadKind : uint8_t { PK_NONE = 0, PK_CLIP, PK_SCENE };
 
 struct PadAction
 {
@@ -90,12 +140,29 @@ inline PadAction mapPad(uint8_t col, uint8_t row)
 {
     PadAction a = { PK_NONE, col, row };
     if (col < 8) a.kind = PK_CLIP;
-    else if (col == 8) a.kind = PK_SCENE;
-    else if (col == 9 && row == 0) a.kind = PK_STOP_T;
-    else if (col == 9 && row == 3) a.kind = PK_STOP_ALL;
-    else if (col == 11 && row == 0) a.kind = PK_QUANT;
+    else if (col == 9) a.kind = PK_SCENE;
     return a;
 }
+
+// What a pad press does. Hold screen button 1 (mode): pads only focus a clip (no accidental launch while the mode is set).
+// Hold button 3 (stop): clip pad = stop that track, scene pad = stop all. An empty clip pad stops its track.
+enum PadOp : uint8_t { OP_NONE = 0, OP_FOCUS, OP_STOP_TRACK, OP_LAUNCH, OP_STOP_ALL, OP_SCENE };
+inline PadOp padOp(PadKind k, bool modeHeld, bool stopHeld, bool hasNotes)
+{
+    if (k == PK_CLIP)
+    {
+        if (modeHeld) return OP_FOCUS;
+        if (stopHeld || !hasNotes) return OP_STOP_TRACK;
+        return OP_LAUNCH;
+    }
+    if (k == PK_SCENE)
+    {
+        if (modeHeld) return OP_FOCUS;
+        return stopHeld ? OP_STOP_ALL : OP_SCENE;
+    }
+    return OP_NONE;
+}
+
 // Screen buttons of the Session view (0-based): 0..3 choose the group, 6 = CLIPS layer, 7 = CUT layer.
 // A layer shows groupSize tracks: 8 -> buttons 0, 1 = tracks 1-8, 9-16; 4 -> buttons 0..3 = 1-4, 5-8, 9-12, 13-16.
 // Returns the first track of the group, or 0xFF when the button does not choose a group.
@@ -107,6 +174,147 @@ inline uint8_t groupFromButton(uint8_t button, uint8_t groupSize)
 // Keep a group valid after the group size changed (CLIPS 8 <-> CUT 4).
 inline uint8_t alignGroup(uint8_t first, uint8_t groupSize) { return (uint8_t)(first - first % groupSize); }
 enum { kButtonClips = 6, kButtonCut = 7 };
+// CLIPS layer screen buttons (0-based): 0 = MODE (hold + wheel), 1 = QUANT (tap cycles), 2 = STOP (hold + pad), 3 = BACK TO SONG.
+enum { kBtnMode = 0, kBtnQuant = 1, kBtnStop = 2, kBtnBackToSong = 3 };
+
+// ---- play mode of a clip (plan 005 R2: per clip = pattern x track, stored in seqclips.bin) --------------------------
+// Wheel while screen button 1 is held: one detent = one mode step, clamped (Loop <-> Play 1x), no wrap.
+inline uint8_t stepClipMode(uint8_t mode, int delta)
+{
+    int m = (int)mode + (delta > 0 ? 1 : (delta < 0 ? -1 : 0));
+    if (m < 0) m = 0;
+    if (m > (int)seqclips::CLIP_MODE_COUNT - 1) m = (int)seqclips::CLIP_MODE_COUNT - 1;
+    return (uint8_t)m;
+}
+inline const char* clipModeName(uint8_t mode) { return mode == seqclips::CLIP_PLAY1X ? "PLAY 1X" : "LOOP"; }
+
+// ---- follow action (Play 1x): what the clip does when it has played once ------------------------------------------
+// The next row down is the pattern after this one. A track without content there (or no row left) stops.
+struct FollowTarget
+{
+    bool launch;
+    uint8_t pattern;
+};
+inline FollowTarget followTarget(uint8_t pattern, bool nextHasContent)
+{
+    FollowTarget f = { false, 0 };
+    if (pattern >= 1 && pattern < kPatternMax && nextHasContent)
+    {
+        f.launch = true;
+        f.pattern = (uint8_t)(pattern + 1);
+    }
+    return f;
+}
+
+// Remembers for which instance of a playing clip the follow action was queued, so it is queued once: a tap on the playing clip
+// cancels it and it must not come back. An instance = (pattern, how often the track applied a command, pattern-switch epoch).
+class FollowArms
+{
+  public:
+    FollowArms() { reset(); }
+    void reset()
+    {
+        for (int i = 0; i < kTracks; i++)
+            key_[i] = 0;
+    }
+    bool needs(uint8_t t, uint8_t pattern, uint8_t applied, uint8_t epoch) const { return t < kTracks && key_[t] != make(pattern, applied, epoch); }
+    void mark(uint8_t t, uint8_t pattern, uint8_t applied, uint8_t epoch)
+    {
+        if (t < kTracks) key_[t] = make(pattern, applied, epoch);
+    }
+
+  private:
+    static uint32_t make(uint8_t pattern, uint8_t applied, uint8_t epoch) { return 0x1000000u | ((uint32_t)epoch << 16) | ((uint32_t)applied << 8) | pattern; }
+    uint32_t key_[kTracks];
+};
+
+// ---- LIVE (plan 005 C2): a launch while the song plays freezes the song on its slot; BACK TO SONG resumes it -------------------
+struct LiveState
+{
+    bool on = false;
+    uint8_t slot = 0; // playlist slot (0-based) the song was frozen on
+    void freeze(uint8_t s)
+    {
+        on = true;
+        slot = s;
+    }
+    void clear() { on = false; }
+    // shown while the transport plays and the song is not running (another way back to the song ends it too)
+    bool active(bool playing, bool songMode) const { return on && playing && !songMode; }
+    // a launch must freeze the song first
+    static bool needsFreeze(bool playing, bool songMode) { return playing && songMode; }
+};
+
+// ---- grid screen (clipGrid.*): geometry and the data the controls draw ----------------------------------------------
+// 800 x 480 screen, content y 29-422 (stock title bar above, screen-button labels below). 12 pattern rows x 16 tracks, a gap
+// after track 8, the scene cell after track 16, an info column on the right. All numbers in pixels.
+namespace clipgrid {
+enum
+{
+    kCellW = 27,
+    kCellH = 23,
+    kPitch = 31,
+    kRowH = 27,
+    kX0 = 44,
+    kBlockGap = 16,
+    kY0 = 60,
+    kSceneW = 32,
+    kInfoX = 616,
+    kRowNumX = 4
+};
+inline int16_t colX(uint8_t track) { return (int16_t)(kX0 + track * kPitch + (track >= 8 ? kBlockGap : 0)); }
+inline int16_t sceneX() { return (int16_t)(colX(15) + kCellW + kBlockGap); }
+inline int16_t rowY(uint8_t visRow) { return (int16_t)(kY0 + visRow * kRowH); }
+// progress of a clip inside the cell: position of the track (step, micro step 1..48) in a clip of `len` steps
+inline uint8_t progressPx(uint8_t pos, uint8_t uStep, uint16_t len)
+{
+    if (len == 0) return 0;
+    uint32_t span = (uint32_t)len * 48u;
+    uint32_t at = (uint32_t)pos * 48u + (uStep ? uStep - 1u : 0u);
+    uint32_t px = at * kCellW / span;
+    return (uint8_t)(px > (uint32_t)kCellW ? (uint32_t)kCellW : px);
+}
+
+enum Cell : uint8_t { CELL_EMPTY = 0, CELL_NOTES, CELL_PLAYING, CELL_QUEUED, CELL_FOLLOW };
+enum { F_ONEX = 1, F_END = 2, F_STOPMARK = 4 }; // 1x clip / 1x clip whose next row is empty (the track stops) / empty cell of a sounding track
+enum MarkKind : uint8_t { MK_NONE = 0, MK_BLINK = 1, MK_FOLLOW = 2 };
+enum Msg : uint8_t { MSG_NONE = 0, MSG_BUSY = 1, MSG_UNDO_CLEARED = 2 };
+inline const char* msgText(uint8_t m) { return m == MSG_BUSY ? "Busy - try again" : m == MSG_UNDO_CLEARED ? "Undo history cleared (launched clips ended)" : ""; }
+
+// The static part of the screen (redrawn when it changes).
+struct View
+{
+    uint8_t top;          // pattern of the first visible row
+    uint8_t winFirst;     // pad window: first pattern (row) ...
+    uint8_t winTrack;     // ... and first track
+    uint8_t focusPattern; // focused clip (0 = none)
+    uint8_t focusTrack;
+    uint8_t focusMode;    // play mode of the focused clip
+    uint8_t quant;        // Quant
+    uint8_t live;         // LIVE: the song is frozen
+    uint8_t liveSlot;     // 1-based slot of the frozen song
+    uint8_t modeHeld;     // screen button 1 held
+    uint8_t stopHeld;     // screen button 3 held
+    uint8_t msg;          // MSG_* status line
+    uint8_t cell[kVisRows][kTracks];
+    uint8_t flags[kVisRows][kTracks];
+    uint8_t scene[kVisRows];      // Cell of the scene cell
+    uint8_t sceneFlags[kVisRows]; // F_ONEX: every clip of the row plays once
+};
+
+// The animated part (small, redrawn at most once per step and for the blink).
+struct Marks
+{
+    uint8_t playRow[kTracks]; // visible row of the playing clip, 0xFF = none
+    uint8_t prog[kTracks];    // progress in px
+    uint8_t qRow[kTracks];    // visible row of the queued clip, 0xFF = none
+    uint8_t qKind[kTracks];   // MarkKind
+    uint8_t sceneRow;         // queued scene (visible row) or 0xFF
+    uint8_t songRow;          // pattern the transport plays (visible row) or 0xFF
+    uint8_t blink;            // blink phase (0 when nothing blinks)
+    uint8_t countdown;        // steps to the next launch point (clamped to 254), 0xFF = nothing queued
+};
+} // namespace clipgrid
 
 // ---- merge for saving the pattern (launched clips never reach the pattern file) ------------------------------
 // Tracks whose RAM data comes from a launched clip are written from the pattern FILE (cleared when there is no file).
@@ -173,6 +381,9 @@ class Launcher
             cur_[i] = 0;
             pat_[i] = 0;
             kind_[i] = K_NONE;
+            q_[i] = kQuantGlobal;
+            since_[i] = 0;
+            applied_[i] = 0;
         }
         stopped_ = 0;
         loading_ = 0;
@@ -182,6 +393,7 @@ class Launcher
         head_ = 0;
         tail_ = 0;
         quant_ = Q_BAR;
+        epoch_ = 0;
     }
 
     // ---- main loop ----
@@ -190,10 +402,18 @@ class Launcher
     // The clip data of the track is being (re)written in the buffer: the audio side must not apply it.
     void beginLoad(uint8_t t) { loading_ = (uint16_t)(loading_ | (1u << t)); }
     void endLoad(uint8_t t) { loading_ = (uint16_t)(loading_ & ~(1u << t)); }
-    bool postClip(uint8_t t, uint8_t pattern) { return t < kTracks && pattern >= 1 && push(CMD_CLIP, t, pattern); }
-    bool postStop(uint8_t t) { return t < kTracks && push(CMD_STOP, t, 0); }
-    bool postStopAll() { return push(CMD_STOPALL, 0, 0); }
-    bool postCancel(uint8_t t) { return t < kTracks && push(CMD_CANCEL, t, 0); } // drop a queued clip / stop of the track
+    // q = kQuantGlobal (the global setting) or a Quant of its own (Q_CLIPEND for a follow action)
+    bool postClip(uint8_t t, uint8_t pattern, uint8_t q = kQuantGlobal) { return t < kTracks && pattern >= 1 && push(LCMD_CLIP, t, pattern, q); }
+    bool postStop(uint8_t t, uint8_t q = kQuantGlobal) { return t < kTracks && push(LCMD_STOP, t, 0, q); }
+    bool postStopAll() { return push(LCMD_STOPALL, 0, 0, kQuantGlobal); }
+    bool postCancel(uint8_t t) { return t < kTracks && push(LCMD_CANCEL, t, 0, kQuantGlobal); } // drop a queued clip / stop of the track
+
+    // The quantise a queued command waits for (its own, or the global one).
+    Quant queuedQuant(uint8_t t) const { return q_[t] == kQuantGlobal ? (Quant)quant_ : (Quant)q_[t]; }
+    // How often a command was applied on the track, and how often the whole pattern switched: a follow action is queued once
+    // per (pattern, applied, epoch) instance of the playing clip (FollowArms).
+    uint8_t applied(uint8_t t) const { return applied_[t]; }
+    uint8_t epoch() const { return epoch_; }
 
     // 0 = the pattern's own track (never launched since the last pattern switch)
     uint8_t current(uint8_t t) const { return cur_[t]; }
@@ -251,20 +471,23 @@ class Launcher
             __asm__ __volatile__("" ::: "memory");
             const Cmd c = ring_[tail_];
             tail_ = (uint8_t)((tail_ + 1) % kRing);
-            if (c.kind == CMD_CLIP)
+            if (c.kind == LCMD_CLIP)
             {
                 kind_[c.track] = K_CLIP;
                 pat_[c.track] = c.pattern;
+                q_[c.track] = c.q;
             }
-            else if (c.kind == CMD_CANCEL)
+            else if (c.kind == LCMD_CANCEL)
             {
                 kind_[c.track] = K_NONE;
                 pat_[c.track] = 0;
+                q_[c.track] = kQuantGlobal;
             }
-            else if (c.kind == CMD_STOP)
+            else if (c.kind == LCMD_STOP)
             {
                 kind_[c.track] = K_STOP;
                 pat_[c.track] = 0;
+                q_[c.track] = c.q;
             }
             else
             {
@@ -272,17 +495,32 @@ class Launcher
                 {
                     kind_[i] = K_STOP;
                     pat_[i] = 0;
+                    q_[i] = kQuantGlobal;
                 }
             }
         }
     }
     // One call per track at its step boundary. A_CLIP: copy the loaded clip into the pattern (pattern = source),
-    // A_STOP: silence the track.
-    Action onStep(uint8_t t, uint16_t pos, uint8_t& pattern)
+    // A_STOP: silence the track. clipLen = steps of the clip that plays on the track (0 = unknown: Q_CLIPEND never hits). The
+    // step counter since_ counts the steps since the clip entered (reset by apply, wraps with the clip) and is what Q_CLIPEND
+    // waits for: it counts steps, not positions, so CUT jumps and rate changes do not confuse it.
+    Action onStep(uint8_t t, uint16_t pos, uint8_t& pattern, uint16_t clipLen = 0)
     {
+        bool clipEnd = false;
+        if (clipLen)
+        {
+            uint16_t s = (uint16_t)(since_[t] + 1);
+            since_[t] = s;
+            if (s >= clipLen)
+            {
+                since_[t] = 0;
+                clipEnd = true;
+            }
+        }
         if (kind_[t] == K_NONE) return A_NONE;
         if (kind_[t] == K_CLIP && ((loading_ >> t) & 1u)) return A_NONE;
-        if (!quantHit(quant_, pos)) return A_NONE;
+        Quant q = queuedQuant(t);
+        if (q == Q_CLIPEND ? !clipEnd : !quantHit(q, pos)) return A_NONE;
         return apply(t, pattern);
     }
     // Transport not running: a pending launch applies at once (no quantise).
@@ -300,9 +538,12 @@ class Launcher
             cur_[i] = 0;
             pat_[i] = 0;
             kind_[i] = K_NONE;
+            q_[i] = kQuantGlobal;
+            since_[i] = 0; // every track starts its pattern again
         }
         stopped_ = 0;
         frozen_ = false;
+        epoch_ = (uint8_t)(epoch_ + 1);
     }
     // Transport stop: stopped tracks play again, queued stops are dropped.
     void onTransportStop()
@@ -310,23 +551,42 @@ class Launcher
         stopped_ = 0;
         frozen_ = false;
         for (int i = 0; i < kTracks; i++)
+        {
             if (kind_[i] == K_STOP) kind_[i] = K_NONE;
+            since_[i] = 0; // the next Play starts every track at its first step
+        }
+    }
+    // Panic (plan 005 M6, main loop, audio callback stopped, transport stopped): queued launches and stops are dropped, the
+    // ring is emptied and stopped tracks play again. The launched clips (cur_) stay until the caller restored the tracks.
+    void panic()
+    {
+        head_ = tail_;
+        for (int i = 0; i < kTracks; i++)
+        {
+            kind_[i] = K_NONE;
+            pat_[i] = 0;
+            q_[i] = kQuantGlobal;
+            since_[i] = 0;
+        }
+        stopped_ = 0;
+        frozen_ = false;
     }
 
   private:
     enum { kRing = 32 };
-    enum CmdKind : uint8_t { CMD_CLIP = 1, CMD_STOP = 2, CMD_STOPALL = 3, CMD_CANCEL = 4 };
+    enum CmdKind : uint8_t { LCMD_CLIP = 1, LCMD_STOP = 2, LCMD_STOPALL = 3, LCMD_CANCEL = 4 };
     struct Cmd
     {
-        uint8_t kind, track, pattern;
+        uint8_t kind, track, pattern, q;
     };
-    bool push(uint8_t kind, uint8_t t, uint8_t p)
+    bool push(uint8_t kind, uint8_t t, uint8_t p, uint8_t q)
     {
         uint8_t next = (uint8_t)((head_ + 1) % kRing);
         if (next == tail_) return false;
         ring_[head_].kind = kind;
         ring_[head_].track = t;
         ring_[head_].pattern = p;
+        ring_[head_].q = q;
         __asm__ __volatile__("" ::: "memory"); // the entry must be written before the audio side sees the new head
         head_ = next;
         return true;
@@ -349,12 +609,19 @@ class Launcher
         }
         kind_[t] = K_NONE;
         pat_[t] = 0;
+        q_[t] = kQuantGlobal;
+        since_[t] = 0; // the clip (or the silence) starts here
+        applied_[t] = (uint8_t)(applied_[t] + 1);
         return a;
     }
 
     volatile uint8_t cur_[kTracks];
     volatile uint8_t pat_[kTracks];
     volatile uint8_t kind_[kTracks];
+    volatile uint8_t q_[kTracks];
+    volatile uint16_t since_[kTracks];
+    volatile uint8_t applied_[kTracks];
+    volatile uint8_t epoch_;
     volatile uint16_t stopped_;
     volatile uint16_t loading_;
     volatile Quant quant_;

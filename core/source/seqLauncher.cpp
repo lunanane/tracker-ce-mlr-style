@@ -1,5 +1,6 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 #include "seqLauncher.h"
+#include "seqClips.h"
 #include "seqTracks.h"
 #include "mtSequencer.h"
 #include "mtStructs.h"
@@ -17,10 +18,13 @@ seqsession::Launcher seqLauncher;
 
 namespace
 {
-seqsession::NoteCache s_cache;
-bool s_active = false;   // Session view is on screen: the cache is kept up to date
+bool s_active = false;   // Session view is on screen
 bool s_ownsPerf = false; // Session switched performance mode on (only then it switches it off again)
 bool s_wasPlay = false;
+seqsession::LiveState s_live;       // the song was frozen by a launch (C2)
+seqsession::FollowArms s_arms;      // Play 1x follow actions queued for the clip instance that plays now
+bool s_panicRestore = false;        // panic: the launched tracks still have to be restored from the pattern files
+bool s_undoCleared = false;         // the pattern undo history was dropped by the last launched clip going away
 
 // Main-loop code that touches the audio-side state of the launcher stops the audio callback for a moment.
 // (IPSR != 0 means we already run in an interrupt, i.e. the audio callback itself.)
@@ -91,16 +95,18 @@ bool saveOwnBeforeLaunch()
 }
 
 // Somebody else switched performance mode off while launched clips are mixed into the pattern: put the original tracks
-// back from the pattern file (like the stock turn-off, which reloads the pattern).
-void restoreLaunched()
+// back from the pattern file (like the stock turn-off, which reloads the pattern). Panic (leavePerf): the launcher also leaves
+// performance mode itself (the perform FX keep it when they still own it).
+// true: done (or nothing to do); false: the file manager is busy / the file is unreadable, try again on a later pass.
+bool restoreLaunched(bool leavePerf = false)
 {
     if (!newFileManager.isIdleForScratch())
-        return; // try again on a later pass
+        return false; // try again on a later pass
     uint8_t own = seqSessionOwnPattern();
     uint16_t mask = seqLauncher.launchedMask(own);
     int r = newFileManager.readWorkspacePatternTo(own, &fileManagerPatternBuffer);
     if (seqsession::mergeMode(r) == seqsession::MERGE_ABORT)
-        return; // read error: never clear the tracks, try again on a later pass
+        return false; // read error: never clear the tracks, try again on a later pass
     Sequencer::strPattern* cur = sequencer.getActualPattern();
     DISABLE_AUDIO_INTERRUPTS();
     for (uint8_t t = 0; t < seqsession::kTracks; t++)
@@ -114,44 +120,52 @@ void restoreLaunched()
     }
     seqLauncher.onPatternSwitched();
     ENABLE_AUDIO_INTERRUPTS();
+    if (leavePerf)
+        sequencer.seqSessionPatternSwitched(); // releases the launcher's claim; performance mode goes off unless the perform FX own it
     s_ownsPerf = false;
     Sequencer::seqPerfOwners.release(seqlogic::PERF_OWNER_LAUNCHER); // the clips are gone; the flag itself was handled by the one who switched it off
+    return true;
 }
 
-void scanOneRow()
+// Plan 005 C2: a launch while the song plays turns the song into a loop of the playing pattern (Ableton: launching overrides the
+// arrangement). false: the sequencer is changing pattern right now, the launch is refused ("Busy") and tried again by the player.
+bool freezeSongIfNeeded()
 {
-    int row = s_cache.nextToScan();
-    if (row < 0 || s_cache.first == 0)
-        return;
-    uint8_t pattern = (uint8_t)(s_cache.first + row);
+    if (!seqsession::LiveState::needsFreeze(sequencer.isPlay(), sequencer.isSongMode()))
+        return true;
+    if (newFileManager.isPatternLoading() || sequencer.isLastPatternStep())
+        return false;
+    uint8_t slot = mtProject.song.playlistPos;
+    sequencer.loopCurrentPattern(slot);
+    s_live.freeze(slot);
+    return true;
+}
+
+// Plan 005 R2 follow action (Play 1x): a track whose playing clip is set to Play 1x gets the next row down queued with the
+// quantise "clip end" as soon as that clip instance plays: the load has the whole clip length of time, the audio side applies it
+// at the step where the clip would restart. The next row empty (or none left) = the track stops. One command per pass.
+void queueFollowActions()
+{
+    if (!sequencer.isPlay() || sequencer.isSongMode())
+        return; // the song advances by itself
     uint8_t own = seqSessionOwnPattern();
-
-    bool allRam = false;
-    if (pattern == own)
+    for (uint8_t t = 0; t < seqsession::kTracks; t++)
     {
-        allRam = true;
-        for (uint8_t t = 0; t < seqsession::kTracks; t++)
-            if (seqLauncher.current(t) != 0 && seqLauncher.current(t) != pattern)
-                allRam = false;
+        if (seqLauncher.stopped(t) || seqLauncher.queuedKind(t) != seqsession::Launcher::K_NONE)
+            continue;
+        uint8_t cp = seqLauncher.current(t) ? seqLauncher.current(t) : own;
+        if (seqClipMode(cp, t) != seqclips::CLIP_PLAY1X)
+            continue;
+        uint8_t applied = seqLauncher.applied(t), epoch = seqLauncher.epoch();
+        if (!s_arms.needs(t, cp, applied, epoch))
+            continue;
+        bool nextHas = cp < seqsession::kPatternMax && ((seqSessionPatternMask((uint8_t)(cp + 1)) >> t) & 1u);
+        seqsession::FollowTarget f = seqsession::followTarget(cp, nextHas);
+        bool ok = f.launch ? seqSessionLaunchClipQ(t, f.pattern, seqsession::Q_CLIPEND) : seqSessionStopTrackQ(t, seqsession::Q_CLIPEND);
+        if (ok)
+            s_arms.mark(t, cp, applied, epoch);
+        return; // busy (file manager) or done: one per pass keeps the main loop short
     }
-
-    uint16_t mask = 0;
-    if (!allRam && newFileManager.getPatternTracksWithNotes(pattern, mask) < 0)
-        return; // a file operation runs: try again on a later pass
-    if (pattern == own)
-    {
-        for (uint8_t t = 0; t < seqsession::kTracks; t++)
-        {
-            if (seqLauncher.current(t) == 0 || seqLauncher.current(t) == pattern)
-            {
-                if (ramTrackHasContent(t))
-                    mask = (uint16_t)(mask | (1u << t));
-                else
-                    mask = (uint16_t)(mask & ~(1u << t));
-            }
-        }
-    }
-    s_cache.set((uint8_t)row, mask);
 }
 } // namespace
 
@@ -216,9 +230,16 @@ void Sequencer::seqSessionStep(uint8_t row)
         seqLauncher.advance((uint16_t)player.globalPos, (uint16_t)(currentPattern->track[0].length + 1));
     seqLauncher.drain();
     uint8_t pattern = 0;
-    switch (seqLauncher.onStep(row, seqLauncher.position(), pattern))
+    // steps the clip on this track runs (what the stock step switch loops over): Q_CLIPEND waits for it
+    uint8_t clipLast = currentPattern->track[0].length;
+    if (player.performanceMode && isPerformanceTrack(row))
+        clipLast = player.performance.trackLength[row];
+    if (player.performance.patternLength > -1)
+        clipLast = (uint8_t)player.performance.patternLength;
+    seqsession::Quant waitedFor = seqLauncher.queuedQuant(row); // the command's own quantise (cleared when it applies)
+    switch (seqLauncher.onStep(row, seqLauncher.position(), pattern, (uint16_t)(clipLast + 1)))
     {
-        case seqsession::Launcher::A_CLIP: seqSessionApplyClip(row, seqLauncher.quant() != seqsession::Q_NOW); break;
+        case seqsession::Launcher::A_CLIP: seqSessionApplyClip(row, waitedFor != seqsession::Q_NOW); break; // a follow action restarts at the clip start
         case seqsession::Launcher::A_STOP: seqSessionApplyStop(row); break;
         default: break;
     }
@@ -292,6 +313,11 @@ void Sequencer::seqSessionEnterPerformance()
 // ---------------------------------------------------------------- main loop
 bool seqSessionLaunchClip(uint8_t track, uint8_t pattern)
 {
+    return seqSessionLaunchClipQ(track, pattern, seqsession::kQuantGlobal);
+}
+
+bool seqSessionLaunchClipQ(uint8_t track, uint8_t pattern, uint8_t quant)
+{
     if (track >= seqsession::kTracks || pattern < 1)
         return false;
     if (seqLauncher.current(track) == 0 && pattern == seqSessionOwnPattern() && !seqLauncher.stopped(track))
@@ -306,12 +332,14 @@ bool seqSessionLaunchClip(uint8_t track, uint8_t pattern)
         return false;
     if (seqLauncher.current(track) == 0 && !saveOwnBeforeLaunch())
         return false; // "Busy": the pattern's unsaved edits are not on the card yet
+    if (!freezeSongIfNeeded())
+        return false;
 
     sequencer.seqSessionEnterPerformance();
     seqLauncher.beginLoad(track);
     bool ok = newFileManager.loadClipTrackToBuffer(pattern, track);
     if (ok)
-        ok = seqLauncher.postClip(track, pattern);
+        ok = seqLauncher.postClip(track, pattern, quant);
     seqLauncher.endLoad(track);
     if (ok && !sequencer.isPlay())
         flushNow();
@@ -320,7 +348,14 @@ bool seqSessionLaunchClip(uint8_t track, uint8_t pattern)
 
 bool seqSessionStopTrack(uint8_t track)
 {
-    if (!seqLauncher.postStop(track))
+    return seqSessionStopTrackQ(track, seqsession::kQuantGlobal);
+}
+
+bool seqSessionStopTrackQ(uint8_t track, uint8_t quant)
+{
+    if (!freezeSongIfNeeded())
+        return false;
+    if (!seqLauncher.postStop(track, quant))
         return false;
     if (!sequencer.isPlay())
         flushNow();
@@ -329,11 +364,70 @@ bool seqSessionStopTrack(uint8_t track)
 
 bool seqSessionStopAll()
 {
+    if (!freezeSongIfNeeded())
+        return false;
     if (!seqLauncher.postStopAll())
         return false;
     if (!sequencer.isPlay())
         flushNow();
     return true;
+}
+
+uint16_t seqSessionPatternMask(uint8_t pattern)
+{
+    if (pattern < 1)
+        return 0;
+    uint16_t m = (uint16_t)(mtProject.values.allPatternsBitmask[pattern - 1] | (mtProject.values.allPatternsBitmaskMidi[pattern - 1] << 8));
+    if (pattern == seqSessionOwnPattern())
+    {
+        // the loaded pattern: RAM is newer than the bitmask (unsaved edits); tracks that play a launched clip keep the file's view
+        for (uint8_t t = 0; t < seqsession::kTracks; t++)
+        {
+            if (seqLauncher.current(t) == 0 || seqLauncher.current(t) == pattern)
+            {
+                if (ramTrackHasContent(t))
+                    m = (uint16_t)(m | (1u << t));
+                else
+                    m = (uint16_t)(m & ~(1u << t));
+            }
+        }
+    }
+    return m;
+}
+
+bool seqSessionLive()
+{
+    return s_live.active(sequencer.isPlay(), sequencer.isSongMode());
+}
+
+uint8_t seqSessionLiveSlot()
+{
+    return (uint8_t)(s_live.slot + 1);
+}
+
+bool seqSessionBackToSong()
+{
+    if (!seqSessionLive())
+        return false;
+    if (newFileManager.isPatternLoading() || sequencer.isLastPatternStep())
+        return false;
+    if (seqSessionQueuedScene() != 0)
+        sequencer.sequencialSwitch_Reset(); // a queued scene would switch the song off again at the pattern end
+    // stock "continue song": at the pattern end the song goes on with the slot after the playing one, and the pattern switch
+    // ends every launched clip (seqSessionPatternSwitched)
+    sequencer.continueSong(mtProject.song.playlistPos);
+    s_live.clear();
+    return true;
+}
+
+void seqSessionPanic()
+{
+    DISABLE_AUDIO_INTERRUPTS(); // the launcher and the player state are audio-side data
+    seqLauncher.panic();
+    ENABLE_AUDIO_INTERRUPTS();
+    s_live.clear();
+    s_arms.reset();
+    s_panicRestore = true; // the launched tracks are put back in seqSessionUpdate (immediately on the next pass)
 }
 
 uint8_t seqSessionOwnPattern()
@@ -356,6 +450,8 @@ bool seqSessionLaunchScene(uint8_t pattern)
         // stock pattern switch: queued, happens at the end of the pattern (like Pattern + left / right)
         if (newFileManager.isPatternLoading())
             return false;
+        if (!freezeSongIfNeeded())
+            return false; // the song would pick the next pattern itself
         uint16_t base = sequencer.sequencialSwitch_GetNext();
         if (base == 0)
             base = (uint16_t)mtProject.values.actualPattern;
@@ -380,21 +476,16 @@ bool seqSessionLaunchScene(uint8_t pattern)
     return true;
 }
 
-void seqSessionSetWindow(uint8_t first)
-{
-    s_cache.invalidate(first);
-}
-
-const seqsession::NoteCache& seqSessionCache()
-{
-    return s_cache;
-}
-
 void seqSessionActive(bool on)
 {
     s_active = on;
-    if (on)
-        s_cache.invalidate(s_cache.first ? s_cache.first : 1); // rescan on entering
+}
+
+bool seqSessionTakeUndoCleared()
+{
+    bool v = s_undoCleared;
+    s_undoCleared = false;
+    return v;
 }
 
 void seqSessionUpdate()
@@ -418,18 +509,35 @@ void seqSessionUpdate()
         ENABLE_AUDIO_INTERRUPTS();
     }
     s_wasPlay = play;
+    if (!play)
+        s_live.clear(); // LIVE only means something while the transport runs
 
     // the last launched clip is gone (scene, Pattern page, restore): undo steps taken meanwhile hold clip content
     static uint16_t s_lastMask = 0;
     uint16_t mask = seqLauncher.launchedMask(seqSessionOwnPattern());
     if (seqsession::clearUndoOnMask(s_lastMask, mask))
+    {
         newFileManager.clearPatternUndoHistory();
+        s_undoCleared = true; // the Session view says so (plan 005 m11)
+    }
     s_lastMask = mask;
+
+    // panic: put the launched tracks back (the file manager may be busy: try again on the next pass)
+    if (s_panicRestore)
+    {
+        if (!seqSessionHasLaunched())
+        {
+            sequencer.seqSessionPatternSwitched(); // nothing to restore: just end the launcher state and its performance-mode claim
+            s_panicRestore = false;
+        }
+        else if (restoreLaunched(true))
+            s_panicRestore = false;
+        return;
+    }
 
     // performance mode went off (Performance screen / fader page) while launched clips are mixed into the pattern
     if (!sequencer.isPerformanceMode() && seqSessionHasLaunched())
         restoreLaunched();
 
-    if (s_active)
-        scanOneRow();
+    queueFollowActions();
 }

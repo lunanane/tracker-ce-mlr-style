@@ -190,7 +190,11 @@ void cSeqSession::screenButton(uint8_t button, bool down)
 
 void cSeqSession::arrowKey(seqsession::ArrowDir dir)
 {
-    layers[layerIndex]->arrow(dir, buttons->isButtonPressed(interfaceButtonShift));
+    if (layers[layerIndex]->arrow(dir, buttons->isButtonPressed(interfaceButtonShift)))
+        return;
+    // the layer left Left / Right alone: they page the groups of tracks (1-8 / 9-16 for CLIPS), as in every layer
+    if (dir == seqsession::ARROW_LEFT || dir == seqsession::ARROW_RIGHT)
+        selectGroup(seqsession::stepGroup(groupFirst, dir == seqsession::ARROW_RIGHT, layers[layerIndex]->groupSize()));
 }
 
 //----------------------------------------------------------------------------------------------
