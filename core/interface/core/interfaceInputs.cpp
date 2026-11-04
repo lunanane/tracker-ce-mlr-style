@@ -2,6 +2,7 @@
 #include "core/interfacePopups.h"
 
 #include "Platform.h"
+#include "seqTracks.h"
 
 #ifdef TRACKER_MINI
 bool fnButtonShiftPressed[4] = { false, false, false, false };
@@ -19,12 +20,18 @@ static inline bool isNavButton(uint8_t b)
 //=======================================================================
 void Interface::potChange(uint8_t n, int16_t value)
 {
+    seqNoteOtherInput();
     ip->processPotsInput(n, value);
 }
 
 //=======================================================================
 void Interface::buttonChange(uint8_t n, uint8_t value)
 {
+    if (n != interfaceButtonPattern)
+    {
+        seqNoteOtherInput(); // breaks a Pattern tap
+    }
+
 #ifdef TRACKER_MINI
     if (isNavButton(n))
     {
@@ -77,6 +84,7 @@ bool Interface::powerButtonChange(uint8_t state)
 //=======================================================================
 void Interface::padPressed(uint8_t n, int8_t, int8_t, uint8_t velo)
 {
+    seqNoteOtherInput();
     ip->processPadsInput(n, 1, velo);
 }
 

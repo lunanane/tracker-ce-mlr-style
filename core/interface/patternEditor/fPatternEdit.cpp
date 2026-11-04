@@ -18,6 +18,7 @@
 #include "Platform.h"
 #include "TrackerImpl.h"
 #include "log.h"
+#include "seqTracks.h"
 
 #include <cr_section_macros.h>
 
@@ -2850,17 +2851,40 @@ static void functPattern(uint8_t state)
         }
 
         PTE->cancelPopups();
+
+        // sequencer tracks mod: arm the tap detector when no other button is held
+        bool othersHeld = false;
+        for (int b = 0; b < interfaceButtonsCount; b++)
+        {
+            if (b != interfaceButtonPattern && PTE->buttons->isButtonPressed(b))
+            {
+                othersHeld = true;
+                break;
+            }
+        }
+        seqPatternTap.down(!othersHeld);
     }
     else if (state == buttonRelease && PTE->patternButtonReleaseActive)
     {
+        bool tap = seqPatternTap.up();
         PTE->setPatternViewMode(0);
         if (sequencer.sequencialSwitch_GetNext() > 0)
         {
             sequencer.sequencialSwitch_SetReady();
         }
+#ifndef TRACKER_MINI
+        if (tap)
+        {
+            // a plain Pattern tap on the Pattern page: Play mode (sequencer tracks mod)
+            PTE->eventFunct(eventActivateSeqPlay, PTE, 0, 0);
+        }
+#else
+        (void)tap;
+#endif
     }
     else if (state == buttonRelease)
     {
+        seqPatternTap.up();
         PTE->patternButtonReleaseActive = 1;
         if (sequencer.sequencialSwitch_GetNext() > 0)
         {
