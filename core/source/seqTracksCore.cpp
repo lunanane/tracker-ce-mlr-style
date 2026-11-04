@@ -17,7 +17,7 @@ enum
 
 Engine::Engine()
   : host_(0), head_(0), tail_(0), takenMask_(0), activeCount_(0), playing_(false), barPulse_(0), idleCount_(0), usAcc_(0), clockSilentUs_(0), epoch_(1),
-    rHead_(0), rTail_(0), recState_(seqrec::Planner::IDLE), recTrack_(0), recHints_(0), recEnds_(0), loading_(false)
+    rHead_(0), rTail_(0), recDrops_(0), recState_(seqrec::Planner::IDLE), recTrack_(0), recHints_(0), recEnds_(0), loading_(false)
 {
     memset(ring_, 0, sizeof(ring_));
     memset(recRing_, 0, sizeof(recRing_));
@@ -144,7 +144,11 @@ void Engine::recSink(const seqrec::Op& op)
     uint8_t h = rHead_;
     uint8_t n = (uint8_t)((h + 1) % kRecRing);
     if (n == rTail_)
-        return; // full: drop (the main loop drains every frame)
+    {
+        if (recDrops_ < 255)
+            recDrops_++; // full: drop, but say so ("Rec overflow" on the screen)
+        return;
+    }
     recRing_[h] = op;
     __atomic_store_n(&rHead_, n, __ATOMIC_RELEASE);
 }
@@ -153,7 +157,7 @@ void Engine::recPublish()
 {
     recState_ = rec_.state();
     recTrack_ = rec_.track();
-    recHints_ = rec_.hints();
+    recHints_ = (uint8_t)(rec_.hints() | (recDrops_ ? seqrec::HINT_OVERFLOW : 0));
     recEnds_ = rec_.ends();
 }
 
@@ -166,6 +170,7 @@ void Engine::applyRec(uint8_t track, uint8_t mode)
     else if (t_[track].type != TYPE_OFF)
     {
         rec_.stop();
+        recDrops_ = 0;
         seqrec::TrackPos p;
         host_->trackPos(track, p);
         rec_.begin(track, mode == REC_LOOP, p.pos);

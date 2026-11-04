@@ -149,10 +149,11 @@ class Engine
     uint32_t epoch_; // bumped before every call into a generator: events of one call form one simultaneous group
 
     // record: planner + queue audio -> main
-    enum { kRecRing = 32 };
+    enum { kRecRing = 128 }; // 8 bytes each: 1 KB; must stay <= 256 (8-bit indices)
     seqrec::Planner rec_;
     seqrec::Op recRing_[kRecRing];
     volatile uint8_t rHead_, rTail_;
+    volatile uint8_t recDrops_; // operations dropped because the queue was full (this recording)
     volatile seqrec::Planner::State recState_;
     volatile uint8_t recTrack_, recHints_, recEnds_;
     volatile bool loading_;

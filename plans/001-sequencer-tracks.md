@@ -180,7 +180,7 @@ Built around immediate playability; no separate Seq page, no Off/Live/Rec modes.
 - Chords: group of notes of the same pulse -> lowest note + `FX_TYPE_MIDI_CHORD` index from `chordDef[1..29]`; no match ->
   highest notes dropped until it matches ("Chord reduced"); sample track -> lowest note only ("Chords need a MIDI track"). Chord
   intervals above 14 semitones cannot be expressed and are dropped as well.
-- Threading: the planner runs in the audio context and pushes operations (8 bytes each, queue of 32) to the main loop, which
+- Threading: the planner runs in the audio context and pushes operations (8 bytes each, queue of 128 = 1 KB in internal RAM; a full queue drops the operation, counts it and shows "Rec overflow" on the Play screen until the next recording) to the main loop, which
   writes the pattern and stores **one** undo revision per recording (first write). Nothing touches the SD from the audio context.
   Recording ends when: Rec again, the loop is complete, the transport stops, the track is set Off, the pattern changes, or Play mode is left (`cSeqPlay::stop`).
 - Sidecar `seqtracks.bin` (2810 bytes max): "SQTR", version 1, 16 tracks, per track [type, ChordArp block, Mono block], CRC16-CCITT.

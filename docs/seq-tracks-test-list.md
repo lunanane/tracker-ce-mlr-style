@@ -107,6 +107,7 @@ Then hold a root pad in columns 1-6. The selection stays when you release (it is
 | Punch while Mono plays | Mono track: press Rec while the sequence runs: its notes replace the steps one by one; steps without a Mono note are cleared. Rec again: stops, the rest of the pattern is untouched. |
 | Chord on a **sample** track (Chord/Arp type on tracks 1-8) | Only the lowest chord note is written. Info line "Chords need a MIDI track (lowest note recorded)". |
 | Chord that is not in the Tracker chord table (a 5-note chord, wide voicing) on a MIDI track | The highest notes are dropped until the table matches, the step gets the shorter chord FX. Info line "Chord reduced to fit the Tracker chord table". |
+| Record a very busy arp (fastest speed, 1/32) for a long time | Normally nothing special. If the info line ever shows "Rec overflow: some steps were not recorded", note what you did (it means the main loop was too slow to take the steps). |
 | Stop the transport while recording | Recording ends by itself. Steps written so far stay, one undo step. |
 | End of a recording (Rec, loop end, stop) while the last note is still held/open | A note-off is written on the next step that holds no note, so the last note does not ring into the old pattern content; a step that already has a note is left alone. |
 | Change the pattern (Song mode) while recording | Recording ends; nothing is written into the new pattern. |

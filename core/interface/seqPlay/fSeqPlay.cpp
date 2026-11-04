@@ -306,6 +306,8 @@ void cSeqPlay::refreshScreen()
         snprintf(infoText[3], sizeof(infoText[3]), "REC track %d: punch-in (Rec = end)", seqEngine.recTrack() + 1);
     else if (rs == seqrec::Planner::LOOP)
         snprintf(infoText[3], sizeof(infoText[3]), "REC track %d: one loop, ends by itself", seqEngine.recTrack() + 1);
+    else if (seqEngine.recHints() & seqrec::HINT_OVERFLOW)
+        snprintf(infoText[3], sizeof(infoText[3]), "Rec overflow: some steps were not recorded");
     else if (seqEngine.recHints() & seqrec::HINT_NEED_MIDI)
         snprintf(infoText[3], sizeof(infoText[3]), "Chords need a MIDI track (lowest note recorded)");
     else if (seqEngine.recHints() & seqrec::HINT_REDUCED)

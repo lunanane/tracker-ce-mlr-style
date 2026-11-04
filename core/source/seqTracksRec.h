@@ -23,7 +23,8 @@ enum { kNoChord = 0xFF, kNoMicro = -1, kNoVolume = -1, kMaxGroup = 8, kMaxSteps 
 enum Hint : uint8_t
 {
     HINT_REDUCED = 1,   // a chord did not fit the Tracker chord table: highest notes dropped
-    HINT_NEED_MIDI = 2  // chord on a sample track: only the lowest note is written
+    HINT_NEED_MIDI = 2, // chord on a sample track: only the lowest note is written
+    HINT_OVERFLOW = 4   // the audio -> main queue was full: some steps of this recording were not written
 };
 
 struct Op

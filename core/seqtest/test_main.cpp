@@ -803,6 +803,33 @@ static void test_engine_rec_punch()
     delete e;
 }
 
+// The record queue holds 127 operations; more are dropped and counted ("Rec overflow" hint), and a new recording starts clean.
+static void test_rec_queue_overflow_hint()
+{
+    MockHost h;
+    Engine* e = mk(h);
+    e->postType(2, TYPE_CHORDARP);
+    e->idleTick();
+    e->postRec(2, Engine::REC_PUNCH);
+    int u = 1;
+    playUSteps(*e, 3, u);
+    CHECK(e->recState() == seqrec::Planner::PUNCH && !(e->recHints() & seqrec::HINT_OVERFLOW));
+    playUSteps(*e, 250, u); // the mock position stays at uStep 1: every uStep enters a step and clears it; nobody drains
+    CHECK(e->recHints() & seqrec::HINT_OVERFLOW);
+    int got = 0;
+    seqrec::Op o;
+    while (e->popRecOp(o))
+        got++;
+    CHECK(got == 127);
+    e->postRec(2, Engine::REC_STOP);
+    playUSteps(*e, 2, u);
+    CHECK(e->recHints() & seqrec::HINT_OVERFLOW); // sticky until the next recording
+    e->postRec(2, Engine::REC_PUNCH);
+    playUSteps(*e, 2, u);
+    CHECK(!(e->recHints() & seqrec::HINT_OVERFLOW));
+    delete e;
+}
+
 static void test_engine_rec_loop_and_stop()
 {
     MockHost h;
@@ -1228,6 +1255,7 @@ int main()
     test_planner_one_loop();
     test_planner_chord_groups();
     test_engine_rec_punch();
+    test_rec_queue_overflow_hint();
     test_engine_rec_loop_and_stop();
     test_planner_punch_out_note_off();
     test_engine_rec_chord();
