@@ -734,7 +734,7 @@ static void functPerformanceButton(uint8_t state)
 {
     if (state == buttonPress)
     {
-        bool othersHeld = seqPadsHeld > 0;
+        bool othersHeld = false; // held pads do not block a tap (plan 005 M4)
         for (int b = 0; b < interfaceButtonsCount; b++)
         {
             if (b != interfaceButtonPerformance && SP->buttons->isButtonPressed(b))
@@ -747,7 +747,7 @@ static void functPerformanceButton(uint8_t state)
     }
     else if (state == buttonRelease)
     {
-        if (seqPerformTap.up(seqNowMs()))
+        if (seqTapUp(seqPerformTap))
             SP->leaveToStock();
     }
 }

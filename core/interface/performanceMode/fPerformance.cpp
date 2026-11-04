@@ -9,6 +9,7 @@
 
 #include "performanceMode.h"
 #include "seqTracks.h"
+#include "seqHooks.h"
 
 #include "Platform.h"
 #include "performanceEngine.h"
@@ -251,7 +252,7 @@ void cPerformanceMode::turnOffAtEndOfPattern()
         return;
 
     dontClearPerformanceMode = 1;
-    if (!sequencer.isSongMode())
+    if (!sequencer.isSongMode() && !sequencer.seqPerfOwners.has(seqlogic::PERF_OWNER_LAUNCHER))
     {
         // force pattern reload to clear changed tracks
         sequencer.sequencialSwitch_changeNextPattern(0);
@@ -682,52 +683,22 @@ static void functSwitchTracksPage()
     }
 }
 
-// Performance button: press = stock behaviour (tracks page / Shift = mute view); a plain tap (press and
-// release, nothing else touched) additionally opens the alt fader page (sequencer tracks mod, plan 004)
-static bool tapPending = false;
-static elapsedMillis tapAge;
-
+// Performance button: the stock press flips the tracks page (plan 005: the v0.1 double-tap hook is gone, so two quick presses
+// flip and flip back again as on stock). Shift + Performance opens the alt fader page (sequencer tracks mod) unless the hook
+// says otherwise; without the hook the stock Shift behaviour (flip + mute view) stays.
 static void functPerformanceButton(uint8_t state)
 {
-    if (state == buttonPress)
-    {
-        bool othersHeld = seqPadsHeld > 0;
-        for (int b = 0; b < interfaceButtonsCount; b++)
-        {
-            if (b != interfaceButtonPerformance && PM->buttons->isButtonPressed(b))
-            {
-                othersHeld = true;
-                break;
-            }
-        }
-        seqPerformTap.down(!othersHeld, seqNowMs());
-        if (othersHeld)
-            tapPending = false;
-        functSwitchTracksPage();
-    }
-    else if (state == buttonRelease)
-    {
+    if (state != buttonPress)
+        return;
 #ifndef TRACKER_MINI
-        if (!seqPerformTap.up(seqNowMs()))
-        {
-            tapPending = false;
-        }
-        else if (tapPending && tapAge < 350)
-        {
-            // second tap within 350 ms: fader page. The two taps flipped the tracks page twice = unchanged.
-            tapPending = false;
-            PM->dontClearPerformanceMode = 1; // the perform FX state moves over to the fader page
-            PM->eventFunct(eventActivateSeqPerform, PM, 0, 0);
-        }
-        else
-        {
-            tapPending = true; // a single tap is the stock tracks-page flip
-            tapAge = 0;
-        }
-#else
-        seqPerformTap.up(seqNowMs());
-#endif
+    if (PM->buttons->isButtonPressed(interfaceButtonShift) && seqFaderShiftFromStock())
+    {
+        PM->dontClearPerformanceMode = 1; // the perform FX state moves over to the fader page
+        PM->eventFunct(eventActivateSeqPerform, PM, 0, 0);
+        return;
     }
+#endif
+    functSwitchTracksPage();
 }
 
 //##############################################################################################

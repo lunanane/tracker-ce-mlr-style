@@ -2879,7 +2879,7 @@ static void functPattern(uint8_t state)
     }
     else if (state == buttonRelease && PTE->patternButtonReleaseActive)
     {
-        bool tap = seqPatternTap.up(seqNowMs());
+        bool tap = seqTapUp(seqPatternTap);
         PTE->setPatternViewMode(0);
         if (sequencer.sequencialSwitch_GetNext() > 0)
         {
@@ -2899,7 +2899,7 @@ static void functPattern(uint8_t state)
     {
         // first release after arriving on the page by another route: stock behaviour unchanged, but a press that was made here
         // (the tap detector is armed only by the press handler above) still counts as a tap
-        bool tap = seqPatternTap.up(seqNowMs());
+        bool tap = seqTapUp(seqPatternTap);
         PTE->patternButtonReleaseActive = 1;
         if (sequencer.sequencialSwitch_GetNext() > 0)
         {

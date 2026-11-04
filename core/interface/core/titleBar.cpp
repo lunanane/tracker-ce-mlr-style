@@ -10,6 +10,7 @@
 TitleBar titleBar;
 
 static elapsedMillis refreshTimer;
+static elapsedMillis flashTimer;
 
 #ifdef TRACKER_MINI
 #define BATTERY_ENABLED 1
@@ -246,8 +247,32 @@ void TitleBar::hide()
     visible = false;
 }
 
+void TitleBar::flashRefused()
+{
+    if (!visible)
+        return;
+    // same colours as the bar, red background: the title text stays readable
+    static uint32_t flashColors[4];
+    const uint32_t* c = display.getTheme().topBarLabelColors;
+    flashColors[0] = c[0];
+    flashColors[1] = display.getTheme().red;
+    flashColors[2] = c[2];
+    flashColors[3] = c[3];
+    display.setControlColors(bar, flashColors);
+    display.refreshControl(bar);
+    flashTimer = 0;
+    flashActive = true;
+}
+
 void TitleBar::refresh()
 {
+    if (flashActive && flashTimer > 180)
+    {
+        flashActive = false;
+        display.setControlColors(bar, display.getTheme().topBarLabelColors);
+        display.refreshControl(bar);
+    }
+
     if (refreshTimer < 300)
     {
         return;
