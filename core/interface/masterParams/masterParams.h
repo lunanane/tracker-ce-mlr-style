@@ -63,6 +63,7 @@ class cMasterParams : public ModuleBase
     void showReverbDamp();
     void showReverbPredelay();
     void showReverbDiffusion();
+    void showReverbType();
     // limiter
     void showLimiterScreen();
     void showLimiterAttack();
@@ -254,6 +255,7 @@ class cMasterParams : public ModuleBase
     void changeReverbDamp(int16_t val);
     void changeReverbPredelay(int16_t val);
     void changeReverbDiffusion(int16_t val);
+    void changeReverbType(int16_t val);
     // equalizer
     void changeEqualizerBandAdjust(uint8_t n, int16_t val);
 
@@ -282,6 +284,7 @@ class cMasterParams : public ModuleBase
     void setDefaultReverbDamp();
     void setDefaultReverbPredelay();
     void setDefaultReverbDiffusion();
+    void setDefaultReverbType();
 
     // equalizer
     void setDefaultEqualizerBandAdjust(uint8_t n);
@@ -407,6 +410,7 @@ class cMasterParams : public ModuleBase
     char reverbDampVal[4];
     char reverbPredelayVal[4];
     char reverbDiffusionVal[4];
+    char reverbTypeVal[8];
 
     char limitAttackVal[8];
     char limitReleaseVal[8];

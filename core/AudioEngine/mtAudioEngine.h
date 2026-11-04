@@ -86,6 +86,10 @@ class audioEngine
     void setReverbDamp(float value);
     void setReverbPredelay(float value);
     void setReverbDiffusion(float value);
+    // plan 007 (values of the mod sidecar seqfx.bin, see seqFxLogic.h)
+    void setDelayFilterWidth(uint8_t twelfthsOfAnOctave);
+    void setReverbHighpass(uint8_t index);
+    void setReverbType(uint8_t type);
     void setDelayParams(uint8_t value);
     void setLimiterAttack(uint16_t attack);
     void setLimiterRelease(float release);

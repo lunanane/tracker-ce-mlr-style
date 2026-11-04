@@ -6,6 +6,7 @@
 #include "util_math.h"
 #include <cmath>
 #include <masterParams/masterParams.h>
+#include "seqFx.h"
 
 static const uint16_t framesPlaces[8][4] = {
     { 0 + 1, 31, 800 / 8 - 3, 391 },
@@ -374,7 +375,7 @@ void cMasterParams::showReverbScreen()
     display.setControlText(label[2], "Predelay");
     display.setControlText(label[3], "Diffusion");
     display.setControlText(label[4], "Line in");
-    display.setControlText(label[5], " ");
+    display.setControlText(label[5], "Type");
     display.setControlText2(label[5], " ");
     display.setControlText(label[6], " ");
     display.setControlText2(label[6], " ");
@@ -408,8 +409,9 @@ void cMasterParams::showReverbScreen()
     showReverbPredelay();
     showReverbDiffusion();
     showLineInReverbSend();
+    showReverbType();
 
-    frameData.placesCount = 5;
+    frameData.placesCount = 6;
     frameData.startPlace = selectedPlaceReverb;
     frameData.places[0] = &framesPlaces[0][0];
     frameData.places[1] = &framesPlaces[1][0];
@@ -563,6 +565,14 @@ void cMasterParams::showDelayScreen()
     display.synchronizeRefresh();
 
     lightUpPadBoard();
+}
+
+// plan 007 F3: the reverb type is a text value (no bar)
+void cMasterParams::showReverbType()
+{
+    snprintf(reverbTypeVal, sizeof(reverbTypeVal), "%s", seqfx::reverbTypeName(seqFxReverbType()));
+    display.setControlText2(label[5], reverbTypeVal);
+    display.refreshControl(label[5]);
 }
 
 void cMasterParams::showReverbSize()

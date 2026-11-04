@@ -4,6 +4,7 @@
 #include "mtPadsBacklight.h"
 #include "mtSequencer.h"
 #include "seqLauncher.h"
+#include "seqFx.h"
 
 #include "patternEditor/patternEditor.h"
 #include "performanceMode/performanceMode.h"
@@ -61,6 +62,7 @@ static void functSelectReverbSize();
 static void functSelectReverbDamp();
 static void functSelectReverbPredelay();
 static void functSelectReverbDiffusion();
+static void functSelectReverbType();
 static void functReverbLineIn();
 static void functReverbCancel();
 // limiter
@@ -532,6 +534,7 @@ static void functEncoder(int16_t value)
             case 2: MP->changeReverbPredelay(value); break;
             case 3: MP->changeReverbDiffusion(value); break;
             case 4: MP->changeLineInReverbSend(value); break;
+            case 5: MP->changeReverbType(value); break;
             default: break;
         }
     }
@@ -767,6 +770,7 @@ static void functUp()
             case 2: MP->changeReverbPredelay(1); break;
             case 3: MP->changeReverbDiffusion(1); break;
             case 4: MP->changeLineInReverbSend(1); break;
+            case 5: MP->changeReverbType(1); break;
             default: break;
         }
     }
@@ -871,6 +875,7 @@ static void functDown()
             case 2: MP->changeReverbPredelay(-1); break;
             case 3: MP->changeReverbDiffusion(-1); break;
             case 4: MP->changeLineInReverbSend(-1); break;
+            case 5: MP->changeReverbType(-1); break;
             default: break;
         }
     }
@@ -976,6 +981,7 @@ static void functDelete()
             case 2: MP->setDefaultReverbPredelay(); break;
             case 3: MP->setDefaultReverbDiffusion(); break;
             case 4: MP->setDefaultLineInReverbSend(); break;
+            case 5: MP->setDefaultReverbType(); break;
             default: break;
         }
     }
@@ -1282,6 +1288,7 @@ void cMasterParams::switchToReverbScreen()
     ip->setButtonObj(interfaceButton2, buttonPress, functSelectReverbPredelay);
     ip->setButtonObj(interfaceButton3, buttonPress, functSelectReverbDiffusion);
     ip->setButtonObj(interfaceButton4, buttonPress, functReverbLineIn);
+    ip->setButtonObj(interfaceButton5, buttonPress, functSelectReverbType);
     ip->setButtonObj(interfaceButton7, buttonPress, functReverbCancel);
 
     keyboardManager.deactivateKeyboard();
@@ -1445,6 +1452,12 @@ static void functSelectReverbPredelay()
 static void functSelectReverbDiffusion()
 {
     MP->selectedPlaceReverb = 3;
+    MP->refreshReverbFrame();
+}
+
+static void functSelectReverbType()
+{
+    MP->selectedPlaceReverb = 5;
     MP->refreshReverbFrame();
 }
 
@@ -2729,6 +2742,22 @@ void cMasterParams::changeLineInDelaySend(int16_t val)
     newFileManager.setProjectStructChanged();
     showLineInDelaySend();
     engine.refreshLineInStreamDelaySend();
+}
+
+// plan 007 F3: reverb type Stock / Plinky (saved with the project in the sidecar seqfx.bin, see seqFx.h)
+void cMasterParams::changeReverbType(int16_t val)
+{
+    if (val > 0)
+        seqFxSetReverbType(seqfx::RT_PLINKY);
+    else if (val < 0)
+        seqFxSetReverbType(seqfx::RT_STOCK);
+    showReverbType();
+}
+
+void cMasterParams::setDefaultReverbType()
+{
+    seqFxSetReverbType(seqfx::RT_STOCK);
+    showReverbType();
 }
 
 void cMasterParams::changeLineInReverbSend(int16_t val)

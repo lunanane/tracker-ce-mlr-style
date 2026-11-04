@@ -12,6 +12,7 @@
 #include "seqLauncher.h"
 #include "seqSidecar.h"
 #include "seqClips.h"
+#include "seqFx.h"
 #include "seqHooks.h"
 #include <math.h>
 #include <new>
@@ -546,6 +547,7 @@ void seqTracksUpdate()
     if (s_autosaveGate.take(sequencer.isPlay()))
         newFileManager.autosaveProjectStruct_ASAP();
     seqClipsUpdate();
+    seqFxUpdate();
     seqCutUpdate();
 
     if (s_pendingRel.any())

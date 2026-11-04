@@ -1,17 +1,18 @@
 # Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 # Host tests for the glue logic (no Polyend code). Needs a desktop g++.   make test
 CXX ?= g++
-CXXFLAGS ?= -std=c++11 -Wall -Wextra -O1 -I../source -I../../seqgen -I../interface/seqSession
+CXXFLAGS ?= -std=c++11 -Wall -Wextra -O1 -I../source -I../../seqgen -I../interface/seqSession -I../libs/Audio/Polyverb
 SEQ = ../../seqgen/chordarp.cpp ../../seqgen/mono.cpp ../../seqgen/playhead.cpp
 GLUE = ../source/seqTracksCore.cpp ../source/seqCut.cpp ../interface/seqSession/cutLayer.cpp
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
 
 .PHONY: test clean preview
-test: build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE)
+test: build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE)
 	build/seq_glue_tests$(EXE)
 	build/seq_perform_tests$(EXE)
 	build/seq_mod_tests$(EXE)
 	build/seq_play_tests$(EXE)
+	build/seq_fx_tests$(EXE)
 
 build/seq_glue_tests$(EXE): test_main.cpp test_session.cpp test_cut.inc ../source/seqSessionLogic.h ../source/seqClipsLogic.h ../source/seqCut.h ../source/seqCutLogic.h ../interface/seqSession/cutLayer.h ../interface/seqSession/cutSessionLayer.h ../interface/seqSession/laneDraw.h ../interface/seqSession/laneView.h ../source/seqTracksCore.h ../source/seqTracksLogic.h ../source/seqTracksRec.h $(GLUE) $(SEQ)
 	mkdir -p build
@@ -34,6 +35,10 @@ preview: build/seq_glue_tests$(EXE)
 build/seq_play_tests$(EXE): test_play.cpp ../source/seqPlayLogic.h ../source/seqTracksLogic.h
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) test_play.cpp -o $@
+
+build/seq_fx_tests$(EXE): test_fx.cpp ../source/seqFxDsp.h ../source/seqFxLogic.h ../source/seqSidecarLogic.h ../libs/Audio/Polyverb/ring_reverb.h
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) test_fx.cpp -o $@
 
 clean:
 	rm -rf build
