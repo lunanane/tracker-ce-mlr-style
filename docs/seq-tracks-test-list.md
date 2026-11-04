@@ -129,6 +129,8 @@ Then hold a root pad in columns 1-6. The selection stays when you release (it is
 | Open the project on stock CE (or the upstream firmware) | Opens normally; the extra file `seqtracks.bin` is ignored. The recorded notes (and chord FX) are ordinary pattern data and play. |
 | A project that never used a sequencer: save it | No `seqtracks.bin` is created in its folder. |
 | Save as (new name) | The new folder gets its own `seqtracks.bin`. |
+| Project A used a sequencer. Open project B (never used one), Save as **over** the existing folder of A | A's old `seqtracks.bin` is removed from that folder (no stale sequencers come back when A's folder is opened). |
+| Save (same name) of a project whose `seqtracks.bin` is unreadable (damaged / newer version) and that you never used a sequencer in | The file is left as it is. |
 
 Known limits of step B: the sidecar is rewritten about once a second after a change (only while the Workspace autosave runs); Rec is
 not written to patterns other than the one you started in; sample-track chords keep the lowest note only; no pad-velocity record.

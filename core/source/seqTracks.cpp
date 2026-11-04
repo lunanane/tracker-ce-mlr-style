@@ -195,15 +195,38 @@ bool writeSidecar(const char* path)
     return fileTransfer.saveMemoryToFile(buf, path, (uint32_t)n) == fileTransferEnd;
 }
 
+enum ReadResult { READ_MISSING, READ_VALID, READ_INVALID };
+
 // Reads a sidecar into the engine. Missing or invalid file: every track Off (stock behaviour).
-bool readSidecar(const char* path)
+ReadResult readSidecar(const char* path)
 {
+    FileSystem* fs = newFileManager.getFileSystem();
+    if (!fs || !fs->exists(path))
+    {
+        seqEngine.resetState();
+        return READ_MISSING;
+    }
+    // the real file length goes to loadState: bytes left in the shared buffer by an earlier file must not complete a short file
+    size_t sz = fs->getFileSize(path);
+    if (sz > seqtracks::Engine::kSidecarMax)
+        sz = seqtracks::Engine::kSidecarMax;
     uint8_t* buf = s_io;
-    uint8_t st = fileTransfer.loadFileToMemory(path, buf, seqtracks::Engine::kSidecarMax, fileWholeOnce);
-    if (st == fileTransferEnd && seqEngine.loadState(buf, seqtracks::Engine::kSidecarMax))
-        return true;
+    if (sz && fileTransfer.loadFileToMemory(path, buf, (uint32_t)sz, fileWholeOnce) == fileTransferEnd &&
+        seqEngine.loadState(buf, sz))
+        return READ_VALID;
     seqEngine.resetState();
-    return false;
+    return READ_INVALID;
+}
+
+// The project folder whose sidecar was loaded (valid or not): Save back to it keeps an unknown file it cannot read.
+uint32_t s_loadedId = 0;
+bool s_loadedValid = false;
+
+void removeIfExists(const char* path)
+{
+    FileSystem* fs = newFileManager.getFileSystem();
+    if (fs && fs->exists(path))
+        fs->remove(path);
 }
 } // namespace
 
@@ -283,7 +306,10 @@ void seqTracksUpdate()
 // ---------------------------------------------------------------- sidecar files
 void seqTracksLoadWorkspace()
 {
-    s_hadSidecar = readSidecar(kWorkspaceSidecar);
+    ReadResult r = readSidecar(kWorkspaceSidecar);
+    s_hadSidecar = r == READ_VALID;
+    s_loadedValid = r != READ_MISSING; // the file came from the project being opened
+    s_loadedId = seqlogic::projectId(newFileManager.getCurrentProjectPath(), newFileManager.getCurrentProjectName());
     s_savedHash = seqEngine.stateHash();
     s_hashInit = true;
     s_wsWritePending = false;
@@ -299,20 +325,40 @@ void seqTracksSaveWorkspace()
 
 void seqTracksSaveProject(const char* path, const char* name)
 {
-    if (!s_hadSidecar && !seqEngine.active())
-        return; // never used in this project: leave the folder as stock firmware writes it
     char file[PATCH_SIZE];
     projectSidecarPath(file, sizeof(file), path, name);
-    writeSidecar(file);
-    writeSidecar(kWorkspaceSidecar);
-    s_wsWritePending = false;
+    uint32_t id = seqlogic::projectId(path, name);
+    switch (seqlogic::sidecarAction(s_hadSidecar || seqEngine.active(), s_loadedValid && s_loadedId == id))
+    {
+        case seqlogic::SIDE_WRITE:
+            if (writeSidecar(file))
+            {
+                s_loadedValid = true;
+                s_loadedId = id;
+            }
+            writeSidecar(kWorkspaceSidecar);
+            s_wsWritePending = false;
+            break;
+        case seqlogic::SIDE_REMOVE:
+            // never used in this project: no stale file of an overwritten project (nor in the Workspace mirror)
+            removeIfExists(file);
+            removeIfExists(kWorkspaceSidecar);
+            break;
+        case seqlogic::SIDE_KEEP: break; // leave the folder as stock firmware writes it
+    }
 }
 
 void seqTracksImportProject(const char* path, const char* name)
 {
-    uint8_t* buf = s_io;
+    FileSystem* fs = newFileManager.getFileSystem();
     char file[PATCH_SIZE];
     projectSidecarPath(file, sizeof(file), path, name);
-    if (fileTransfer.loadFileToMemory(file, buf, seqtracks::Engine::kSidecarMax, fileWholeOnce) == fileTransferEnd)
-        fileTransfer.saveMemoryToFile(buf, kWorkspaceSidecar, seqtracks::Engine::kSidecarMax);
+    if (!fs || !fs->exists(file))
+        return;
+    size_t sz = fs->getFileSize(file);
+    if (sz > seqtracks::Engine::kSidecarMax)
+        sz = seqtracks::Engine::kSidecarMax;
+    uint8_t* buf = s_io;
+    if (sz && fileTransfer.loadFileToMemory(file, buf, (uint32_t)sz, fileWholeOnce) == fileTransferEnd)
+        fileTransfer.saveMemoryToFile(buf, kWorkspaceSidecar, (uint32_t)sz);
 }

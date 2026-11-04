@@ -180,7 +180,8 @@ Built around immediate playability; no separate Seq page, no Off/Live/Rec modes.
   Written next to `project.mt` by Save / Save as (only when a sequencer was ever used in the project), mirrored in
   `Workspace/seqtracks.bin` by the Workspace autosave (state change detected by a hash about once a second), copied from the project
   folder into the Workspace when a project is opened, read when the Workspace is loaded. Missing / short / corrupt / wrong version =
-  all tracks Off, nothing else changes. `.mtp`, `project.mt` and the pattern struct are untouched.
+  all tracks Off, nothing else changes. Save / Save as with a project that never used a sequencer writes nothing and removes a stale
+  `seqtracks.bin` (and the Workspace mirror) unless it is the project the file was loaded from (an unreadable or newer file is kept there). `.mtp`, `project.mt` and the pattern struct are untouched.
 - Not done: Copy / Paste of a track's sequencer, recording into other patterns than the one active at Rec start, pad velocity record.
 
 ## Script sequencers — parked (owner 2026-11-03)

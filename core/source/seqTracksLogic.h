@@ -64,4 +64,25 @@ inline bool wantTakeover(uint8_t type, int heldPads, int soundingNotes, bool mon
 // Pending type changes apply on the first pulse of a bar (96 pulses per bar).
 inline bool isBarStart(uint32_t pulseInBar) { return pulseInBar == 0; }
 
+// What Save / Save As does with <project>/seqtracks.bin.
+//  WRITE:  the project used a sequencer -> write the current state.
+//  KEEP:   never used, and this is the project the sidecar was loaded from (it may be an unknown / newer file): leave it.
+//  REMOVE: never used and it is another project (Save as over an existing folder): a stale file of the overwritten project.
+enum SidecarAction : uint8_t { SIDE_WRITE = 0, SIDE_KEEP = 1, SIDE_REMOVE = 2 };
+inline SidecarAction sidecarAction(bool used, bool sameProjectAsLoaded)
+{
+    if (used) return SIDE_WRITE;
+    return sameProjectAsLoaded ? SIDE_KEEP : SIDE_REMOVE;
+}
+
+// Identity of a project folder (FNV-1a over path, '/', name).
+inline uint32_t projectId(const char* path, const char* name)
+{
+    uint32_t h = 2166136261u;
+    for (const char* p = path; p && *p; p++) h = (h ^ (uint8_t)*p) * 16777619u;
+    h = (h ^ (uint8_t)'/') * 16777619u;
+    for (const char* p = name; p && *p; p++) h = (h ^ (uint8_t)*p) * 16777619u;
+    return h;
+}
+
 }  // namespace seqlogic

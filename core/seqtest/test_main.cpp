@@ -116,6 +116,16 @@ static void test_logic()
     CHECK(!wantTakeover(TYPE_OFF, 5, 5, true, true));
 }
 
+static void test_sidecar_policy()
+{
+    CHECK(sidecarAction(true, true) == SIDE_WRITE && sidecarAction(true, false) == SIDE_WRITE);
+    CHECK(sidecarAction(false, true) == SIDE_KEEP);   // same project, unknown file: preserved
+    CHECK(sidecarAction(false, false) == SIDE_REMOVE); // Save as over another project: stale file goes
+    CHECK(projectId("/Projects", "a") == projectId("/Projects", "a"));
+    CHECK(projectId("/Projects", "a") != projectId("/Projects", "b"));
+    CHECK(projectId("/Projects", "ab") != projectId("/Projectsa", "b"));
+}
+
 static void test_off_is_inert()
 {
     MockHost h;
@@ -908,6 +918,7 @@ int main()
 {
     test_tap();
     test_logic();
+    test_sidecar_policy();
     test_off_is_inert();
     test_chord_takeover_stopped();
     test_chord_takeover_playing_and_pattern_returns();
