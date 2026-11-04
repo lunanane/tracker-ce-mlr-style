@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 """Delta-debug a failing lua_compare script: python shrink.py script.txt"""
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

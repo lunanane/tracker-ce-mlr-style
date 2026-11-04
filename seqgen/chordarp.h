@@ -1,3 +1,4 @@
+// Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 // Chord/Arp sequencer: owner's grid-composer c34 page 3 without the arranger/tracker part.
 #pragma once
 #include "seqgen.h"

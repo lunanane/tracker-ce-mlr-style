@@ -1,3 +1,4 @@
+// Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 // Second half of the tests (included by test_main.cpp, which holds the runner and the helpers).
 
 TEST(arp_directions_up_down_updown_pattern) {

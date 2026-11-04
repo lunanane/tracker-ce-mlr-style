@@ -65,12 +65,12 @@ col 10 = PAGE+/SPD+/VEL-, col 11 = CLEAR/-/VEL+. LOOP held + two step pads sets 
 
 ```
 make test                    # 74 unit tests, 2887 checks, host g++ only
-make lua-compare PYTHON=<python with lupa>   # differential test, see below
+make lua-compare LUA=<path to monome_iii_c34.lua> PYTHON=<python with lupa>   # differential test, see below
 make arm                     # arm-none-eabi-g++ compile + object sizes
 ```
 (`make` is optional; the commands are one-liners, see the Makefile.)
 
-Differential test: `lua_compare.py` loads the real `monome_iii_c34.lua` from `E:\claude\iii-grid-composer` in Lua 5.4 (through the
+Differential test: `lua_compare.py` loads the real `monome_iii_c34.lua` (path via `--lua`, the `SEQGEN_LUA` environment variable or `make LUA=...`) in Lua 5.4 (through the
 Python package `lupa`, already installed for another Python on this machine; nothing was downloaded for this work), stubs the iii
 API, and drives it only through `event_grid` / `event_midi` / `framework_tick` (so also the real menu pad to switch pages). The
 same script (semantic commands, mapped to c34 grid coordinates on the Lua side and to the 12x4 pads / params on the C++ side) is
@@ -222,7 +222,7 @@ Rules (all covered by tests):
 ## Results at hand-over (c34)
 
 - `make test`: 75 tests, 0 failures.
-- `make lua-compare PYTHON=<python with lupa>` (default: 40 random scripts + 3 hand-written): 43 scripts identical, 9633 events.
+- `make lua-compare LUA=<path to monome_iii_c34.lua> PYTHON=<python with lupa>` (default: 40 random scripts + 3 hand-written): 43 scripts identical, 9633 events.
 - `python -I test/lua_compare.py --fuzz 100 --seed S --script test/scripts/chord_basic.txt test/scripts/mono_basic.txt test/scripts/chord_c34.txt`
   for S = 1..5: 515 scripts, 0 mismatches, 123863 events. One of them (seed 5 #28) hits `n%0` inside the original c34 `c_arp`
   (deviation 7); it is compared up to that moment.

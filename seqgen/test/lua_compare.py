@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 """Run the original c31 Lua pages (headless, stubbed iii API) and the C++ port on the same gesture
 script and compare the MIDI event streams (pulse/tick-stamped).
 
@@ -16,7 +17,7 @@ Script language (one command per line; shared by both sides):
 """
 import argparse, os, random, subprocess, sys, tempfile
 
-DEFAULT_LUA = r"E:\claude\iii-grid-composer\monome_iii_c34.lua"  # the port follows c34; c31 can be given but will differ
+DEFAULT_LUA = os.environ.get("SEQGEN_LUA")  # path to monome_iii_c34.lua (the port follows c34; c31 can be given but will differ)
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 PRELUDE = r"""
@@ -315,7 +316,8 @@ def gen_script(rng, nlines=260):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--lua", "--c31", dest="c31", default=DEFAULT_LUA)
+    ap.add_argument("--lua", "--c31", dest="c31", default=DEFAULT_LUA, required=DEFAULT_LUA is None,
+                    help="path to the grid-composer Lua script (or set SEQGEN_LUA)")
     ap.add_argument("--driver", default=os.path.join(HERE, "..", "build", "lua_driver.exe"))
     ap.add_argument("--fuzz", type=int, default=0)
     ap.add_argument("--seed", type=int, default=1)

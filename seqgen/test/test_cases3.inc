@@ -1,3 +1,4 @@
+// Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 // c34 additions (included by test_cases2.inc after MRig is defined).
 
 TEST(mono_velocity_pattern_per_instance) {

@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 """Print both event streams for a script: python dump.py script.txt"""
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

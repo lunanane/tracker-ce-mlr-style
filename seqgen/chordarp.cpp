@@ -1,3 +1,4 @@
+// Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 // Chord/Arp engine, port of c34 page 3 without the arranger. See README.md for the mapping.
 #include "chordarp.h"
 

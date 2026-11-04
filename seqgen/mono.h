@@ -1,3 +1,4 @@
+// Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 // Mono sequencer: owner's grid-composer c34 page 4, one instance = one tk[k].
 #pragma once
 #include "chordarp.h"

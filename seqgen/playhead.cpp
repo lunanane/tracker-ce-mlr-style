@@ -1,3 +1,4 @@
+// Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 // Playhead, see playhead.h and README.md ("Playhead").
 #include "playhead.h"
 

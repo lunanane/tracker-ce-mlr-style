@@ -1,3 +1,4 @@
+# Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 # mono: two steps, loop, tie, pages, speed; then a chord root changes the scale under it
 par 1 2
 mwin 1 0

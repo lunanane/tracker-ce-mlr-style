@@ -1,3 +1,4 @@
+// Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 // Script-driven event-stream dump, used by lua_compare.py to compare the C++ port with the c31 Lua pages.
 // Usage: lua_driver script.txt   (see lua_compare.py for the script language)
 #include <stdio.h>

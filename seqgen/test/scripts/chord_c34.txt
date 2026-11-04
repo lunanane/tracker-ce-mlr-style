@@ -1,3 +1,4 @@
+# Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 # c34 features: velocity patterns/blends, swing 3, gate lanes, extra speeds/pairs, arp directions, octave range, transpose
 par 1 2
 start

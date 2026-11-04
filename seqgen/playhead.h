@@ -1,3 +1,4 @@
+// Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 // Playhead: MLR-style per-track playhead controller for the Session view (plan 002, phase S1).
 // One instance = one track. No platform includes, no heap, no STL, no float, fixed arrays.
 // Rules and rationale: README.md, section "Playhead".

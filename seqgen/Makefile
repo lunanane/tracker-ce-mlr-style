@@ -1,3 +1,4 @@
+# Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 # seqgen host tests. Needs only a desktop g++ (and make). Run from this directory.
 #   make test         build + run the unit tests
 #   make lua-compare  differential test against the c31 Lua pages (needs Python with `lupa`)
@@ -7,7 +8,7 @@ CXXFLAGS ?= -std=c++11 -Wall -Wextra -Wdouble-promotion -O1
 SRC = chordarp.cpp mono.cpp playhead.cpp
 PYTHON ?= python
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
-LUA ?= E:/claude/iii-grid-composer/monome_iii_c34.lua   # set LUA=...monome_iii_c31.lua to run the older script (the port follows c34, so it will differ)
+LUA ?=   # path to monome_iii_c34.lua of the grid-composer (or monome_iii_c31.lua for the older script; the port follows c34, so it will differ); required for lua-compare
 FUZZ ?= 40
 
 .PHONY: test lua-compare arm clean
@@ -23,7 +24,7 @@ build/lua_driver$(EXE): test/lua_driver.cpp $(SRC) seqgen.h chordarp.h mono.h
 	$(CXX) $(CXXFLAGS) test/lua_driver.cpp $(SRC) -o $@
 
 lua-compare: build/lua_driver$(EXE)
-	$(PYTHON) -I test/lua_compare.py --lua $(LUA) --driver build/lua_driver$(EXE) --fuzz $(FUZZ) --seed 1 --script test/scripts/*.txt
+	$(if $(LUA),,$(error set LUA=path/to/monome_iii_c34.lua))$(PYTHON) -I test/lua_compare.py --lua $(LUA) --driver build/lua_driver$(EXE) --fuzz $(FUZZ) --seed 1 --script test/scripts/*.txt
 
 ARMFLAGS = -std=gnu++17 -mcpu=cortex-m4 -mthumb -mfpu=fpv4-sp-d16 -mfloat-abi=hard -Os -fno-exceptions -fno-rtti \
            -Wall -Wextra -Wdouble-promotion -ffunction-sections -fdata-sections

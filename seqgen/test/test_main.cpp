@@ -1,3 +1,4 @@
+// Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 // Tiny self-written test runner for seqgen (no frameworks). Expected values are derived by hand from c31.
 #include <stdio.h>
 #include <string.h>

@@ -2,11 +2,11 @@
 
 Status: DRAFT (2026-11-03). Target hardware: **original Tracker (MK66, 48 pads = 12 columns × 4 rows)**; Tracker+
 should work unchanged (same pads). Tracker Mini (no pads) is out of scope for now. The drum engine is dropped
-(owner 2026-11-03).
+(2026-11-03).
 
 ## Idea
 Every track can pick a **sequencer type**. The sequencers are the owner's grid-composer pages (monome iii,
-`D:\OneDrive\CodeLibraries\iii\monome_iii_c31.lua`) and the groovebox scripts (`lnx-groovebox`), ported to C++.
+c31/c34, github.com/lunanane/iii-grid-composer) and the groovebox scripts (`lnx-groovebox`), ported to C++.
 A track's sequencer is used in two ways:
 
 - **Record**: play the sequencer, and what it plays is written into the track's tracker steps (note, volume,
@@ -99,7 +99,7 @@ r4    degree window +0       | WIN−  —     —     —
 
 ## Recording chords (a tracker track plays one note per step)
 - Arp → one note per step on the track: fits directly.
-- **Chord mode → the lowest note + `FX_TYPE_MIDI_CHORD`** (owner 2026-11-03). The Tracker's chord FX
+- **Chord mode → the lowest note + `FX_TYPE_MIDI_CHORD`** (2026-11-03). The Tracker's chord FX
   (`core/source/mtChordDefs.h`) is a table of 29 interval bitmasks (at most 4 notes within 15 semitones of the bass
   note) and is played only on **MIDI tracks** (`Sequencer::sendMidiChordOn`, `mtSequencer.cpp:2344`).
   - The glue (firmware side, not seqgen) turns the sounding chord into intervals above its lowest note and looks the
@@ -202,7 +202,7 @@ Built around immediate playability; no separate Seq page, no Off/Live/Rec modes.
   whole engine to external RAM would need placement construction and slower audio-context access, not done).
 - Not done: Copy / Paste of a track's sequencer, recording into other patterns than the one active at Rec start, pad velocity record.
 
-## Script sequencers — parked (owner 2026-11-03)
+## Script sequencers — parked (2026-11-03)
 The owner decided against an embedded script engine on the original Tracker (flash too tight): all sequencers are
 built in (C++). The notes below stay for a possible Tracker+ version.
 

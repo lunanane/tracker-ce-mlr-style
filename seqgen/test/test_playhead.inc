@@ -1,3 +1,4 @@
+// Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 // Playhead tests (plan 002, S1). Included from test_main.cpp.
 
 static Playhead::StepOut stp(Playhead& p) { return p.step(); }

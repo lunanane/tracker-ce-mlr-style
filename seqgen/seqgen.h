@@ -1,6 +1,7 @@
+// Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 // seqgen - pure C++ sequencer engines (Chord/Arp and Mono) ported from the owner's grid-composer c31.
 // No platform includes, no heap, no exceptions/RTTI, float-free (integer maths only).
-// License: to be chosen by the owner (see README.md).
+// License: PolyForm Noncommercial 1.0.0 (see LICENSE.md).
 #pragma once
 #include <stddef.h>
 #include <stdint.h>

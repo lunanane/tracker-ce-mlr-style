@@ -1,3 +1,4 @@
+// Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 // Mono sequencer, port of c34 page 4. See README.md for the mapping.
 #include "mono.h"
 
