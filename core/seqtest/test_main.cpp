@@ -121,6 +121,18 @@ static void test_tap()
     CHECK(!t.up(0x300u));
 }
 
+static void test_perform_key_route()
+{
+    using namespace seqlogic;
+    // (onFaderPage, onStockPage, shift)
+    CHECK(performKeyRoute(false, false, false) == PERFORM_TO_FADER);        // Pattern / Song / Master / ... : plain = fader page
+    CHECK(performKeyRoute(false, false, true) == PERFORM_STOCK_SWITCH);     // Shift = the stock Performance page
+    CHECK(performKeyRoute(true, false, false) == PERFORM_STAY);             // fader page: plain does nothing
+    CHECK(performKeyRoute(true, false, true) == PERFORM_TO_STOCK_PAGE);     // fader page: Shift = stock page
+    CHECK(performKeyRoute(false, true, false) == PERFORM_FLIP_TRACKS);      // stock page: plain flips the tracks
+    CHECK(performKeyRoute(false, true, true) == PERFORM_TO_FADER);          // stock page: Shift = fader page
+}
+
 static void test_double_tap()
 {
     DoubleTap d;
@@ -1332,6 +1344,7 @@ int main()
 {
     test_tap();
     test_double_tap();
+    test_perform_key_route();
     test_logic();
     test_sidecar_policy();
     test_pending_release_retry();
@@ -1376,6 +1389,8 @@ int main()
     test_cut_layer();
     test_cut_session_freeze_and_launch();
     test_cut_session_layer_adapter();
+    test_layer_handover_display_queue();
+    test_layer_handover_lifecycle();
     test_syncall_encoding();
     test_syncall_one_pass_mixed_state();
     test_syncall_edge_cases();

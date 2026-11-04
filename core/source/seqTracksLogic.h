@@ -46,6 +46,20 @@ struct TapDetector
 // every Song press with press() and every release with release(isTap) (isTap = TapDetector result: short, plain, no other
 // button). A long hold or a refused press breaks the sequence, so a hold never opens the launcher. release() is true on the
 // release of the second tap.
+// Performance key (owner 2026-11-04, plan 005 / 007 B3): the one place that decides where the key goes.
+//   any other page:      plain -> fader page,            Shift -> stock Performance page
+//   fader page (ours):   plain -> nothing (stays),       Shift -> stock Performance page
+//   stock Performance:   plain -> stock (flips tracks),  Shift -> fader page
+enum PerformRoute : uint8_t { PERFORM_STOCK_SWITCH = 0, PERFORM_TO_FADER = 1, PERFORM_TO_STOCK_PAGE = 2, PERFORM_STAY = 3, PERFORM_FLIP_TRACKS = 4 };
+inline PerformRoute performKeyRoute(bool onFaderPage, bool onStockPage, bool shift)
+{
+    if (onFaderPage)
+        return shift ? PERFORM_TO_STOCK_PAGE : PERFORM_STAY;
+    if (onStockPage)
+        return shift ? PERFORM_TO_FADER : PERFORM_FLIP_TRACKS;
+    return shift ? PERFORM_STOCK_SWITCH : PERFORM_TO_FADER; // the stock switch of the Performance key goes to the stock page
+}
+
 struct DoubleTap
 {
     enum { kGapMs = 350 };

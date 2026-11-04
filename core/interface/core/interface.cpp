@@ -16,6 +16,7 @@
 #include "seqPerform/seqPerform.h"
 #include "seqSession/seqSession.h"
 #include "seqHooks.h"
+#include "seqTracksLogic.h"
 #include "performanceMode/performanceMode.h"
 #include "projectEditor/projectEditor.h"
 #include "sampleEditor/sampleEditor.h"
@@ -467,7 +468,9 @@ void Interface::switchModuleByButton(hModule module, uint8_t button, uint32_t op
 
     // sequencer tracks mod: the Performance key opens the alt fader page; Shift + Performance the stock Performance page (owner
     // change 2026-11-04). The check runs before deactivateModule, which fakes a Shift release (plan 005 R3).
-    if (button == interfaceButtonPerformance && !getPlatform()->getButtons()->isButtonPressed(interfaceButtonShift) &&
+    if (button == interfaceButtonPerformance &&
+        seqlogic::performKeyRoute(isSeqPerformScreenActive(), isPerformanceModeScreenActive(),
+                                  getPlatform()->getButtons()->isButtonPressed(interfaceButtonShift)) == seqlogic::PERFORM_TO_FADER &&
         seqFaderShiftFromElsewhere(isSeqPerformScreenActive()))
     {
         deactivateModule(module);

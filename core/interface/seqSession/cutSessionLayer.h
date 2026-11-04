@@ -23,8 +23,7 @@ class CutSessionLayer : public SessionLayer
     void enter(uint8_t firstTrack) override
     {
         setGroup(firstTrack);
-        laneViewCreate(); // the controls live while the layer is visible (no slot is held while CLIPS is shown)
-        laneViewShow(true);
+        laneViewShow(true); // the controls exist since the module start (createControls); only shown here (plan 007 B1)
     }
     void setGroup(uint8_t firstTrack) override
     {
@@ -36,8 +35,7 @@ class CutSessionLayer : public SessionLayer
     void leave() override
     {
         cutReleaseAll();
-        laneViewShow(false);
-        laneViewDestroy();
+        laneViewShow(false); // hidden, never destroyed: a destroyed control with a queued refresh stalls the display queue
     }
     void pad(uint8_t col, uint8_t row, bool down) override { cutPad(col, row, down, down && cutShiftHeld()); } // Shift + RESYNC = SYNC ALL
     void leds(uint8_t out[48]) override { cutLeds(out); }
@@ -51,8 +49,8 @@ class CutSessionLayer : public SessionLayer
     }
 
     // ---- own screen ----
-    void createControls() override {}  // created in enter()
-    void destroyControls() override { laneViewDestroy(); }
+    void createControls() override { laneViewCreate(); } // hidden until enter()
+    void destroyControls() override { laneViewForget(); }
     bool refresh(bool force) override { return laneViewRefresh(force, first_); }
     bool drawsOwnScreen() const override { return true; }
     bool button(uint8_t i, bool down) override

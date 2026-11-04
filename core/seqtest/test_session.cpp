@@ -307,6 +307,74 @@ static void test_quant_cycle_and_countdown()
         }
 }
 
+// ---- plan 007 B2: the launch quantise follows its setting, whatever the length of the pattern / clip ----
+// Drives the launcher the way the audio hook does (seqSessionStep: advance on row 0, then onStep per track) over patterns of
+// 16 .. 255 steps. A tap at any position must apply at the next bar (<= 16 steps), at the next step (immediate) or at the pattern
+// end, exactly as the "next in N" countdown (stepsToQuant) says - also for the second launch, after the counter is frozen.
+static void test_long_pattern_quant()
+{
+    const int lens[] = { 16, 20, 64, 128, 200, 255, 256 };
+    for (size_t li = 0; li < sizeof(lens) / sizeof(lens[0]); li++)
+    {
+        const int L = lens[li];
+        for (int qi = 0; qi < Q_COUNT; qi++)
+            for (int tapAt = 0; tapAt < L; tapAt += (L > 64 ? 7 : 1))
+            {
+                Launcher l;
+                l.setQuant((Quant)qi);
+                uint16_t g = (uint16_t)((tapAt + L - 1) % L); // the global position that plays next, as player.globalPos
+                int applied = 0, launches = 0, since = -1, expect = 0;
+                for (int step = 0; step < L * 3 && launches < 2; step++)
+                {
+                    g = (uint16_t)((g + 1) % L);
+                    l.advance(g, (uint16_t)L);
+                    if (step == 0 || (launches == 1 && since < 0 && step > 5))
+                    {
+                        l.postClip(3, (uint8_t)(7 + launches)); // the first tap, then a second one after the first was applied
+                        since = 0;
+                        expect = stepsToQuant((Quant)qi, l.position(), l.length());
+                        // the tap is drained at the next step in the audio context: it counts from there
+                    }
+                    l.drain();
+                    bool hit = false;
+                    for (int t = 0; t < 16; t++)
+                    {
+                        uint8_t p = 0;
+                        Launcher::Action a = l.onStep((uint8_t)t, l.position(), p, (uint16_t)L);
+                        if (t == 3 && a == Launcher::A_CLIP)
+                            hit = true;
+                    }
+                    if (since >= 0)
+                    {
+                        if (hit)
+                        {
+                            applied = since;
+                            if (qi == Q_NOW) SCHECK(applied == 0);
+                            if (qi == Q_BAR) SCHECK(applied <= 16);
+                            // the countdown shown before the launch is not later than the launch ("next in N" counted from the step before)
+                            SCHECK(applied <= (expect > 0 ? expect : 1));
+                            launches++;
+                            since = -1;
+                        }
+                        else
+                            since++;
+                    }
+                }
+                SCHECK(launches == 2); // both launches happened, none waited a whole long pattern for a bar / immediate quantise
+                (void)applied;
+            }
+    }
+}
+
+// The scene (stock pattern switch) is the pattern end by definition: the launcher counts it that way, whatever the quantise is.
+static void test_scene_countdown_is_pattern_end()
+{
+    for (int L = 16; L <= 255; L += 37)
+        for (uint16_t pos = 0; pos < (uint16_t)L; pos += 11)
+            SCHECK(stepsToQuant(Q_PATTERN, pos, (uint16_t)L) == (uint16_t)(L - pos) &&
+                   stepsToQuant(Q_BAR, pos, (uint16_t)L) <= 16 && stepsToQuant(Q_NOW, pos, (uint16_t)L) == 1);
+}
+
 static void test_navigation()
 {
     // Up / Down move the pad window by one row (pattern), Shift by a whole window
@@ -780,6 +848,8 @@ int sessionTests(int& checks)
     test_save_merge_and_launched();
     test_cancel_and_counter();
     test_quant_cycle_and_countdown();
+    test_long_pattern_quant();
+    test_scene_countdown_is_pattern_end();
     test_navigation();
     test_pad_gestures();
     test_play_mode_wheel();

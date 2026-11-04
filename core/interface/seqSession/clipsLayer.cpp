@@ -264,7 +264,8 @@ void ClipsLayer::showControls(bool on)
     {
         display.setControlShow(marks_);
         display.setControlShow(grid_);
-        memset(&marksData_, 0xFF, sizeof(marksData_)); // force a redraw of both
+        memset(&marksData_, 0xFF, sizeof(marksData_)); // force a redraw of both (the grid too: its data did not change while hidden)
+        memset(&view_, 0xFF, sizeof(view_));
     }
     else
     {

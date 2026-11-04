@@ -11,8 +11,9 @@ static bool g_shiftHeld = false;
 static int g_groupRequests = 0;
 static int g_lastGroupRequest = -1;
 static int g_laneShow = 0, g_laneHide = 0;
-void laneViewCreate() {}
-void laneViewDestroy() {}
+static int g_laneCreate = 0, g_laneForget = 0;
+void laneViewCreate() { g_laneCreate++; }
+void laneViewForget() { g_laneForget++; }
 void laneViewShow(bool show) { if (show) g_laneShow++; else g_laneHide++; }
 bool laneViewRefresh(bool, uint8_t) { return false; }
 bool cutShiftHeld() { return g_shiftHeld; }
@@ -1367,4 +1368,75 @@ static void test_r4_handback_retrigger_and_stock_phase()
         CHECK(c.activeMask() == 0);
     }
     CHECK(!kRedrawPerStep); // default: smooth 25 fps playhead
+}
+
+// ---- plan 007 B1: CLIPS <-> CUT handover ("stuck in MLR") ----
+// Model of the display's refresh queue (core/libs/NewDisplay/display.cpp step1): the head entry of the queue is only passed once its control
+// has been drawn; an entry whose control slot is empty is never passed (step1 returns on it), so everything behind it - the grid of the
+// CLIPS layer - is never drawn again. destroyControl() also shifts the slots above the freed one down.
+namespace
+{
+struct FakeDisplay
+{
+    bool alive[8];
+    int queue[32];
+    int head, tail;
+    int drawn[8];
+    FakeDisplay() : head(0), tail(0) { for (int i = 0; i < 8; i++) { alive[i] = false; drawn[i] = 0; } }
+    int create() { for (int i = 0; i < 8; i++) if (!alive[i]) { alive[i] = true; return i; } return -1; }
+    void destroy(int h) { alive[h] = false; }
+    void refresh(int h) { for (int i = head; i != tail; i = (i + 1) % 32) if (queue[i] == h) return; queue[tail] = h; tail = (tail + 1) % 32; }
+    void update() { while (head != tail) { int h = queue[head]; if (!alive[h]) return; drawn[h]++; head = (head + 1) % 32; } }
+};
+} // namespace
+
+static void test_layer_handover_display_queue()
+{
+    // the old handover: leaving CUT queued a refresh of both lane controls and then destroyed them
+    FakeDisplay d;
+    int grid = d.create(), lanes = d.create();
+    d.refresh(lanes); d.destroy(lanes);   // laneViewShow(false) + laneViewDestroy()
+    d.refresh(grid);                      // CLIPS enter: the grid is to be drawn
+    d.update();
+    CHECK(d.drawn[grid] == 0);            // the bug: the queue is stuck on the dead slot, the grid is never drawn
+
+    // the new handover: created once, hidden and shown only
+    FakeDisplay e;
+    grid = e.create(); lanes = e.create();
+    for (int i = 0; i < 4; i++)
+    {
+        e.refresh(lanes);                 // laneViewShow(true / false) refreshes its controls
+        e.refresh(grid);
+        e.update();
+    }
+    CHECK(e.drawn[grid] == 4 && e.drawn[lanes] == 4);
+}
+
+static void test_layer_handover_lifecycle()
+{
+    FakePattern f;
+    f.map[0] = 1;
+    seqcut::Cut* c = freshCut(f);
+    CHECK(c != 0);
+    if (!c)
+        return;
+    g_laneCreate = g_laneForget = g_laneShow = g_laneHide = 0;
+    seqsession::CutSessionLayer a;
+    a.createControls();                   // module start
+    CHECK(g_laneCreate == 1 && g_laneShow == 0);
+    for (int i = 0; i < 5; i++)           // CLIPS -> CUT -> CLIPS, repeatedly
+    {
+        a.enter(0);
+        CHECK(g_laneShow == i + 1 && g_laneHide == i);
+        a.leave();
+        CHECK(g_laneShow == i + 1 && g_laneHide == i + 1);
+    }
+    CHECK(g_laneCreate == 1);             // never created again while the module runs, ...
+    CHECK(g_laneForget == 0);             // ... and the controls are never given up before the module stops (a destroyed control stalls the display queue)
+    a.destroyControls();                  // module stop
+    CHECK(g_laneForget == 1);
+    a.createControls();                   // module start again: fresh controls
+    CHECK(g_laneCreate == 2);
+    seqEngine.resetState();
+    seqEngine.idleTick();
 }
