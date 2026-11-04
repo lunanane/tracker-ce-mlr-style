@@ -357,6 +357,10 @@ class cPatternEditor : public ModuleBase
     void setActionButtonPage3Funct();
     void refreshActualActionButtonPage();
 
+    // Play mode (sequencer tracks mod): action-button page SeqPlayOverlay::kPage, outside the page cycle
+    void seqPlayEnter();
+    void seqPlayLeave();
+
     void showActionButtonPage1Labels();
     void showActionButtonPage2Labels();
     void showActionButtonPage3Labels();

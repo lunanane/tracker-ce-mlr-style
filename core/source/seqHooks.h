@@ -28,6 +28,15 @@ bool seqFaderShiftFromStock();
 // seqPerform (the hook has made sure its start() finds a clean state, e.g. read the perform data). false = stock switching.
 // onFaderPage: the fader page is the module that is on screen now.
 bool seqFaderShiftFromElsewhere(bool onFaderPage);
+// The stock Performance page starts fresh (fPerformance.cpp cPerformanceMode::start, not handed over): perform FX the fader page
+// kept running end here, before the stock page resets its track states.
+void seqFaderStockEntered();
+// A project was loaded (seqSidecarsLoadWorkspace): perform FX of the old project end, the fader state is cleared, no pattern reload.
+void seqFaderProjectLoaded();
+// Kept fader FX (left running into Pattern / Song) when the user goes on to a page that does not keep them: seqFaderKept() asks,
+// seqFaderEndKept() applies the stock rule (turn-off at the pattern end while playing, else now).
+bool seqFaderKept();
+void seqFaderEndKept();
 
 // ---- panic (plan 005 M6): transport Stop is the panic of the whole mod. seqPanic() runs once on the main loop after every
 // Stop (seqTracksUpdate) and calls the four hooks below; each ends what its module owns. ----

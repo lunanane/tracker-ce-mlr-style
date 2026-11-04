@@ -20,39 +20,70 @@ Do these first (the full list below is the detail):
 
 Contents: 1-6 Play mode | 7 Record | 8 save / load | 9 Session CLIPS | 10 Session CUT | 11 alt Performance page | 12 stock-behaviour checks.
 
-## 1. Enter / leave Play mode
+## 1. Enter / leave Play mode (v0.2: Play mode is the 4th action-button page of the pattern editor)
+Naming: the bottom-right key printed "Perform" is the firmware's **Pattern** key. The pattern view (tracks, playhead, title bar, mutes) stays on screen in Play mode; only the 8 labels under the screen and the pads change.
 | Press | Expected |
 |---|---|
-| On the Pattern page tap **Pattern** (press and release, nothing else) | Title bar "Play mode". Middle of the screen: "Track N: Off" and three hint lines. The 8 bottom labels show `[1 -]` `2 -` ... (track number, type letter, `[ ]` around the current track). |
-| Hold **Pattern** for about half a second, release (nothing else) | Stays on the pattern editor: only a quick tap (up to 400 ms) opens Play mode. |
-| Open a note / FX / instrument popup on a step, then tap **Pattern** | The popup closes (as before); Play mode does NOT open. Tap **Pattern** once more: Play mode opens. |
-| Reach the Pattern page without pressing Pattern (e.g. close a menu / come back from Song with another button), then tap **Pattern** once | Play mode opens at the first tap. |
-| Pattern + arrow keys / Pattern held with other buttons | Same as stock, never Play mode. |
-| Tap **Pattern** again | Session view (section 9; the cycle is Editor > Play > Session > Editor). Tap **Pattern** once more: back to the normal pattern editor, as before (cursor, view). Tap again: Play mode again. |
-| In Play mode press Params / Song / File ... | The module opens as usual. Pattern from there: pattern editor (not Play mode). |
+| On the Pattern page tap **Pattern** (press and release, nothing else) | The pattern view stays. The 8 bottom labels become the strip: line 1 `1 ---` ... (track number and type: `---` Off, `CHRD`, `MONO`; `*` after it while that track is taken over), line 2 the state (`pattern` for an Off track). The selected track is in brackets, e.g. `[1 ---]`, and framed in the pattern view. No "Play mode" screen, no extra text in the middle. |
+| The pattern editor was in edit mode (red) | Play mode switches it off (green); Rec is the sequencer's Rec now. |
+| Tap **Pattern** again | Back to the normal pattern editor on the action-button page you entered from (Pattern / Length / Step ... or the other pages), the stock pad lights; edit mode stays off. |
+| Tap **Pattern** while a fill popup / menu / note keyboard is open | Play mode does not open and the title bar flashes red (the tap was refused). |
+| Enter Play mode with the cursor on track 7 | The pattern view shows tracks 5-8 with the frame on track 7 at once. |
+| Hold **Pattern** for about half a second, release (nothing else) | Stays as it was: only a quick tap (up to 400 ms) toggles Play mode. |
+| Open a note / FX / instrument popup on a step, then tap **Pattern** | The popup closes (as before); Play mode does NOT open. Tap **Pattern** once more: it opens. |
+| Pattern + arrow keys / Pattern held with other buttons | Same as stock, never toggles Play mode. The title bar flashes red once for a refused quick press. |
+| Hold a pad (a chord in Play mode), tap **Pattern** | The tap still toggles (pads do not block it). Leaving Play mode releases the held chord. |
+| In Play mode press Params / Song / File / Performance ... | The module opens as usual and Play mode is off when you come back to the pattern editor. A chord pad that was held is released, a running recording ends. |
+| Menu button (the editor popup) in Play mode | The menu works as in stock; pads / arrows / Rec belong to the menu while it is open. |
 | Leave Play mode while a chord pad is held | The chord stops (no hanging note). |
+| Stop (transport) in Play mode | Panic: a recording ends, held pads are released, an open type list closes; the chord / Mono stop. Stop then Play gives plain pattern playback again. |
 
-## 2. Jump to a track
+## 2. Strip and track selection
 | Press | Expected |
 |---|---|
-| Screen buttons 1-8 | Brackets move to that track, title shows "Track N". |
-| Hold **Shift** | Labels show 9-16; **Shift + screen button** selects tracks 9-16. Release Shift: labels back to 1-8. |
+| Screen buttons 1-8 | That track is selected: brackets move, the pattern view shows the block of four tracks that contains it (1-4, 5-8, 9-12, 13-16) with the cursor frame on that track's column, pad LEDs switch to its sequencer. Works with the transport stopped and playing, and when edit mode was off. |
+| **Right** | Strip shows tracks 9-16; **Left** shows 1-8. The pattern view and the selected track do not change by themselves. |
+| Select a track on strip 9-16, then **Left**, then a screen button | The pattern view jumps back to the block of four of the newly selected track. |
+| Hold **Shift** (a quick tap, under a quarter of a second) | Stock mute buttons on the 8 labels (names Mute / Unmute); no legend flashes. Shift + screen button mutes that track as in stock; the labels return to the strip when Shift is released. |
+| Hold **Shift** about a quarter of a second without pressing a screen button, track has a sequencer | A legend of 12 x 4 cells appears over the lower pattern rows (not over the playhead row), above the mute labels. See section 2b. |
 | Hold a pad, then press another screen button | The first track releases its pad (chord stops); the pad LEDs switch to the new track's layout. |
+| **Pattern held** + Left / Right in Play mode | Stock pattern queue / change (not swallowed). Plain Left / Right switch the strip. |
+| Hold **Rec**, press **Play** in Play mode | Plain play / stop (no stock live-rec arm, edit mode stays off). |
+| Select a track on strip 9-16, press **Left** | The strip shows 1-8 and a yellow `T12 >` marker sits at its right edge (`< T3` at the left edge for the other direction). Pressing Shift snaps the strip to the selected track's group so the mute labels match. |
+| A track plays a launched clip or an MLR jam | Only the strip says so (`clip` / `cut` on line 2). The pattern column is NOT dimmed (a dim would look like a mute); the pattern view shows the edit pattern, not what that track sounds. |
+| Note / Instr / FX1 / FX2 / Copy / Insert / Delete in Play mode | Nothing happens (no popups over the strip). Up / Down and Play work as in stock. |
+| Hold a pad, tap Pattern (leave), keep the finger down, then lift | No stray note-off / stock pad event on lift; the chord stopped at the tap. |
+| Pads on a track whose type is Off | Nothing (no stock notes either). |
+| Strip line 2 on a track that plays a launched Session clip / an MLR (CUT) jam | `clip` / `cut`. Rec on a launched-clip track shows `on a clip` on that cell for two seconds. |
 
-## 3. Pick a sequencer type (Instr + jog wheel)
+## 2b. Pad legend (hold Shift)
 | Press | Expected |
 |---|---|
-| Hold **Instr**, turn the jog wheel | A list Off / Chord/Arp / Mono appears over the current track's screen button; `>` marks the selection. |
-| Release **Instr** (transport stopped) | The type applies at once: the label shows `C` (Chord/Arp) or `M` (Mono), `-` for Off. |
-| Start the pattern (Play), hold Instr + jog to another type, release | Info line "Next bar: ..." ; the label changes on the next bar line (every 16 steps counted from Play). |
-| Choose the type the track already has | Cancels a pending change. |
+| Chord/Arp track selected, hold Shift for 250 ms | Caption "CHORD/ARP ..." and 12 x 4 cells: columns 1-6 green (roots), columns 7-10 cyan (4x4 panel), columns 11-12: TYP SET / GRV PRM (orange), I- I+ / O- O+ (yellow). |
+| Mono track selected, hold Shift | Columns 1-8 green with 1-8 in the top row (steps); HLF TIE W+ W- (column 9), P- S- LP (column 10), P+ S+ V- (column 11), CLR and V+ (column 12). |
+| Off track selected | No legend. |
+| Chord/Arp legend | The 24 root cells show root names (E, C#m, ...); the mode pad of the visible panel (TYP / SET / GRV / PRM) is white; the caption names the panel. |
+| Mono legend | Steps show 1-8 or 9-16 following HALF; the caption shows the degree window offset. |
+| **Display budget** (DEBUG build or a log of `lastMemoryUsed` in `display.cpp`) | With the legend open the summed display-list size of all shown controls stays below 8172 B (above it the display drops controls). Note the number with and without the legend and with the type list open. |
+| Release Shift | Legend gone, strip labels back. Press a screen button while Shift is held: legend hides until Shift is released. |
+
+## 3. Pick a sequencer type (hold the track's screen button + jog wheel)
+| Press | Expected |
+|---|---|
+| Hold a track's screen button, turn the wheel **one detent** | A list Off / Chord/Arp / Mono (3 boxes) appears above that button, highlight on the track's **current** type, a small square marks the current one. The first detent only opens the list, it never changes the type. |
+| Release the button without turning further | Nothing changes (the type stays; a running track is not touched). |
+| Hold the button, turn the wheel 2 detents, release (transport stopped) | The type applies at once: the strip shows `CHRD` or `MONO` (`---` for Off). |
+| Start the pattern (Play), hold the button, wheel to another type, release | Line 2 of that cell shows `next: MONO`; the type changes at the next bar. |
+| With a change pending: hold the button, wheel back to the current type, release | The pending change is cancelled (`next:` disappears). |
+| Open the list, then press Shift (or **Left / Right**) before releasing | The list closes and nothing is applied. |
+| Wheel with no screen button held | The stock wheel behaviour (not a type change). |
 | Other tracks | Unaffected. |
 
 ## 4. Chord/Arp live (track type `C`, transport stopped first, then playing)
 Use a MIDI track (9-16) with a synth/hardware on its channel, and a sample track (1-8) with a sample instrument.
 | Press | Expected |
 |---|---|
-| Hold a root pad in the left 6 columns | Chord sounds (needs a moment: next quarter at most). Label shows `C*`; info line "Sequencer plays this track (pattern muted)". |
+| Hold a root pad in the left 6 columns | Chord sounds (needs a moment: next quarter at most). The strip shows `CHRD*` with `live` under it (pattern muted on that track). |
 | Release the pad | Notes stop, `*` disappears. No hanging notes. |
 | While the pattern plays a note pattern on that track: hold a root pad | Pattern notes on that track go silent while you hold; other tracks keep playing. Release: the track's pattern is back at the next step. |
 | Panel pads (cols 7-10), SETTINGS pad (col 12, row 1) | Chord / arp settings change as documented in plans/001 (types, T/S/D/Z rows). Pads show LEDs. |
@@ -63,7 +94,7 @@ Use a MIDI track (9-16) with a synth/hardware on its channel, and a sample track
 | Press | Expected |
 |---|---|
 | Stopped: tap pads in the left 8 columns | LEDs show the notes (steps). No sound while stopped, no `*`. |
-| Press Play | The sequence plays on that track at 1/16; `M*`; the track's own pattern notes are muted. Playhead moves on the pads. |
+| Press Play | The sequence plays on that track at 1/16; `MONO*` / `live`; the track's own pattern notes are muted. Playhead moves on the pads. |
 | CLEAR pad (column 12, row 1) | The sequence is cleared, the note stops, `*` goes, the pattern plays again on that track. |
 | Stop | Notes stop immediately, `*` goes. |
 | Leave Play mode while Mono plays | Mono keeps playing (set the track to Off to silence it). |
@@ -79,7 +110,7 @@ Use a MIDI track (9-16) with a synth/hardware on its channel, and a sample track
 | Pattern playback timing with some tracks set to Mono/Chord | Pattern timing of the other tracks is steady (no hiccups). |
 | **External MIDI clock** (Config: clock source external, a drum machine as master). Transport stopped, hold a root pad on a Chord/Arp track, release it | The chord stops at the release, the pattern comes back. Pad releases never wait for a clock pulse. |
 | External clock: Mono plays, then the master stops (Stop, or just pull the clock) | Mono goes quiet within half a second (no hanging note). Starting the master again resumes it. |
-| External clock: start a punch-in Rec, then stop the master | The recording ends (info line clears). |
+| External clock: start a punch-in Rec, then stop the master | The recording ends (the red `REC` goes). |
 
 Known limits of Play mode: no parameter editing on the jog wheel (only the pads). Recording is section 7, saving section 8.
 
@@ -89,7 +120,7 @@ Known limits of Play mode: no parameter editing on the jog wheel (only the pads)
 
 Prepare: a project with an empty pattern (or any pattern, you will see it being replaced), one **MIDI track** (9-16) with a synth or
 hardware on its channel and one **sample track** (1-8). In Play mode give the MIDI track Chord/Arp and the sample track Mono.
-All recording happens on the **current track** of Play mode (the bracketed one). Stock Rec outside Play mode is unchanged.
+All recording happens on the **selected track** of Play mode (the bracketed one). Stock Rec outside Play mode is unchanged.
 
 ## 7a. How to get a 3- or 4-note chord (default is ONE note)
 A new Chord/Arp track starts in the c31 default: chord type 1 = a single note (the root), size 5. Holding a root pad therefore sounds
@@ -108,28 +139,28 @@ Then hold a root pad in columns 1-6. The selection stays when you release (it is
 ## 7. Record in Play mode
 | Press | Expected |
 |---|---|
-| Rec on a track whose type is Off | Info line "Pick a sequencer type first (Instr + jog wheel)". Nothing records, the transport does not start. |
-| Transport stopped, Chord/Arp track: press **Rec** | The transport starts at step 1 and recording starts at once. Info line "REC track N: punch-in (Rec = end)". |
-| (Triad chosen, see 7a) Hold a root pad for a few steps, release | The chord keeps sounding while held (Live). Press **Rec** again: the info line clears. Leave Play mode (tap Pattern): the pattern page shows a note with the chord FX (`MIDI chord`) on the first step of the chord, steps you passed with no chord are empty, **even where the pattern had notes before** (replace). |
+| Rec on a track whose type is Off | The selected strip cell shows `pick a type` for two seconds. Nothing records, the transport does not start. |
+| Transport stopped, Chord/Arp track: press **Rec** | The transport starts at step 1 and recording starts at once. The recorded track's cell turns red and shows `REC`. After it ends the cell shows `rec overflow` / `MIDI only` / `reduced` while the last recording had that hint. |
+| (Triad chosen, see 7a) Hold a root pad for a few steps, release | The chord keeps sounding while held (Live). Press **Rec** again: the red `REC` goes. Leave Play mode (tap Pattern): the pattern page shows a note with the chord FX (`MIDI chord`) on the first step of the chord, steps you passed with no chord are empty, **even where the pattern had notes before** (replace). |
 | Quantise | A note that starts in the first half of a step (before the middle) lands on that step, in the second half on the next step (like stock live record). With rec microtiming ON in the Config the note stays on its step and gets a micromove value instead. |
 | Velocity | With rec velocity ON in the Config the step volume follows the sequencer velocity (the c31 groove), otherwise the volume stays default. |
 | Undo | In the pattern editor press the stock **Undo**: the whole recording disappears in **one** step and the previous pattern is back. Redo brings it back. |
 | Punch while Mono plays | Mono track: press Rec while the sequence runs: its notes replace the steps one by one; steps without a Mono note are cleared. Rec again: stops, the rest of the pattern is untouched. |
-| Chord on a **sample** track (Chord/Arp type on tracks 1-8) | Only the lowest chord note is written. Info line "Chords need a MIDI track (lowest note recorded)". |
-| Chord that is not in the Tracker chord table (a 5-note chord, wide voicing) on a MIDI track | The highest notes are dropped until the table matches, the step gets the shorter chord FX. Info line "Chord reduced to fit the Tracker chord table". |
-| Record a very busy arp (fastest speed, 1/32) for a long time | Normally nothing special. If the info line ever shows "Rec overflow: some steps were not recorded", note what you did (it means the main loop was too slow to take the steps). |
+| Chord on a **sample** track (Chord/Arp type on tracks 1-8) | Only the lowest chord note is written. (The v0.1 hint texts are no longer shown on screen; the lowest note is still the one written.) |
+| Chord that is not in the Tracker chord table (a 5-note chord, wide voicing) on a MIDI track | The highest notes are dropped until the table matches, the step gets the shorter chord FX. (No on-screen hint any more.) |
+| Record a very busy arp (fastest speed, 1/32) for a long time | Normally nothing special. If steps are missing in a long busy recording, note what you did (it means the main loop was too slow to take the steps). |
 | Stop the transport while recording | Recording ends by itself. Steps written so far stay, one undo step. |
 | End of a recording (Rec, loop end, stop) while the last note is still held/open | A note-off is written on the next step that holds no note, so the last note does not ring into the old pattern content; a step that already has a note is left alone. |
 | Change the pattern (Song mode) while recording | Recording ends; nothing is written into the new pattern. |
-| Set the recorded track to Off (Instr + jog) while recording | Recording ends when the change applies (next bar). |
+| Set the recorded track to Off (screen button + wheel) while recording | Recording ends when the change applies (next bar). |
 | Rec held in other pages | Outside Play mode Rec is the stock Rec (edit mode). Leaving Play mode (tap Pattern, any other module button) ends a running recording (punch-out note-off as usual); the pattern is not touched while you edit it. |
 
 ## 7b. Shift + Rec: exactly one loop
 | Press | Expected |
 |---|---|
-| Transport running, Chord/Arp or Mono track: **Shift + Rec** | Info line "REC track N: waiting for the loop start". Nothing is written until the pattern wraps to step 1. |
-| Wait for the wrap | At step 1 the info line changes to "one loop, ends by itself"; the sequencer's notes replace every step of the loop. |
-| At the next wrap | Recording stops by itself, info line clears. The whole loop is one undo step. A note near the end of the last step that would quantise to step 1 is NOT written to step 1. |
+| Transport running, Chord/Arp or Mono track: **Shift + Rec** | The track's cell turns red (`REC`). Nothing is written until the pattern wraps to step 1. |
+| Wait for the wrap | At step 1 the sequencer's notes replace every step of the loop. |
+| At the next wrap | Recording stops by itself, the red `REC` goes. The whole loop is one undo step. A note near the end of the last step that would quantise to step 1 is NOT written to step 1. |
 | Transport stopped: **Shift + Rec** | The transport starts at step 1 and the loop starts at once. |
 | Press **Rec** twice quickly (double tap) | Recording starts and ends again (toggle); it does not restart. |
 | **Rec** (without Shift) while armed or recording | Ends it at once (what was written stays). |
@@ -268,61 +299,87 @@ Setup: patterns 1-4 with different notes on tracks 1-3 (CLIPS needs them), track
 | In CUT hold two pads (loop), then press screen button 7 (CLIPS) | The loop ends at once (pads are released by the layer switch). Rec held while switching: the take is closed. |
 | Leave the Session view (any module button) while a CUT pad is held / Rec is held | Nothing hangs: loop ends, take closed. |
 
-# Alt Performance page (8-step faders) — plans/004-perform-faders.md
+# Alt Performance page (8-step faders) — plans/004-perform-faders.md, reworked in plan 005 R3 (v0.2)
 
-Provisional parts (owner did not specify): LATCH / RESET pads, jog-wheel settings, the steps' value mapping.
+Entry is **Shift + the top-row Performance button** (firmware "Performance"), from the stock Performance page AND from every other page.
+Fader positions and active FX are NOT saved with the project: after loading a project every perform FX is off.
+Provisional parts (owner did not specify): LATCH pads, jog-wheel settings, the steps' value mapping, what DISENGAGE does to PING / REV project values (restores the earlier value).
 
-## 11. Alt Performance page (double tap on Performance)
+## 11. Alt Performance page (Shift + Performance)
 Setup: a project with tracks playing; on the stock Performance page give the slots a few FX (e.g. slot 1 low-pass, slot 2 sample volume,
 slot 5 pan, slot 9 tune).
 
 | Press | Expected |
 |---|---|
-| **Performance** (tap, from any page) | Stock Performance page opens (as always). |
-| **Performance** tapped ONCE | Stock behaviour: the tracks page flips (tracks 1-8 / 9-16) as always. |
-| **Performance** double tap (second tap within 350 ms, nothing else touched, no pad held) | Fader page (the tracks page is unchanged, the two taps flipped it twice). Title "Perform faders: FX 1-4"; pad rows 1-4 lit only where a slot has an FX; group pad FX1-4 (col 9, row 1) bright, FX5-8 / FX9-12 dim, row 4 of column 9 dark; PING (col 10 row 1) and REV (col 10 row 2) dim; LATCH column dim, RESET column dim. |
-| **Performance** single tap on the fader page | Back on the stock Performance page; the 8 buttons keep their state; tracks page is the one you had; FX that were playing from the stock pad rows still sound and their pads are lit. |
-| Leave the fader page for Pattern, then open the stock Performance page again | A fresh stock page (no old FX sounding, pad rows reset) - nothing leaks from the fader page. |
-| Hold a pad, tap Performance twice | No fader page (a held pad is not a tap). |
-| **Performance** held, then another button / a pad / the jog wheel, then release | Stock behaviour only (tracks page flip; Shift + Performance = mute view), the fader page does NOT open. |
-| Never tap twice: use the stock page for a while | Everything works exactly as before (pads, jog, edit mode, tracks page). |
+| **Performance** (plain press, from any page) | Stock Performance page opens (as always). |
+| **Performance** pressed twice quickly on the stock page | Stock behaviour only: the tracks page flips and flips back (1-8 / 9-16). The fader page does NOT open. |
+| **Shift + Performance** on the stock Performance page | Fader page. The tracks page and the 8 track buttons are as you left them; FX that were latched on the stock pad rows show as lit rows. |
+| **Shift + Performance** from Pattern, Song, Master, Params, Sample pages, File ... | Fader page. No track is affected yet (buttons under the screen show 1-8 without brackets, the header says "no track selected" in a warning colour), every row is DISENGAGED. |
+| **Performance** (plain press) on the fader page | Back on the stock Performance page; the 8 buttons keep their state; FX that were playing from the stock pad rows still sound and their pads are lit. |
+| Screen layout | Below the title bar: a chip row (FX 1-4, FX 5-8, FX 9-12 | PING, REV = pad columns 9 / 10; the page you are on is filled, a green dot marks a page with something dialled in) and on the right "affects tracks 1-4 7". Under the chips the step numbers 1-8. Four bands = the four pad rows: row number, FX name, current value, a long bar of 8 steps (lit from the left), a LATCH and a DISENGAGE cell (pad columns 11 / 12), the state word under them (DISENGAGED / ENGAGED / LATCHED; PING / REV project rows: PROJECT / DIALLED) and a second line (slot number and range). A strip at the bottom shows the group line (FX pages: how many are dialled in; PING: time / rate, feedback, filter, ping-pong, sync; REV: size, damp, predelay, diffusion). An empty slot is drawn dim with "(empty slot)". |
+| Pad LEDs | Pad rows 1-4 lit only where a slot has an FX; column 9 group pads: current page bright, a page with something dialled in medium, others dim (row 4 dark on purpose); PING / REV (column 10) likewise; LATCH column dim (bright when latched); DISENGAGE column (12) bright where its row has something to take off, dim otherwise. |
+| Hold a pad, plain Performance press | Leaves at once (a held pad does not block it). |
 
 ## 11b. Perform FX on the faders (FX1-4 / FX5-8 / FX9-12)
 | Press | Expected |
 |---|---|
-| Select tracks 1 and 2 with the 8 buttons under the screen (label shows `[1]` `[2]`) | Selected tracks are the ones the FX affect (same as the stock page). Shift + button = tracks 9-16. |
-| Hold pad 5 of fader 1 (row 1) | Bar lit from the left up to pad 5; info line shows the FX name and value; the FX is heard on tracks 1 and 2 only. |
+| Select tracks 1 and 2 with the 8 buttons under the screen (label shows `[1]` `[2]`) | Selected tracks are the ones the FX affect (same as the stock page); header "affects tracks 1 2". Shift + button = tracks 9-16. |
+| Hold pad 5 of fader 1 (row 1) | Bar lit from the left up to pad 5; the band shows the FX name, the value, the state ENGAGED; the FX is heard on tracks 1 and 2 only. |
 | Slide to pad 8 | Value rises to the FX maximum; pad 1 is about 1/8 of the range (a signed range gives 0 on pad 4). |
-| Release | Bar goes dark and the FX is cleared at once (momentary, like stock). |
+| Release | Bar goes dark, DISENGAGED, and the FX is cleared at once (momentary, like stock). |
 | Hold pad 3 of fader 2, then also pad 6 (two pads), release pad 6 | Value falls back to the still-held pad 3 until the last pad is released. |
-| Stock page: press a pad of slot 1 (the stock page latches its row), double tap Performance | Fader 1 shows the bar for that value and the FX keeps playing. Pressing a fader pad changes it; release returns to the stock value (not to silence). RESET of row 1 clears the FX and the stock pad row (dark on the stock page too). |
+| Stock page: press a pad of slot 1 (the stock page latches its row), Shift + Performance | Fader 1 shows the bar for that value (note "stock pad row") and the FX keeps playing. Pressing a fader pad changes it; release returns to the stock value (not to silence). **DISENGAGE** of row 1 clears the FX and the stock pad row (dark on the stock page too). |
 | Fader FX and a stock slot with the same FX | The newer fader takes over (stock rule); the older one goes dark. Releasing a fader re-applies the other active faders / sends. |
 | Song mode, pattern switch while on the fader page; Shift + Play | Same as the stock page (track patterns follow the song; Shift + Play starts the song / toggles loop). MIDI CC 41-48 / 51-62 (perform CC) are NOT handled on the fader page (known limit). |
-| Tap **LATCH** of row 1, then press and release pad 5 of fader 1 | FX stays; bar stays lit; info line shows LATCH. |
-| Tap **RESET** of row 1 | FX cleared, LATCH off, bar dark. |
+| Tap **LATCH** (column 11) of row 1, then press and release pad 5 of fader 1 | FX stays; bar stays lit; state LATCHED (orange bar, orange LATCH cell). |
+| Tap **DISENGAGE** (column 12) of row 1 | FX cleared, LATCH off, bar dark, state DISENGAGED. Nothing is remembered: pressing a pad starts from scratch. The DISENGAGE pad is dim again. |
+| **Shift + DISENGAGE** of any row | All four rows of the current page are disengaged. Other pages are untouched. |
 | LATCH on, then tap LATCH again | FX cleared when no pad is held. |
+| Hold a pad of fader 2, tap DISENGAGE of row 2, release the pad | The FX stays off (the held pad does not bring it back). |
 | With a latched FX, select track 3 with its button | The FX also reaches track 3. Deselect track 1: its FX ends. |
-| Tap **FX5-8**, **FX9-12** | The four faders now control slots 5-8, 9-12; the group pad is bright. An empty slot has a dark row. Latched FX on the old page keep playing. |
+| Tap **FX5-8**, **FX9-12** | The four faders now control slots 5-8, 9-12; the group pad is bright; the chip of the page with the latched FX shows a green dot and its pad is medium. An empty slot has a dark row. Latched FX on the old page keep playing. |
 | Hold a fader and tap another group pad | The held fader is released (unless LATCH). |
+| Click check: engage a latched filter / volume FX and disengage it a few times while playing | Same sound behaviour as releasing a stock pad row; no extra click from the page (listen on headphones). |
 
 ## 11c. PING (delay) and REV (reverb)
 | Press | Expected |
 |---|---|
-| Tap **PING** | Title "PING (delay)"; faders show: 1 delay send (dark until used), 2 time (or rate when sync is on), 3 feedback, 4 filter - bars 2-4 show the current project values (default time 500 ms = pad 3, feedback 50 = pad 5, filter 20000 = pad 8). |
+| Tap **PING** | Chip PING filled; faders: 1 delay send (DISENGAGED until used), 2 time (or rate when sync is on), 3 feedback, 4 filter - bars 2-4 show the current project values, state PROJECT (default time 500 ms = pad 3, feedback 50 = pad 5, filter 20000 = pad 8). The bottom strip lists time, fb, filter, ping-pong and sync. |
 | Hold pad 6 of fader 1, release | Delay send of the selected tracks goes up (+63) while held, back to normal on release (LATCH keeps it). |
-| Press pad 2 / 5 / 8 of fader 2 (sync off) | Delay time changes (about 219 / 1367 / 3500 ms) and STAYS after releasing; the info line shows ms. |
-| Jog wheel right / left | Ping-pong on / off (line 5 shows it); audible stereo bounce. |
-| Shift + jog wheel right | Sync on: fader 2 is now the rate (info line "Rate 1/8" etc.), pad 1 = "8", pad 8 = "1/32". Shift + jog left = sync off. |
+| Press pad 2 / 5 / 8 of fader 2 (sync off) | Delay time changes (about 219 / 1367 / 3500 ms) and STAYS after releasing; the band shows ms and the state DIALLED. |
+| Jog wheel right / left | Ping-pong on / off (bottom strip shows it); audible stereo bounce. |
+| Shift + jog wheel right | Sync on: fader 2 is now the rate (band "Rate 1/8" etc.), pad 1 = "8", pad 8 = "1/32". Shift + jog left = sync off. |
 | Fader 3 pad 8 | Feedback 99 (long repeats); fader 4 pad 1 = about 194 Hz (dull repeats). |
-| RESET of row 2/3/4 | Time 500 ms (or rate 8), feedback 50, filter 20000 Hz. |
-| Tap **REV** | Fader 1 reverb send of the selected tracks; 2 size, 3 damp, 4 predelay (0-100); jog wheel = diffusion; line 5 shows it. RESET returns the defaults (50 / 50 / 50). |
-| Change PING / REV values, save the project, power off, open it | The values are saved with the project (same as changing them on the Master page); open the Master page: it shows the same values. |
+| **DISENGAGE** of row 2/3/4 after you moved it with the fader | The value it had BEFORE your first fader press comes back (time and rate index, feedback, filter), state PROJECT again; a second DISENGAGE does nothing. On a row you never touched DISENGAGE does nothing. Row 1 (send): off. |
+| Tap **REV** | Fader 1 reverb send of the selected tracks; 2 size, 3 damp, 4 predelay (0-100); jog wheel = diffusion; the bottom strip shows it. DISENGAGE restores the value from before the fader touched it. |
+| Change PING / REV values, save the project, power off, open it | The values are saved with the project (same as changing them on the Master page); open the Master page: it shows the same values. The fader positions / latches / engaged state are NOT saved: after loading, the fader page is all DISENGAGED / PROJECT. |
 | No volume or panning on this page | Correct (owner decision). |
 
-LATCH pads of PING / REV rows 2-4 are dark and do nothing (project values always stay). Leaving the fader page (any other page): fader FX and sends are released and latches cleared; FX from the stock pad rows stay while the target keeps the perform FX (Master, Params, stock page), otherwise everything ends like on the stock page. PING / REV project values stay.
+LATCH pads of PING / REV rows 2-4 are dark and do nothing (project values always stay).
 Known: delay time jumps (no smoothing in the delay engine, same as the Master page), so a press may click while playing.
 Known limits: FX that exist only for synth tracks / global FX use the stock slot rules; two slots with the same FX exclude each other
-(stock rule), the older fader bar may stay lit.
+(stock rule), the older fader bar may go dark.
+
+## 11d. Leaving the fader page, Stop panic (plan 005 owner decisions)
+Setup: tracks 1 and 2 selected, a filter on slot 1, a volume FX on slot 2; latch rows 1 and 2 and press pads so both are ENGAGED / LATCHED.
+
+| Press | Expected |
+|---|---|
+| **Pattern** (opens the pattern editor), then tap Pattern again (Play mode) | The latched FX keep sounding in the pattern editor and in Play mode. Pads in Play mode drive the sequencer as in R1. |
+| **Song**, then the clip launcher (Song tap), MLR layer | The latched FX keep sounding in the launcher and in MLR; launching clips does not end them. |
+| Back with **Shift + Performance** from any of those | The fader page opens with the same rows ENGAGED / LATCHED (positions, latch, page you were on), nothing jumps. |
+| Hold a pad (not latched) and press Pattern | The held pad ends (momentary), the latched rows stay. |
+| Latched FX running, press **File**, **Config**, Sample pages | Stock rule: the FX end (at the pattern end while playing); the fader page is clean the next time. |
+| Latched FX running, press **Master** or **Params** | Stock rule: performance mode stays (as the stock Performance page does), the fader FX end. |
+| Latched FX running, press plain **Performance** | Stock Performance page; the FX that were kept from Pattern / Song end (the stock page starts fresh); a fader row you handed over from the stock page keeps working there. |
+| Latched FX running, any page, press **Stop** | Every perform FX ends (panic): fader rows DISENGAGED (also latches), rows handed over from the stock page too. PING / REV project values stay. Stop then Play = plain playback. |
+| Same on the fader page | Press Stop: all rows go DISENGAGED at once, the page stays open. |
+| Launch clips, open the fader page, dial an FX, leave and press Stop | Clips are stopped by the launcher panic, the FX ends; no pattern is reloaded while clips still own performance mode. |
+| Save the project with FX engaged, load it | All perform FX are off after loading (also a latched FX kept into the Pattern editor, even if you load while stopped); performance mode is not left on. |
+| Latched FX kept into the Pattern editor, edit steps (unsaved), press Stop | The FX end; the pattern is NOT reloaded from the SD card, the unsaved edits stay (reload only happens when per-track performance patterns were loaded on the stock page). |
+| From the Pattern editor (FX kept) go on to File / Config / Sample pages | The kept FX follow the stock rule: they end at the pattern end while playing, at once when stopped; Master / Params / Song / Pattern / Performance keep or hand over as above. |
+| Hold Shift while pressing Performance, keep Shift down and press a pad / jog | Shift is ignored until you release it once (no accidental Shift + DISENGAGE or Shift jog). |
+| Leave the fader page while playing (any button) | No SD / config write at that moment; DISENGAGE of a stock pad row marks the perform data, written after Stop. Device test: moving a PING / REV fader 2-4 sets the project changed flag, so the stock 10 s autosave can run while playing (same as the Master page). Watch for stream hiccups. |
 
 # Stock-behaviour checks (section 12) — run last, and after every change
 A project with no sequencer set and no Session use must behave exactly like stock CE.
@@ -333,8 +390,8 @@ A project with no sequencer set and no Session use must behave exactly like stoc
 | Open a project you know, play it (Play), stop, edit steps, record, switch pages | Exactly as stock CE. |
 | Hold **Pattern** + Left / Right / Up / Down (8-track view and others) | Same as stock; the screen does NOT switch to Play mode when you release Pattern. |
 | Hold **Pattern**, turn the jog wheel or press a pad, release Pattern | Nothing new happens. |
-| Hold **Shift** (or any button), tap **Pattern** | No Play mode. |
+| Hold **Shift** (or any button), tap **Pattern** | Play mode does not toggle. |
 | Come from another page (e.g. Song) by pressing Pattern | Pattern page opens, no Play mode (the first press only switches pages). |
 | Open a project, tap Pattern twice (Play mode, Session) and back to the editor without touching any pad; Save | No `seqtracks.bin` is created, the pattern files are unchanged, playback is as before (Session alone changes nothing until a clip is launched). |
-| Tap Performance once, play with the stock Performance page | Exactly the stock page (the alt fader page only opens on a double tap). |
+| Tap Performance once, play with the stock Performance page | Exactly the stock page (the alt fader page only opens with Shift + Performance). |
 | Project with CUT used (rows cut, recorded loop), save and re-open | CUT is not saved in v0.1: all rows stock after loading; `seqtracks.bin` is only written when a sequencer type is set. |
