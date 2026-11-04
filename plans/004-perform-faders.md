@@ -1,7 +1,7 @@
 # Plan 004 — Alt Performance page: 8-step faders (owner 2026-11-04)
 
 Status: APPROVED idea, layout provisional. Same concept as Play mode / Session view: on the Performance page,
-**pressing Performance again** toggles between the stock Performance page and this fader page.
+**pressing Performance twice** (double tap, 350 ms; a single tap keeps the stock tracks-page flip) toggles between the stock Performance page and this fader page.
 
 ## Layout (12 × 4 pads) — revised by the owner 2026-11-04
 ```
@@ -40,7 +40,7 @@ pages.
   `delayFilterFrequency`; reverb: `mtProject.values.reverb {size, damp, predelay, diffusion}`; per-track
   `delaySend`, `reverbSend`; returns `delayVolume`, `reverbVolume`.
 - Master values changed here are real project values (saved with the project like edits on the Master page)
-  [provisional]; perform-FX faders are momentary unless LATCH, like the stock page.
+  [provisional]; perform-FX faders are momentary unless LATCH. NOTE: the stock page latches the pad row of a slot (a pressed pad stays selected); FX already playing from the stock page show on the faders at entry, a fader release returns to that stock value, and RESET clears the stock row.
 
 ## Release
 Step D of plan 003: built after C (Session view); in v0.1 if it is solid in time, else v0.2.

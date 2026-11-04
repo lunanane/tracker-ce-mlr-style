@@ -5,6 +5,8 @@
 
 extern seqtracks::Engine seqEngine;
 extern seqlogic::TapDetector seqPatternTap; // Pattern button tap detection (interface inputs + pattern editor)
+extern uint8_t seqPadsHeld; // pads currently held (any page); a Performance tap needs none
+extern seqlogic::TapDetector seqPerformTap; // Performance button tap detection (interface inputs + Performance pages)
 
 uint32_t seqNowMs(); // free-running milliseconds (Pattern tap timing)
 
@@ -12,6 +14,7 @@ uint32_t seqNowMs(); // free-running milliseconds (Pattern tap timing)
 inline void seqNoteOtherInput()
 {
     seqPatternTap.other();
+    seqPerformTap.other();
 }
 
 // ---- pads (main loop) ----

@@ -822,3 +822,17 @@ cPerformFx patternLengthPerfFx(mtPerfPatternLength,
 //##########  ########################################################################
 
 //##########  ########################################################################
+
+// sequencer tracks mod, alt Performance page: delay / reverb send of the selected tracks (value 0 = clear)
+void perfApplySend(bool reverb, int16_t value)
+{
+    for (uint8_t track = 0; track < kPerformanceTracks; track++)
+    {
+        if (performance.getTrackState(track) != 1)
+            continue;
+        if (value == 0)
+            reverb ? reverbClear(track) : delayClear(track);
+        else
+            reverb ? reverbSet(track, value) : delaySet(track, value);
+    }
+}

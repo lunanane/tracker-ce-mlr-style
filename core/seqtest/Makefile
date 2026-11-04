@@ -6,12 +6,17 @@ SEQ = ../../seqgen/chordarp.cpp ../../seqgen/mono.cpp
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
 
 .PHONY: test clean
-test: build/seq_glue_tests$(EXE)
+test: build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE)
 	build/seq_glue_tests$(EXE)
+	build/seq_perform_tests$(EXE)
 
 build/seq_glue_tests$(EXE): test_main.cpp ../source/seqTracksCore.cpp ../source/seqTracksCore.h ../source/seqTracksLogic.h ../source/seqTracksRec.h $(SEQ)
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) test_main.cpp ../source/seqTracksCore.cpp $(SEQ) -o $@
+
+build/seq_perform_tests$(EXE): test_perform.cpp ../source/seqPerformLogic.h
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) test_perform.cpp -o $@
 
 clean:
 	rm -rf build

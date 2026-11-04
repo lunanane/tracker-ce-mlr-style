@@ -27,9 +27,17 @@ void Interface::potChange(uint8_t n, int16_t value)
 //=======================================================================
 void Interface::buttonChange(uint8_t n, uint8_t value)
 {
-    if (n != interfaceButtonPattern)
+    if (n != interfaceButtonPattern && n != interfaceButtonPerformance)
     {
-        seqNoteOtherInput(); // breaks a Pattern tap
+        seqNoteOtherInput(); // breaks a Pattern / Performance tap
+    }
+    else if (n == interfaceButtonPattern)
+    {
+        seqPerformTap.other(); // Pattern pressed while Performance is held
+    }
+    else
+    {
+        seqPatternTap.other(); // Performance pressed while Pattern is held
     }
 
 #ifdef TRACKER_MINI
@@ -85,12 +93,16 @@ bool Interface::powerButtonChange(uint8_t state)
 void Interface::padPressed(uint8_t n, int8_t, int8_t, uint8_t velo)
 {
     seqNoteOtherInput();
+    if (seqPadsHeld < 255)
+        seqPadsHeld++;
     ip->processPadsInput(n, 1, velo);
 }
 
 //=======================================================================
 void Interface::padReleased(uint8_t n)
 {
+    if (seqPadsHeld > 0)
+        seqPadsHeld--;
     ip->processPadsInput(n, 0, 0);
 }
 
