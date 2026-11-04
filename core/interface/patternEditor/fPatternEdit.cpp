@@ -20,6 +20,7 @@
 #include "log.h"
 #include "seqTracks.h"
 #include "seqLauncher.h"
+#include "seqPlay/seqPlay.h"
 
 #include <cr_section_macros.h>
 
@@ -172,6 +173,8 @@ elapsedMillis playheadBlinkTimer;
 
 void cPatternEditor::update()
 {
+    seqPlayOverlay.update(); // Play mode (sequencer tracks mod): strip, pad LEDs, type list, legend
+
     // zarzadznie renderowaniem zaznaczenia ---------------------------
     uint8_t managerStatus = newFileManager.getStatus();
 
@@ -310,6 +313,13 @@ void cPatternEditor::start(uint32_t options)
 {
     (void)options;
 
+    // Play mode never survives a (re)start of the editor
+    seqPlayOverlay.moduleStart();
+    if (actualActionButtonsPage == SeqPlayOverlay::kPage)
+    {
+        actualActionButtonsPage = 0;
+    }
+
     moduleRefresh = 1;
     patternButtonReleaseActive = 0;
 
@@ -356,6 +366,8 @@ void cPatternEditor::start(uint32_t options)
 
 void cPatternEditor::stop()
 {
+    seqPlayOverlay.moduleStop();
+
     if (mtPopups.isNoteKeyboardPopupActive())
     {
         mtPopups.toggleNoteKeyboardPopup();
@@ -2888,8 +2900,15 @@ static void functPattern(uint8_t state)
 #ifndef TRACKER_MINI
         if (tap)
         {
-            // a plain Pattern tap on the Pattern page: Play mode (sequencer tracks mod)
-            PTE->eventFunct(eventActivateSeqPlay, PTE, 0, 0);
+            // a plain Pattern tap on the Pattern page: Play mode on / off (sequencer tracks mod, 4th action-button page)
+            if (PTE->actualActionButtonsPage == SeqPlayOverlay::kPage)
+            {
+                PTE->seqPlayLeave();
+            }
+            else
+            {
+                PTE->seqPlayEnter();
+            }
         }
 #else
         (void)tap;
@@ -2908,7 +2927,14 @@ static void functPattern(uint8_t state)
 #ifndef TRACKER_MINI
         if (tap)
         {
-            PTE->eventFunct(eventActivateSeqPlay, PTE, 0, 0);
+            if (PTE->actualActionButtonsPage == SeqPlayOverlay::kPage)
+            {
+                PTE->seqPlayLeave();
+            }
+            else
+            {
+                PTE->seqPlayEnter();
+            }
         }
 #else
         (void)tap;
@@ -4220,6 +4246,11 @@ void cPatternEditor::loadPatternsStatus()
 
 void cPatternEditor::lightUpPadBoard()
 {
+    if (actualActionButtonsPage == SeqPlayOverlay::kPage)
+    {
+        return; // Play mode: the pads show the sequencer, not the stock pad board
+    }
+
     padsBacklight.clearGlobalPads(1, 1, 0);
 
     //--------------------------------------------
@@ -5208,6 +5239,28 @@ void cPatternEditor::setActionButtonPage3Funct()
     ip->setButtonObj(interfaceButton7, buttonPress, functNextActionButtonPage);
 }
 
+// Play mode (sequencer tracks mod, plan 005 R1): the 4th action-button page. Entering forces the non-edit mode, leaving returns to
+// the first page. The strip, pads and wheel are handled by seqPlayOverlay.
+void cPatternEditor::seqPlayEnter()
+{
+    if (selectedPlace >= 0 || fillState > 0 || mtPopups.isNoteKeyboardPopupActive() || mtMenuPopup.isPopupVisible())
+    {
+        return;
+    }
+
+    seqPlayOverlay.enter();
+    actualActionButtonsPage = SeqPlayOverlay::kPage;
+    refreshEditState();
+}
+
+void cPatternEditor::seqPlayLeave()
+{
+    seqPlayOverlay.leave();
+    actualActionButtonsPage = 0;
+    refreshEditState();
+    lightUpPadBoard();
+}
+
 // odsiwez przypisanie akcji oraz grafike przyciskow pod ekranem
 void cPatternEditor::refreshActualActionButtonPage()
 {
@@ -5231,6 +5284,11 @@ void cPatternEditor::refreshActualActionButtonPage()
         {
             setActionButtonPage3Funct();
             showActionButtonPage3Labels();
+            break;
+        }
+        case SeqPlayOverlay::kPage: // Play mode (sequencer tracks mod): the router handles the buttons
+        {
+            seqPlayOverlay.bindPage();
             break;
         }
         default: break;
