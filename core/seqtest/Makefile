@@ -2,7 +2,8 @@
 # Host tests for the glue logic (no Polyend code). Needs a desktop g++.   make test
 CXX ?= g++
 CXXFLAGS ?= -std=c++11 -Wall -Wextra -O1 -I../source -I../../seqgen -I../interface/seqSession -I../libs/Audio/Polyverb
-SEQ = ../../seqgen/chordarp.cpp ../../seqgen/mono.cpp ../../seqgen/playhead.cpp
+SEQ = ../../seqgen/chordarp.cpp ../../seqgen/mono.cpp ../../seqgen/playhead.cpp ../../seqgen/hr.cpp ../../seqgen/hr_stab.cpp ../../seqgen/hr_arpseq.cpp ../../seqgen/hr_chordarp.cpp
+HRSRC = ../../seqgen/hr.cpp ../../seqgen/hr_stab.cpp ../../seqgen/hr_arpseq.cpp ../../seqgen/hr_chordarp.cpp
 GLUE = ../source/seqTracksCore.cpp ../source/seqCut.cpp ../interface/seqSession/cutLayer.cpp
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
 
@@ -14,7 +15,7 @@ test: build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tes
 	build/seq_play_tests$(EXE)
 	build/seq_fx_tests$(EXE)
 
-build/seq_glue_tests$(EXE): test_main.cpp test_session.cpp test_cut.inc ../source/seqSessionLogic.h ../source/seqClipsLogic.h ../source/seqCut.h ../source/seqCutLogic.h ../interface/seqSession/cutLayer.h ../interface/seqSession/cutSessionLayer.h ../interface/seqSession/laneDraw.h ../interface/seqSession/laneView.h ../source/seqTracksCore.h ../source/seqTracksLogic.h ../source/seqTracksRec.h $(GLUE) $(SEQ)
+build/seq_glue_tests$(EXE): test_main.cpp test_session.cpp test_cut.inc ../source/seqSessionLogic.h ../source/seqClipsLogic.h ../source/seqCut.h ../source/seqCutLogic.h ../interface/seqSession/cutLayer.h ../interface/seqSession/cutSessionLayer.h ../interface/seqSession/laneDraw.h ../interface/seqSession/laneView.h ../source/seqTracksCore.h ../source/seqTracksLogic.h ../source/seqTracksRec.h test_hr.inc $(GLUE) $(SEQ)
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) test_main.cpp test_session.cpp $(GLUE) $(SEQ) -o $@
 
@@ -32,9 +33,9 @@ preview: build/seq_glue_tests$(EXE)
 	SEQ_LANE_PREVIEW=build/preview build/seq_glue_tests$(EXE) > /dev/null
 	python lane_preview.py build/preview
 
-build/seq_play_tests$(EXE): test_play.cpp ../source/seqPlayLogic.h ../source/seqTracksLogic.h
+build/seq_play_tests$(EXE): test_play.cpp ../source/seqPlayLogic.h ../source/seqTracksLogic.h $(HRSRC)
 	mkdir -p build
-	$(CXX) $(CXXFLAGS) test_play.cpp -o $@
+	$(CXX) $(CXXFLAGS) test_play.cpp $(HRSRC) -o $@
 
 build/seq_fx_tests$(EXE): test_fx.cpp ../source/seqFxDsp.h ../source/seqFxLogic.h ../source/seqSidecarLogic.h ../libs/Audio/Polyverb/ring_reverb.h
 	mkdir -p build

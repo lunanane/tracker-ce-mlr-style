@@ -75,9 +75,14 @@ static void test_type_list_selection()
     CHECK(l.sel == seqlogic::TYPE_CHORDARP);
     CHECK(l.wheel(5, seqlogic::TYPE_OFF, 0xFF, 1)); // Mono
     CHECK(l.sel == seqlogic::TYPE_MONO);
+    for (uint8_t t = seqlogic::TYPE_HR_FIRST; t < seqlogic::TYPE_COUNT; t++) // plan 008 D: the HYPER_RASP scripts follow Mono
+    {
+        CHECK(l.wheel(5, seqlogic::TYPE_OFF, 0xFF, 1));
+        CHECK(l.sel == t);
+    }
     CHECK(!l.wheel(5, seqlogic::TYPE_OFF, 0xFF, 1)); // no wrap, nothing changed
-    CHECK(l.sel == seqlogic::TYPE_MONO);
-    CHECK(l.release(seqlogic::TYPE_OFF, 0xFF) == seqlogic::TYPE_MONO);
+    CHECK(l.sel == seqlogic::TYPE_COUNT - 1);
+    CHECK(l.release(seqlogic::TYPE_OFF, 0xFF) == seqlogic::TYPE_COUNT - 1);
     CHECK(!l.open);
     // a zero delta never opens
     TypeList z;
@@ -385,6 +390,52 @@ static void test_strip_text()
     CHECK(strcmp(a, "1 ---") == 0);
 }
 
+// HYPER_RASP script legends (plan 008 D): the overlay hands the script's own cells to the display through an HrSnap
+static void test_hr_legend()
+{
+    seqgen::HrSlot slot;
+    static HrSnap snap;
+    for (uint8_t t = 0; t < seqgen::HR_COUNT; t++)
+    {
+        seqgen::HrScript* s = slot.create(t);
+        CHECK(s != nullptr);
+        fillHrSnap(snap, *s);
+        LegendState st;
+        st.type = (uint8_t)(seqlogic::TYPE_HR_FIRST + t);
+        st.hr = &snap;
+        int words = 0;
+        for (uint8_t r = 0; r < 4; r++)
+            for (uint8_t c = 0; c < 12; c++)
+            {
+                LegendCell lc = legendCell(st, c, r);
+                CHECK(strlen(lc.txt) <= 6);
+                CHECK(lc.zone <= Z_HOLD);
+                if (lc.txt[0]) words++;
+                CHECK(strcmp(lc.txt, snap.txt[r * 12 + c]) == 0 && lc.zone == snap.zone[r * 12 + c]);
+            }
+        CHECK(words >= 24);
+        char title[96];
+        legendTitle(st, title, sizeof title);
+        CHECK(strlen(title) > 8 && strlen(title) <= 84);
+        CHECK(strlen(legendHelp(st)) > 20 && strlen(legendHelp(st)) <= 88);
+        CHECK(strcmp(legendCaption(st.type), typeName(st.type)) == 0);
+    }
+    // without a snapshot (no script) there is nothing to show, and no crash
+    LegendState none;
+    none.type = seqlogic::TYPE_HR_FIRST;
+    CHECK(legendCell(none, 0, 0).zone == Z_NONE && legendHelp(none)[0] == 0);
+    // a lit cell is the white one: the stab pads that is latched
+    seqgen::HrScript* s = slot.create(seqgen::HR_CHORD_STABS);
+    s->pad(2, 0, true);
+    s->pad(2, 0, false);
+    fillHrSnap(snap, *s);
+    LegendState st;
+    st.type = seqlogic::TYPE_HR_FIRST + seqgen::HR_CHORD_STABS;
+    st.hr = &snap;
+    CHECK(strcmp(legendCell(st, 2, 0).txt, "D") == 0 && legendCell(st, 2, 0).on && !legendCell(st, 3, 0).on);
+    CHECK(strcmp(legendCell(st, 0, 2).txt, "Major") == 0 && legendCell(st, 0, 2).on);
+}
+
 static void test_legend()
 {
     // Chord/Arp, Play page: roots cols 0-5, chord types cols 6-7, type / speed / direction rows, inversion + octave row
@@ -490,6 +541,7 @@ int main()
     test_late_release();
     test_strip_text();
     test_legend();
+    test_hr_legend();
     test_legend_words_and_captions();
     printf("seqplay: %d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;

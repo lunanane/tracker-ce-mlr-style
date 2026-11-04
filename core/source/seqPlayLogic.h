@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "hr.h"
 #include "seqTracksLogic.h"
 
 namespace seqplay {
@@ -143,12 +144,20 @@ inline const char* recHintText(bool overflow, bool needMidi, bool reduced)
     return overflow ? "rec overflow" : needMidi ? "MIDI only" : reduced ? "reduced" : nullptr;
 }
 
+// The ported HYPER_RASP scripts (seqgen/hr.h order). "HR Chord/Arp" is HYPER_RASP chord_arp.lua: a different script from grid-composer Chord/Arp.
+static const char* const kHrShort[] = { "ARPL", "STAB", "ARSQ", "HRCA" };
+static const char* const kHrName[] = { "Arp Lines", "Chord Stabs", "Arp Seq", "HR Chord/Arp" };
+static_assert(sizeof(kHrShort) / sizeof(kHrShort[0]) == seqlogic::kHrScripts && sizeof(kHrName) / sizeof(kHrName[0]) == seqlogic::kHrScripts,
+              "one name per HYPER_RASP script");
+
 inline const char* typeShort(uint8_t type)
 {
+    if (seqlogic::isHrType(type)) return kHrShort[type - seqlogic::TYPE_HR_FIRST];
     return type == seqlogic::TYPE_CHORDARP ? "CHRD" : type == seqlogic::TYPE_MONO ? "MONO" : "---";
 }
 inline const char* typeName(uint8_t type)
 {
+    if (seqlogic::isHrType(type)) return kHrName[type - seqlogic::TYPE_HR_FIRST];
     return type == seqlogic::TYPE_CHORDARP ? "Chord/Arp" : type == seqlogic::TYPE_MONO ? "Mono" : "Off";
 }
 
@@ -203,9 +212,26 @@ struct LegendCell
     char txt[8]; // up to 6 characters
 };
 
+// The legend of a HYPER_RASP script, as the script reports it (seqgen::HrScript::legend / title / help); filled by the overlay.
+// Zones and the "on" flag are the HrZone / HrCell values of seqgen/hr.h (same numbers as Zone below).
+struct HrSnap
+{
+    char title[96];
+    const char* help; // static text of the script
+    uint8_t zone[48];
+    uint8_t on[48];
+    char txt[48][7];
+};
+
+static_assert((int)seqgen::HZ_NONE == (int)Z_NONE && (int)seqgen::HZ_NOTE == (int)Z_NOTE && (int)seqgen::HZ_STEP == (int)Z_STEP &&
+                  (int)seqgen::HZ_PANEL == (int)Z_PANEL && (int)seqgen::HZ_MODE == (int)Z_MODE && (int)seqgen::HZ_ADJ == (int)Z_ADJ &&
+                  (int)seqgen::HZ_ACTION == (int)Z_ACTION && (int)seqgen::HZ_HOLD == (int)Z_HOLD,
+              "seqgen::HrZone and seqplay::Zone must use the same numbers");
+
 // What the legend needs to know about the selected sequencer (read from the engine, display only).
 struct LegendState
 {
+    const HrSnap* hr = nullptr; // HYPER_RASP types: their whole legend
     uint8_t type = 0;
     uint8_t page = 0;   // Chord/Arp: 0 Play 1 Groove 2 Feel 3 Setup
     uint8_t pon = 0;    // Chord/Arp: parametric groove on (the Groove page block shows tiers / archetypes)
@@ -252,6 +278,15 @@ inline LegendCell legendCell(const LegendState& st, uint8_t col, uint8_t row)
     c.on = false;
     for (int i = 0; i < 8; i++) c.txt[i] = 0;
     if (col >= 12 || row >= 4) return c;
+    if (seqlogic::isHrType(st.type))
+    {
+        if (!st.hr) return c;
+        const int i = row * 12 + col;
+        c.zone = (Zone)st.hr->zone[i];
+        c.on = st.hr->on[i] != 0;
+        for (int k = 0; k < 6; k++) c.txt[k] = st.hr->txt[i][k];
+        return c;
+    }
     auto set = [&c](Zone z, const char* t) {
         c.zone = z;
         for (int i = 0; i < 6 && t[i]; i++) c.txt[i] = t[i];
@@ -403,9 +438,29 @@ inline LegendCell legendCell(uint8_t type, uint8_t col, uint8_t row)
     return legendCell(st, col, row);
 }
 
+// The legend of a HYPER_RASP script: its title, help and the 48 cells, as the script reports them
+inline void fillHrSnap(HrSnap& s, const seqgen::HrScript& script)
+{
+    memset(&s, 0, sizeof(s));
+    script.title(s.title, sizeof(s.title));
+    s.help = script.help();
+    for (int r = 0; r < 4; r++)
+        for (int c = 0; c < 12; c++)
+        {
+            seqgen::HrCell cell;
+            script.legend(c, r, cell);
+            const int i = r * 12 + c;
+            s.zone[i] = cell.zone;
+            s.on[i] = cell.on ? 1 : 0;
+            for (int k = 0; k < 6; k++)
+                s.txt[i][k] = cell.txt[k];
+        }
+}
+
 // Short heading, kept for callers that only know the type: empty for an Off track
 inline const char* legendCaption(uint8_t type)
 {
+    if (seqlogic::isHrType(type)) return typeName(type);
     if (type == seqlogic::TYPE_CHORDARP) return "CHORD/ARP";
     if (type == seqlogic::TYPE_MONO) return "MONO";
     return "";
@@ -428,6 +483,8 @@ inline void legendTitle(const LegendState& st, char* out, size_t n)
         snprintf(out, n, "MONO   %s   Page %d/%d   Speed %s   Vel %d   Tie %s   Window %+d", view, (int)st.ep, (int)st.np, speedName(st.speed),
                  (int)((st.vel ? st.vel - 1 : 0) % 8 + 1), st.tie ? "on" : "off", (int)st.win);
     }
+    else if (seqlogic::isHrType(st.type) && st.hr)
+        snprintf(out, n, "%s", st.hr->title);
     else if (n)
         out[0] = 0;
 }
@@ -450,6 +507,7 @@ inline const char* legendHelp(const LegendState& st)
         if (st.menu) return "Speed: tap one. Pg: tap = edit page, hold Pg 1 + Pg N = N pages. Vel: loudness.";
         return "Tap a cell: note on/off. Hold Loop + tap first and last step = loop. Half: steps 9-16.";
     }
+    if (seqlogic::isHrType(st.type) && st.hr && st.hr->help) return st.hr->help;
     return "";
 }
 

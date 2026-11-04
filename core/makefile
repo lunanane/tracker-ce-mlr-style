@@ -25,7 +25,7 @@ C_SRCS 	 	+= $(shell find ./libs/ -name *.c)
 
 # sequencer tracks mod: the pure C++ library in ../seqgen is built into the core (objects under obj/seqgen/)
 SEQGEN_DIR	?= ../seqgen
-SEQGEN_SRCS	:= chordarp mono playhead
+SEQGEN_SRCS	:= chordarp mono playhead hr hr_stab hr_arpseq hr_chordarp
 
 _CPP_OBJS	= $(patsubst ./%.cpp, %.o, $(CPP_SRCS))
 _C_OBJS		= $(patsubst ./%.c, %.o, $(C_SRCS))
@@ -98,6 +98,9 @@ endif
 
 $(OBJ_DIR)/%.o: %.cpp
 	$(TOOLCHAIN)c++ $(DEFINES) $(INCLUDES) $(CPP_OPTIONS) $(COMPILER_OPTIONS) -o "$@" "$<"
+
+# the HYPER_RASP script ports run per clock pulse / pad press, never per sample: -Os
+$(OBJ_DIR)/seqgen/hr%.o: COMPILER_OPTIONS += -Os
 
 $(OBJ_DIR)/seqgen/%.o: $(SEQGEN_DIR)/%.cpp
 	$(TOOLCHAIN)c++ $(DEFINES) $(INCLUDES) $(CPP_OPTIONS) $(COMPILER_OPTIONS) -o "$@" "$<"
