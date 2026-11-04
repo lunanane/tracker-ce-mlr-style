@@ -973,6 +973,39 @@ static void test_engine_rec_chord()
     delete e;
 }
 
+// Sample track = one voice: of a chord only the lowest note is sent (no churn), and it is released cleanly.
+static void test_sample_track_chord_lowest_only()
+{
+    MockHost h;
+    h.sample = true;
+    Engine* e = mk(h);
+    e->postType(2, TYPE_CHORDARP);
+    e->idleTick();
+    e->postPad(2, 8, true); // triad
+    e->postPad(2, 8, false);
+    e->idleTick();
+    e->postPad(2, 0, true);
+    idle(*e, 96 * 8);
+    CHECK(h.count('+', 2) == 1 && h.count('-', 2) == 0);
+    CHECK(e->soundingCount(2) == 1);
+    e->postPad(2, 0, false);
+    idle(*e, 96 * 72);
+    CHECK(h.count('+', 2) == 1 && h.count('-', 2) == 1 && !e->takenOver(2));
+    // the same chord on a MIDI track sounds with all three notes
+    MockHost h2;
+    Engine* e2 = mk(h2);
+    e2->postType(2, TYPE_CHORDARP);
+    e2->idleTick();
+    e2->postPad(2, 8, true);
+    e2->postPad(2, 8, false);
+    e2->idleTick();
+    e2->postPad(2, 0, true);
+    idle(*e2, 96 * 8);
+    CHECK(h2.count('+', 2) == 3);
+    delete e;
+    delete e2;
+}
+
 // ---------------------------------------------------------------- sidecar
 static uint16_t testCrc(const uint8_t* b, size_t n)
 {
@@ -1110,6 +1143,7 @@ int main()
     test_engine_rec_loop_and_stop();
     test_planner_punch_out_note_off();
     test_engine_rec_chord();
+    test_sample_track_chord_lowest_only();
     test_sidecar_roundtrip_and_corruption();
     test_state_change_detection();
     printf("%d checks, %d failures\n", g_checks, g_fail);

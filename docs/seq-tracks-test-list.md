@@ -61,6 +61,7 @@ Use a MIDI track (9-16) with a synth/hardware on its channel, and a sample track
 ## 6. Misc
 | Check | Expected |
 |---|---|
+| Chord on a sample track (triad) | One note sounds (the lowest), without stutter or retriggering; it ends cleanly on release. A MIDI track plays all notes. |
 | Muted track | A muted track makes no sound from the sequencer either. |
 | Two Chord/Arp tracks | The lower-numbered one supplies the scale to Mono tracks (C major if none). |
 | Transport running, Mono track with steps set while another Chord/Arp track already runs: change the type of a third track | The change happens at the start of a pattern bar (every 16 steps), not 16 steps after Play was pressed. |

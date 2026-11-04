@@ -107,6 +107,8 @@ class Engine
         uint8_t nSounding;
         uint8_t padBits[seqlogic::kPads / 8];
         uint8_t sounding[16];
+        int16_t grpNote;    // sample track: lowest note of the current simultaneous group (-1 none)
+        uint32_t grpEpoch;  // group the note belongs to
     };
 
     bool push(const Cmd& c);
@@ -140,6 +142,7 @@ class Engine
     uint8_t idleCount_;
     uint32_t usAcc_;
     uint32_t clockSilentUs_;
+    uint32_t epoch_; // bumped before every call into a generator: events of one call form one simultaneous group
 
     // record: planner + queue audio -> main
     enum { kRecRing = 32 };

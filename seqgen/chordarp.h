@@ -105,6 +105,7 @@ class ChordArp : public SeqBase {
   int arp(const int16_t* p, int n, int d, int st, bool alt);
   uint32_t rnd(int l);
   void killLive();
+  void markLive(int n);  // lN_[n] = true and widen the scanned range
   void fl(const int16_t* p, int n);
   int liveAt(int rv, bool mn, int16_t* out) const;
   void tickLive(int rootNote);
@@ -132,6 +133,7 @@ class ChordArp : public SeqBase {
   int16_t llArp_;
   uint8_t lgate_;
   bool lN_[128];
+  uint8_t lLo_, lHi_;  // range of lN_ that may be set (killLive scans only this; lLo_ > lHi_ = none)
   int16_t cpool3_[24];
   uint8_t ncpool3_;
   uint8_t meas_, fc_;

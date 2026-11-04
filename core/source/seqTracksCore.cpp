@@ -14,7 +14,7 @@ enum
 };
 
 Engine::Engine()
-  : host_(0), head_(0), tail_(0), takenMask_(0), activeCount_(0), playing_(false), barPulse_(0), idleCount_(0), usAcc_(0), clockSilentUs_(0),
+  : host_(0), head_(0), tail_(0), takenMask_(0), activeCount_(0), playing_(false), barPulse_(0), idleCount_(0), usAcc_(0), clockSilentUs_(0), epoch_(1),
     rHead_(0), rTail_(0), recState_(seqrec::Planner::IDLE), recTrack_(0), recHints_(0), recEnds_(0), loading_(false)
 {
     memset(ring_, 0, sizeof(ring_));
@@ -37,6 +37,8 @@ void Engine::initTrack(uint8_t i)
     t.nSounding = 0;
     memset(t.padBits, 0, sizeof(t.padBits));
     memset(t.sounding, 0, sizeof(t.sounding));
+    t.grpNote = -1;
+    t.grpEpoch = 0;
     t.ca.setChannel(i);
     t.mo.setChannel(i);
     t.ca.setSink(&Engine::sink, this);
@@ -210,6 +212,7 @@ void Engine::applyPad(uint8_t track, uint8_t pad, bool down)
     Track& t = t_[track];
     if (t.type == TYPE_OFF)
         return;
+    epoch_++;
     uint8_t& byte = t.padBits[pad >> 3];
     uint8_t bit = (uint8_t)(1u << (pad & 7));
     bool was = (byte & bit) != 0;
@@ -251,6 +254,7 @@ void Engine::applyType(uint8_t track, uint8_t type)
     if (track >= kTracks)
         return;
     Track& t = t_[track];
+    epoch_++;
     t.pending = 0xFF;
     if (type >= TYPE_COUNT || type == t.type)
         return;
@@ -295,6 +299,7 @@ void Engine::applyType(uint8_t track, uint8_t type)
 void Engine::startTrack(uint8_t track)
 {
     Track& t = t_[track];
+    epoch_++;
     t.needStart = false;
     if (t.type == TYPE_CHORDARP)
     {
@@ -333,6 +338,7 @@ void Engine::setPlaying(bool p)
         else
         {
             t.needStart = false;
+            epoch_++;
             if (t.type == TYPE_MONO)
                 t.mo.stop(); // Chord/Arp keeps running while stopped (free-running clock)
             refresh((uint8_t)i);
@@ -356,6 +362,7 @@ void Engine::pulseAll()
     for (int i = 0; i < kTracks; i++)
         if (t_[i].type == TYPE_CHORDARP)
         {
+            epoch_++;
             t_[i].ca.pulse();
             refresh((uint8_t)i);
         }
@@ -365,6 +372,7 @@ void Engine::pulseAll()
         for (int i = 0; i < kTracks; i++)
             if (t_[i].type == TYPE_MONO)
             {
+                epoch_++;
                 t_[i].mo.pulse();
                 refresh((uint8_t)i);
             }
@@ -442,6 +450,7 @@ void Engine::advanceUs(uint32_t us)
         {
             if (t_[i].type == TYPE_CHORDARP)
             {
+                epoch_++;
                 t_[i].ca.tick();
                 refresh((uint8_t)i);
             }
@@ -486,13 +495,16 @@ void Engine::releaseAll(uint8_t track)
         host_->trackPos(track, p);
         rec_.noteOff(p, host_->recParams());
     }
-    for (int n = 0; n < 128; n++)
-        if (t.sounding[n >> 3] & (1u << (n & 7)))
-        {
-            t.sounding[n >> 3] = (uint8_t)(t.sounding[n >> 3] & ~(1u << (n & 7)));
-            if (host_)
-                host_->noteOff(track, (uint8_t)n);
-        }
+    for (int by = 0; by < 16; by++)
+        if (t.sounding[by])
+            for (int bit = 0; bit < 8; bit++)
+                if (t.sounding[by] & (1u << bit))
+                {
+                    t.sounding[by] = (uint8_t)(t.sounding[by] & ~(1u << bit));
+                    if (host_)
+                        host_->noteOff(track, (uint8_t)(by * 8 + bit));
+                }
+    t.grpNote = -1;
     t.nSounding = 0;
 }
 
@@ -518,12 +530,42 @@ void Engine::onEvent(const seqgen::Event& e)
             takenMask_ = (uint16_t)(takenMask_ | (1u << track));
             host_->takeoverBegin(track);
         }
-        if (!(byte & bit))
+        // A sample track has one voice: of the notes of one simultaneous group (a chord) only the lowest is sent
+        // (the others would only churn the voice; the recording writes the lowest note too). Recording still sees them all.
+        bool send = true;
+        if (host_->sampleTrack(track))
         {
-            byte = (uint8_t)(byte | bit);
-            t.nSounding++;
+            if (t.grpEpoch == epoch_ && t.grpNote >= 0)
+            {
+                if (e.note >= t.grpNote)
+                    send = false;
+                else
+                {
+                    uint8_t& ob = t.sounding[t.grpNote >> 3];
+                    uint8_t obit = (uint8_t)(1u << (t.grpNote & 7));
+                    if (ob & obit)
+                    {
+                        ob = (uint8_t)(ob & ~obit);
+                        t.nSounding--;
+                        host_->noteOff(track, (uint8_t)t.grpNote);
+                    }
+                }
+            }
+            if (send)
+            {
+                t.grpEpoch = epoch_;
+                t.grpNote = e.note;
+            }
         }
-        host_->noteOn(track, e.note, velocityToVolume(e.vel));
+        if (send)
+        {
+            if (!(byte & bit))
+            {
+                byte = (uint8_t)(byte | bit);
+                t.nSounding++;
+            }
+            host_->noteOn(track, e.note, velocityToVolume(e.vel));
+        }
         if (rec_.active() && rec_.track() == track)
         {
             seqrec::TrackPos p;

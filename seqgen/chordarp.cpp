@@ -65,6 +65,7 @@ void ChordArp::reset() {
   koct_ = 0; inv_ = 0; arpTpose_ = 0;
   lAptr_ = 1; lGptr_ = 1; llArp_ = -1; lgate_ = 0;
   for (int i = 0; i < 128; ++i) lN_[i] = false;
+  lLo_ = 128; lHi_ = 0;
   ncpool3_ = 0; meas_ = 0; fc_ = 0; blink_ = false; pulse_ = 8; pn_ = 8;
   for (int i = 0; i < 4; ++i) held_[i] = false;
   msAcc_ = 0;
@@ -215,8 +216,15 @@ int ChordArp::arp(const int16_t* p0, int n, int d, int st, bool alt) {
 // ---- live layer -------------------------------------------------------------------------------
 unsigned ChordArp::gateTicks() const { return glen_ == 1 ? 4 : (glen_ == 2 ? 2 : 0); }
 
+void ChordArp::markLive(int n) {
+  lN_[n] = true;
+  if (n < lLo_) lLo_ = (uint8_t)n;
+  if (n > lHi_) lHi_ = (uint8_t)n;
+}
+
 void ChordArp::killLive() {  // c31 k_l
-  for (int n = 0; n < 128; ++n) if (lN_[n]) { emit(EV_NOTE_OFF, n, 0); lN_[n] = false; }
+  for (int n = lLo_; n <= lHi_; ++n) if (lN_[n]) { emit(EV_NOTE_OFF, n, 0); lN_[n] = false; }  // only the range ever set
+  lLo_ = 128; lHi_ = 0;
   if (llArp_ >= 0) { emit(EV_NOTE_OFF, llArp_, 0); llArp_ = -1; }
 }
 
@@ -227,7 +235,7 @@ void ChordArp::noteOnLive(int note, int vel, unsigned gateMs) {
 void ChordArp::fl(const int16_t* p, int n) {  // sound a pool at the held-chord velocity
   for (int i = 0; i < n; ++i) {
     noteOnLive(p[i], 105, 0);
-    if (p[i] >= 0 && p[i] <= 127) lN_[p[i]] = true;
+    if (p[i] >= 0 && p[i] <= 127) markLive(p[i]);
   }
 }
 
@@ -249,7 +257,7 @@ void ChordArp::tickLive(int rootNote) {
         unsigned gt = gx_;
         for (int i = 0; i < n; ++i) {
           noteOnLive(p[i], v, gt * kTickMs);
-          if (p[i] >= 0 && p[i] <= 127) lN_[p[i]] = true;
+          if (p[i] >= 0 && p[i] <= 127) markLive(p[i]);
         }
         lgate_ = internalGate_ ? (uint8_t)gt : 0;
       }
@@ -384,7 +392,7 @@ void ChordArp::gridRootEvent(int x, int y, bool down) {  // c31 event(): chord r
         }
       } else if (selT_ == 1 && selS_ == 1 && !f) {
         noteOnLive(n, 105, 0);
-        if (n >= 0 && n <= 127) lN_[n] = true;
+        if (n >= 0 && n <= 127) markLive(n);
       }
     } else {
       for (int i = 0; i < ncpool3_; ++i) if (cpool3_[i] == n) {

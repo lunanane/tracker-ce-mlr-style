@@ -151,7 +151,7 @@ Built around immediate playability; no separate Seq page, no Off/Live/Rec modes.
 - Takeover: Chord/Arp from the first note (only grid pads count as held: root columns 0-5; panel / control pads never take over) until all pads are released and nothing sounds; Mono while playing and the sequence has
   at least one step. The pattern resumes at the **next step** boundary, not mid-step. [provisional]
 - Instrument of a taken-over track = last used instrument (as pads do), picked when the takeover begins. Sample tracks are
-  monophonic (last chord note wins); MIDI tracks get every note. [provisional]
+  monophonic: of the notes sounded together (a chord) only the lowest is sent, which is also what is recorded; MIDI tracks get every note. [provisional]
 - Type change while playing: applied on the first pulse of the next bar of the pattern (bar = 16 steps = 96 pulses, counted from the
   player position of track 0: `(actual_pos*6 + (uStep-1)/8) % 96`, `Host::pulseInBar`). A generator that starts mid-playback (first track set
   to a type, clock resumed) waits for the next pulse boundary and a Chord/Arp takes its bar phase from that position. Per track one ChordArp
