@@ -76,9 +76,9 @@ TEST(external_gate_option_arms_no_timer) {
 TEST(parametric_groove_pon_and_reroll) {
   Rig r;
   CHECK_EQ(r.ca.getParam(ChordArp::P_PON), 0);
-  r.panel(ChordArp::PANEL_PARAM);
-  CHECK_EQ(r.ca.getParam(ChordArp::P_PON), 0);    // first tap only opens the panel
-  r.press(11, 1);                                 // re-tap PARAM = PON
+  r.page(ChordArp::PAGE_GROOVE);
+  CHECK_EQ(r.ca.getParam(ChordArp::P_PON), 0);    // opening the page does not switch it on
+  r.press(10, 0);                                 // the Param pad of the Groove page = PON
   CHECK_EQ(r.ca.getParam(ChordArp::P_PON), 1);
   CHECK_EQ(r.ca.vgvSel(1, 100), 100);              // c34: PON no longer shapes velocity (pattern 1 = flat)
   static const int on[4] = {1, 5, 11, 13};
@@ -128,14 +128,14 @@ TEST(bar_counter_advances_context_gb_once_per_bar) {
 }
 TEST(inv_and_oct_pads_both_reset) {
   Rig r;
-  r.press(11, 2); r.press(11, 2); CHECK_EQ(r.ca.getParam(ChordArp::P_INV), 2);
-  r.press(10, 2); CHECK_EQ(r.ca.getParam(ChordArp::P_INV), 1);
-  r.ca.pad(11, 2, true); r.ca.pad(10, 2, true);  // both held
+  r.press(9, 3); r.press(9, 3); CHECK_EQ(r.ca.getParam(ChordArp::P_INV), 2);
+  r.press(8, 3); CHECK_EQ(r.ca.getParam(ChordArp::P_INV), 1);
+  r.ca.pad(9, 3, true); r.ca.pad(8, 3, true);  // both held
   CHECK_EQ(r.ca.getParam(ChordArp::P_INV), 0);
-  r.ca.pad(11, 2, false); r.ca.pad(10, 2, false);
-  for (int i = 0; i < 9; ++i) r.press(11, 2);
+  r.ca.pad(9, 3, false); r.ca.pad(8, 3, false);
+  for (int i = 0; i < 9; ++i) r.press(9, 3);
   CHECK_EQ(r.ca.getParam(ChordArp::P_INV), 6);   // clamps at +6
-  for (int i = 0; i < 15; ++i) r.press(10, 2);
+  for (int i = 0; i < 15; ++i) r.press(8, 3);
   CHECK_EQ(r.ca.getParam(ChordArp::P_INV), -6);
   r.press(11, 3); CHECK_EQ(r.ca.getParam(ChordArp::P_KOCT), 1);
   r.press(11, 3); CHECK_EQ(r.ca.getParam(ChordArp::P_KOCT), 1);
@@ -224,7 +224,7 @@ TEST(serialize_roundtrip_and_validation) {
   CHECK_EQ(r.ca.serialize(buf, sizeof buf), ChordArp::kSerialSize);
   CHECK_EQ(buf[0], ChordArp::kSerialVersion);
   ChordArp b; CHECK(b.deserialize(buf, ChordArp::kSerialSize));
-  for (int id = 0; id <= ChordArp::P_PANEL; ++id) CHECK_EQ(b.getParam(id), r.ca.getParam(id));
+  for (int id = 0; id <= ChordArp::P_PAGE; ++id) CHECK_EQ(b.getParam(id), r.ca.getParam(id));
   for (int i = 1; i <= 16; ++i) CHECK_EQ(b.gbit(1, i), r.ca.gbit(1, i));
   buf[0] = 99; CHECK(!b.deserialize(buf, ChordArp::kSerialSize));
   buf[0] = ChordArp::kSerialVersion; buf[7] = 9; CHECK(!b.deserialize(buf, ChordArp::kSerialSize));
@@ -233,7 +233,7 @@ TEST(serialize_roundtrip_and_validation) {
 TEST(leds_levels_in_range_and_roles) {
   Rig r; uint8_t l[kPads], ro[kPads];
   for (int st = 0; st < 40; ++st) {
-    r.ca.setParam(ChordArp::P_PANEL, st % 4);
+    r.ca.setParam(ChordArp::P_PAGE, st % 4);
     r.ca.setParam(ChordArp::P_PMODE, 1 + st % 3);
     r.ca.setParam(ChordArp::P_INV, st % 7 - 3);
     r.ca.pad(st % 6, (st / 6) % 4, true);
@@ -241,8 +241,8 @@ TEST(leds_levels_in_range_and_roles) {
     r.ca.leds(l, ro);
     for (int i = 0; i < kPads; ++i) CHECK(l[i] <= 15);
   }
-  r.ca.setParam(ChordArp::P_PMODE, 1); r.ca.leds(l, ro);
-  CHECK_EQ(ro[0], ROLE_ROOT_MAJOR); CHECK_EQ(ro[12], ROLE_ROOT_MINOR); CHECK_EQ(ro[6], ROLE_PANEL); CHECK_EQ(ro[10], ROLE_CONTROL);
+  r.ca.setParam(ChordArp::P_PMODE, 1); r.ca.setParam(ChordArp::P_PAGE, 0); r.ca.leds(l, ro);
+  CHECK_EQ(ro[0], ROLE_ROOT_MAJOR); CHECK_EQ(ro[12], ROLE_ROOT_MINOR); CHECK_EQ(ro[6], ROLE_PANEL); CHECK_EQ(ro[11], ROLE_CONTROL);
 }
 TEST(tick_pulse_levels_match_c31_formulas) {
   Rig r;
@@ -277,8 +277,8 @@ TEST(mono_speed_table) {
   for (int i = 1; i <= 12; ++i) CHECK_EQ(Mono::speedPulses(i), e[i - 1]);
   MRig r; CHECK_EQ(r.m.getParam(Mono::P_SPEED), 8); CHECK_EQ(r.m.getParam(Mono::P_DIV), 6);
   r.press(10, 1); CHECK_EQ(r.m.getParam(Mono::P_DIV), 4);   // SPD+
-  r.press(9, 1); r.press(9, 1); CHECK_EQ(r.m.getParam(Mono::P_DIV), 8);
-  for (int i = 0; i < 20; ++i) r.press(9, 1);
+  r.press(10, 0); r.press(10, 0); CHECK_EQ(r.m.getParam(Mono::P_DIV), 8);
+  for (int i = 0; i < 20; ++i) r.press(10, 0);
   CHECK_EQ(r.m.getParam(Mono::P_SPEED), 1);
 }
 TEST(mono_tap_toggles_step_and_start_fires) {
@@ -311,13 +311,13 @@ TEST(mono_new_note_kills_previous) {
 }
 TEST(mono_tie_holds_identical_resolved_note) {
   MRig r; r.m.setStep(1, 0); r.m.setStep(2, 0); r.m.setStep(3, 0); r.m.setParam(Mono::P_SPEED, 12);
-  r.press(8, 1);   // TIE on
+  r.press(9, 2);   // TIE on
   CHECK_EQ(r.m.getParam(Mono::P_TIE), 1);
   r.m.start(); clearEv(); r.pulses(2);
   CHECK_EQ(g_nev, 0);                // tied: no retrigger
   r.pulses(1);                       // step 4 = rest breaks the tie
   CHECK_EQ(countOff(), 1);
-  r.press(8, 1); r.m.start(); clearEv(); r.pulses(1);   // tie off: every step re-attacks
+  r.press(9, 2); r.m.start(); clearEv(); r.pulses(1);   // tie off: every step re-attacks
   CHECK_EQ(g_nev, 2);
 }
 TEST(mono_tie_breaks_on_transpose_change) {
@@ -329,9 +329,9 @@ TEST(mono_tie_breaks_on_transpose_change) {
 }
 TEST(mono_loop_gesture_and_wrap) {
   MRig r;
-  r.m.pad(9, 2, true);                // LOOP held
+  r.m.pad(8, 3, true);                // LOOP held
   r.m.pad(2, 0, true); r.m.pad(4, 0, true);   // steps 3 and 5
-  r.m.pad(4, 0, false); r.m.pad(2, 0, false); r.m.pad(9, 2, false);
+  r.m.pad(4, 0, false); r.m.pad(2, 0, false); r.m.pad(8, 3, false);
   CHECK_EQ(r.m.getParam(Mono::P_LSTART), 3); CHECK_EQ(r.m.getParam(Mono::P_LEND), 5);
   CHECK_EQ(r.m.stepAt(3), Mono::kNoStep);   // loop pads do not edit notes
   r.m.pad(4, 0, true); r.m.pad(4, 0, false);  // a normal tap edits again: step 5, row 0 = degree 3
@@ -339,23 +339,23 @@ TEST(mono_loop_gesture_and_wrap) {
   r.m.setParam(Mono::P_SPEED, 12);
   r.m.start(); CHECK_EQ(r.m.getParam(Mono::P_POS), 3);
   r.pulses(3); CHECK_EQ(r.m.getParam(Mono::P_POS), 3);   // 4, 5, wrap to 3
-  r.m.pad(9, 2, true); r.m.pad(6, 0, true); r.m.pad(1, 0, true);   // reversed order: end first
-  r.m.pad(1, 0, false); r.m.pad(6, 0, false); r.m.pad(9, 2, false);
+  r.m.pad(8, 3, true); r.m.pad(6, 0, true); r.m.pad(1, 0, true);   // reversed order: end first
+  r.m.pad(1, 0, false); r.m.pad(6, 0, false); r.m.pad(8, 3, false);
   CHECK_EQ(r.m.getParam(Mono::P_LSTART), 2); CHECK_EQ(r.m.getParam(Mono::P_LEND), 7);
 }
 TEST(mono_loop_across_halves_uses_press_time_step) {
   MRig r;
-  r.m.pad(9, 2, true);
+  r.m.pad(8, 3, true);
   r.m.pad(1, 0, true);            // step 2 (first half)
-  r.press(8, 0);                  // HALF while LOOP held
+  r.press(8, 2);                  // HALF while LOOP held
   r.m.pad(3, 0, true);            // step 12 (second half)
-  r.press(8, 0);                  // flip back before releasing
-  r.m.pad(3, 0, false); r.m.pad(1, 0, false); r.m.pad(9, 2, false);
+  r.press(8, 2);                  // flip back before releasing
+  r.m.pad(3, 0, false); r.m.pad(1, 0, false); r.m.pad(8, 3, false);
   CHECK_EQ(r.m.getParam(Mono::P_LSTART), 2); CHECK_EQ(r.m.getParam(Mono::P_LEND), 12);
 }
 TEST(mono_pages_chain_np_ep_pg) {
   MRig r;
-  r.press(10, 0);                    // PAGE+ extends the chain to 2 and edits page 2
+  r.press(9, 1);                    // PAGE+ extends the chain to 2 and edits page 2
   CHECK_EQ(r.m.getParam(Mono::P_EP), 2); CHECK_EQ(r.m.getParam(Mono::P_NP), 2);
   r.step(1, 0); CHECK_EQ(r.m.stepAt(17), 0);   // absolute index (page-1)*16 + x
   r.press(9, 0);                     // PAGE-
@@ -378,21 +378,21 @@ TEST(mono_np_clamps_ep_pg) {
 }
 TEST(mono_half_and_window) {
   MRig r;
-  r.press(8, 0); CHECK_EQ(r.m.getParam(Mono::P_HALF), 1);
+  r.press(8, 2); CHECK_EQ(r.m.getParam(Mono::P_HALF), 1);
   r.step(1, 0); CHECK_EQ(r.m.stepAt(9), 0);      // second half = steps 9..16
-  r.press(8, 0);
-  r.press(8, 2); r.press(8, 2); CHECK_EQ(r.m.getParam(Mono::P_WIN), 2);   // WIN+
+  r.press(8, 2);
+  r.press(8, 0); r.press(8, 0); CHECK_EQ(r.m.getParam(Mono::P_WIN), 2);   // WIN+
   r.step(2, 5);                                  // window +2: top row = degree 5
   CHECK_EQ(r.m.stepAt(2), 5);
-  r.press(8, 3); r.press(8, 3); r.press(8, 3); CHECK_EQ(r.m.getParam(Mono::P_WIN), -1);
+  r.press(8, 1); r.press(8, 1); r.press(8, 1); CHECK_EQ(r.m.getParam(Mono::P_WIN), -1);
   r.step(4, -1); CHECK_EQ(r.m.stepAt(4), -1);
-  for (int i = 0; i < 100; ++i) r.press(8, 2);
+  for (int i = 0; i < 100; ++i) r.press(8, 0);
   CHECK_EQ(r.m.getParam(Mono::P_WIN), Mono::kWinLimit);
 }
 TEST(mono_clear_resets_sequence) {
   MRig r; r.m.setStep(1, 0); r.m.setStep(20, 2);
   r.m.setParam(Mono::P_NP, 3); r.m.setParam(Mono::P_LSTART, 4);
-  r.press(11, 0);
+  r.press(11, 3); r.press(7, 3); r.press(11, 3);   // Menu, Clear all, back to the notes
   CHECK_EQ(r.m.stepAt(1), Mono::kNoStep); CHECK_EQ(r.m.stepAt(20), Mono::kNoStep);
   CHECK_EQ(r.m.getParam(Mono::P_NP), 1); CHECK_EQ(r.m.getParam(Mono::P_LSTART), 1); CHECK_EQ(r.m.getParam(Mono::P_LEND), 16);
   CHECK_EQ(r.m.getParam(Mono::P_SPEED), 8);      // speed is not part of CLEAR (c31)

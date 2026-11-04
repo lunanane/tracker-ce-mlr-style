@@ -56,7 +56,7 @@ ChordArp::ChordArp() : ctx_(0), internalGate_(true) { ch_ = 3; reset(); }
 
 void ChordArp::reset() {
   selMod_ = 1; selSize_ = 5; selT_ = 1; selS_ = 1; selD_ = 1; selG_ = 1; sw_ = 0; glen_ = 1; pmode_ = 1;
-  parch_ = 1; panel_ = PANEL_TYPES; pon_ = false;
+  parch_ = 1; page_ = PAGE_PLAY; editPage_ = PAGE_GROOVE; pon_ = false;
   PW_[0] = 2; PW_[1] = 1; PW_[2] = 0;
   pseed_ = 1;
   selVg_ = 1; lane_ = 0; orng_ = 1; ownGb_ = 0; xh_[0] = xh_[1] = 0; gbPending_ = false; gx_ = 0; rng_ = 2463534242u;
@@ -69,13 +69,15 @@ void ChordArp::reset() {
   lLo_ = 128; lHi_ = 0;
   ncpool3_ = 0; meas_ = 0; fc_ = 0; blink_ = false; pulse_ = 8; pn_ = 8;
   for (int i = 0; i < 4; ++i) held_[i] = false;
+  vh_ = lh_ = 0; modHeld_ = false; padLock_ = false;
+  for (int i = 0; i < kPads; ++i) downPage_[i] = 0xFF;
   msAcc_ = 0;
   pgen();
 }
 
 const char* ChordArp::chordTypeName(int mod) {
-  static const char* const n[16] = {"?", "root", "sus2", "sus4m", "5th", "add6", "7", "9",
-                                    "dom7", "maj7", "dim", "aug", "7b5", "7#5", "addb9", "?"};
+  static const char* const n[16] = {"?", "Root", "Sus2", "Triad", "Sus4", "5th", "6th", "7th", "9th",
+                                    "Dom7", "Maj7", "Dim", "Aug", "7b5", "7#5", "b9"};  // index = type pad value (c34 cdeg / cabs)
   return (mod >= 0 && mod < 16) ? n[mod] : "?";
 }
 
@@ -366,14 +368,34 @@ void ChordArp::lockButton(bool down) {
 }
 
 // ---- pads -------------------------------------------------------------------------------------
+// Pad map (col, row), row 0 = top. Cols 0..5 = the 24 roots (always; c34 x1-4 / y1-6 turned: row = x-1, col = y-1).
+// Cols 6..11 = the visible page (Page). PLAY page: cols 6-7 chord types 1..8 (hold Root + pad = types 9..15), row 0 cols 8-10
+// Chord / Arp / Arp+Oct, row 1 speed, row 2 direction, row 3 Inv- Inv+ Oct- Oct+, (0,11) = Page (opens the last edit page).
+// Edit pages: col 11 = tabs Play / Groove / Feel / Setup (rows 0..3). See README "Chord/Arp pads" for the whole table.
+void ChordArp::setPage(int p) {
+  page_ = (uint8_t)p;
+  if (p) editPage_ = (uint8_t)p;
+  xh_[0] = xh_[1] = 0; vh_ = lh_ = 0; modHeld_ = false;  // gestures held on the page we leave are over (their releases are ignored)
+  for (int i = 0; i < 4; ++i) held_[i] = false;
+  if (padLock_) { centerHeld_ = false; padLock_ = false; }
+}
+
 void ChordArp::pad(int col, int row, bool down) {
   if (col < 0 || col >= kCols || row < 0 || row >= kRows) return;
-  if (col <= 5) gridRootEvent(row + 1, col + 1, down);
-  else if (col <= 9) {
-    if (!down) { if ((row == 1 || row == 2) && xh_[row - 1] == col - 5) xh_[row - 1] = 0; }  // 2nd-finger tracking
-    panelEvent(col - 6, row, down);
+  if (col <= 5) { gridRootEvent(row + 1, col + 1, down); return; }
+  int idx = row * kCols + col, pg;
+  if (down) { downPage_[idx] = page_; pg = page_; }
+  else { pg = downPage_[idx] == 0xFF ? page_ : downPage_[idx]; downPage_[idx] = 0xFF; }  // the release belongs to the page of the press
+  if (col == 11 && (pg != PAGE_PLAY || row == 0)) {  // page pad / tabs
+    if (down) setPage(pg == PAGE_PLAY ? editPage_ : row);
+    return;
   }
-  else controlEvent(row * 2 + (col - 10), down);
+  switch (pg) {
+    case PAGE_PLAY: playPage(col, row, down); break;
+    case PAGE_GROOVE: groovePage(col, row, down); break;
+    case PAGE_FEEL: feelPage(col, row, down); break;
+    default: setupPage(col, row, down); break;
+  }
 }
 
 void ChordArp::gridRootEvent(int x, int y, bool down) {  // c31 event(): chord roots / scale grid
@@ -425,39 +447,113 @@ void ChordArp::gridRootEvent(int x, int y, bool down) {  // c31 event(): chord r
   }
 }
 
-void ChordArp::panelEvent(int pc, int pr, bool down) {
-  if (!down) return;
+// c34 chord mod pads (x1-4, y7-8): single types 1..8; pad 1 is also a modifier: hold it and tap pad 2..8 for the extended types 9..15.
+void ChordArp::typePad(int m, bool down) {
+  if (!down) { if (m == 1) modHeld_ = false; return; }
   int16_t p[24];
-  switch (panel_) {
-    case PANEL_TYPES: {  // direct pads 1..15 (c31 chord mod pads incl. the two-button extended types)
-      int mv = pr * 4 + pc + 1;
-      if (mv > 15) return;
-      if (selT_ == 1 && selS_ == 1) {
-        selMod_ = (uint8_t)mv; qMod_ = 0; killLive();
-        if (last_.valid) { int n = pool(rv(last_), mv, last_.x % 2 == 0, p); fl(p, n); }
-      } else if (ql_.valid) { ql_.m = (uint8_t)mv; qMod_ = 0; }
-      else qMod_ = (uint8_t)mv;
+  int mv = (modHeld_ && m > 1) ? 8 + (m - 1) : m;
+  if (m == 1) modHeld_ = true;
+  if (selT_ == 1 && selS_ == 1) {
+    selMod_ = (uint8_t)mv; qMod_ = 0; killLive();
+    if (last_.valid) { int n = pool(rv(last_), mv, last_.x % 2 == 0, p); fl(p, n); }
+  } else if (ql_.valid) { ql_.m = (uint8_t)mv; qMod_ = 0; }
+  else qMod_ = (uint8_t)mv;
+}
+
+void ChordArp::playPage(int col, int row, bool down) {
+  if (col <= 7) { typePad((col - 6) * 4 + row + 1, down); return; }
+  int v = col - 7;  // 1..4 (c34 x5..8)
+  switch (row) {
+    case 0: if (down && v <= 3) qT_ = (uint8_t)v; break;  // chord / arp / arp+oct; "off" is the Setup page's Mute
+    case 1: case 2: {
+      uint8_t& cur = row == 1 ? qS_ : qD_;
+      if (down) setPair(cur, row, v);
+      else if (xh_[row - 1] == v) xh_[row - 1] = 0;
       break;
     }
-    case PANEL_SETTINGS: {
-      int v = pc + 1;
-      if (pr == 0) qT_ = (uint8_t)v;
-      else if (pr == 1) setPair(qS_, 1, v);
-      else if (pr == 2) setPair(qD_, 2, v);
-      else qSize_ = kSm[v - 1];
-      break;
+    default: {
+      int i = col - 8;  // 0 INV-, 1 INV+, 2 OCT-, 3 OCT+
+      held_[i] = down;
+      if (!down) break;
+      if (i < 2) {
+        if (held_[0] && held_[1]) inv_ = 0;
+        else if (i == 1) inv_ = (int8_t)(inv_ + 1 > 6 ? 6 : inv_ + 1);
+        else inv_ = (int8_t)(inv_ - 1 < -6 ? -6 : inv_ - 1);
+      } else {
+        if (held_[2] && held_[3]) koct_ = 0;
+        else if (i == 3) koct_ = (int8_t)(koct_ + 1 > 1 ? 1 : koct_ + 1);
+        else koct_ = (int8_t)(koct_ - 1 < -1 ? -1 : koct_ - 1);
+      }
     }
-    case PANEL_GROOVE: qG_ = (uint8_t)(pr * 4 + pc + 1); break;
-    case PANEL_PARAM:
-      if (pr <= 2) PW_[pr] = (uint8_t)pc;
+  }
+}
+
+// GROOVE: cols 6-9 = the 4x4 groove block (c34 x5-8 y5-8; with parametric groove on: three tier rows + archetype row),
+// col 10 = parametric on/off, gate length, swing -, swing +.
+void ChordArp::groovePage(int col, int row, bool down) {
+  if (!down) return;
+  if (col <= 9) {
+    int pc = col - 6;
+    if (pon_) {
+      if (row <= 2) PW_[row] = (uint8_t)pc;
       else {
         int a = pc + 1;
         if (a == parch_) pseed_ = (pseed_ * 7 + 29) % 251;  // re-tap the active archetype: reroll
         else { parch_ = (uint8_t)a; for (int j = 0; j < 3; ++j) PW_[j] = kPar[a - 1][j]; }
       }
       pgen();
-      break;
+    } else qG_ = (uint8_t)(row * 4 + pc + 1);
+    return;
   }
+  switch (row) {
+    case 0: pon_ = !pon_; break;
+    case 1: glen_ = (uint8_t)(glen_ % 3 + 1); break;
+    case 2: if (sw_ > 0) sw_--; break;
+    default: if (sw_ < 3) sw_++; break;
+  }
+}
+
+// FEEL: cols 6-9 rows 0-1 = velocity patterns 1..8 (a second finger blends two), row 2 = gate lanes 1..4 (tap again = off, a second
+// finger = both), row 3 = arp octave range 1..4 (c34: hold octave centre + tap); col 10 = chord size 5 / 4 / 3 / 2 (c34 x5-8 y4).
+void ChordArp::feelPage(int col, int row, bool down) {
+  if (col == 10) { if (down) qSize_ = kSm[row]; return; }
+  int pc = col - 6;
+  if (row <= 1) {
+    int k = row * 4 + pc + 1;
+    if (down) {
+      int g = k;
+      if (vh_ && vh_ != k) g = (vh_ < k ? vh_ : k) + 8 * (vh_ < k ? k : vh_);
+      else vh_ = (uint8_t)k;
+      selVg_ = (uint8_t)g;
+    } else if (vh_ == k) vh_ = 0;
+  } else if (row == 2) {
+    int g = pc + 1;
+    if (down) {
+      int f = lh_;
+      if (f && f != g) lane_ = (uint8_t)((f < g ? f : g) + 8 * (f < g ? g : f));
+      else { lane_ = (lane_ == g) ? 0 : (uint8_t)g; lh_ = (uint8_t)g; }
+    } else if (lh_ == g) lh_ = 0;
+  } else if (down) orng_ = (uint8_t)(pc + 1);
+}
+
+// SETUP: row 0 = key mode Key / Locked / Grid (hold Locked and tap a root = set the lock key, c34 x14), row 1 = transpose - / + / 0
+// (scale degrees), row 2 = mute / off (type 4, from the next bar).
+void ChordArp::setupPage(int col, int row, bool down) {
+  if (row == 0 && col <= 8) {
+    int mode = col - 5;  // 1 key, 2 locked, 3 grid
+    if (down) { lockTransition(mode, true); padLock_ = (mode == 2); }
+    else if (mode == 2 && padLock_) { centerHeld_ = false; padLock_ = false; }
+    return;
+  }
+  if (!down) return;
+  if (row == 1 && col <= 8) {
+    if (col == 6) arpTpose_ = (int8_t)(arpTpose_ > -24 ? arpTpose_ - 1 : -24);
+    else if (col == 7) arpTpose_ = (int8_t)(arpTpose_ < 24 ? arpTpose_ + 1 : 24);
+    else arpTpose_ = 0;
+  } else if (row == 2 && col == 6) {
+    amute_ = !amute_;
+    if (amute_) killLive();
+  } else if (row == 2 && col == 7) qT_ = 4;  // c34 type 4 (off): the live layer is silent from the next bar
 }
 
 // c34: a second finger on the speed / direction row selects the pair (index 5..10) of the two held pads.
@@ -469,30 +565,6 @@ void ChordArp::setPair(uint8_t& cur, int row, int v) {
   } else {
     xh_[row - 1] = (uint8_t)v;
     cur = (uint8_t)v;
-  }
-}
-
-void ChordArp::controlEvent(int idx, bool down) {
-  if (idx >= 4) held_[idx - 4] = down;
-  if (!down) return;
-  switch (idx) {
-    case 0: panel_ = PANEL_TYPES; break;
-    case 1: panel_ = PANEL_SETTINGS; break;
-    case 2: panel_ = PANEL_GROOVE; break;
-    case 3:
-      if (panel_ == PANEL_PARAM) pon_ = !pon_;  // re-tap PARAM = parametric groove on/off
-      else panel_ = PANEL_PARAM;
-      break;
-    case 4: case 5:  // INV- / INV+ ; both = reset
-      if (held_[0] && held_[1]) inv_ = 0;
-      else if (idx == 5) inv_ = (int8_t)(inv_ + 1 > 6 ? 6 : inv_ + 1);
-      else inv_ = (int8_t)(inv_ - 1 < -6 ? -6 : inv_ - 1);
-      break;
-    case 6: case 7:  // OCT- / OCT+ ; both = 0
-      if (held_[2] && held_[3]) koct_ = 0;
-      else if (idx == 7) koct_ = (int8_t)(koct_ + 1 > 1 ? 1 : koct_ + 1);
-      else koct_ = (int8_t)(koct_ - 1 < -1 ? -1 : koct_ - 1);
-      break;
   }
 }
 
@@ -521,7 +593,7 @@ int ChordArp::getParam(int id) const {
     case P_PSEED: return pseed_;
     case P_TPOSE: return arpTpose_;
     case P_MUTE: return amute_;
-    case P_PANEL: return panel_;
+    case P_PAGE: return page_;
     case P_Q_TYPE: return qT_;
     case P_Q_SPEED: return qS_;
     case P_Q_DIR: return qD_;
@@ -561,7 +633,7 @@ void ChordArp::setParam(int id, int v) {
     case P_PSEED: pseed_ = clampv(v, 0, 250); pgen(); break;
     case P_TPOSE: arpTpose_ = (int8_t)clampv(v, -24, 24); break;
     case P_MUTE: amute_ = v != 0; if (amute_) killLive(); break;  // c31 keeps a pending gate timer
-    case P_PANEL: panel_ = (uint8_t)clampv(v, 0, 3); break;
+    case P_PAGE: setPage(clampv(v, 0, 3)); break;
   }
 }
 
@@ -575,7 +647,7 @@ size_t ChordArp::serialize(uint8_t* b, size_t cap) const {
   b[11] = selG_; b[12] = selMod_; b[13] = (uint8_t)koct_; b[14] = (uint8_t)inv_; b[15] = pon_; b[16] = parch_;
   b[17] = PW_[0]; b[18] = PW_[1]; b[19] = PW_[2];
   b[20] = (uint8_t)(pseed_ & 0xff); b[21] = (uint8_t)((pseed_ >> 8) & 0xff);
-  b[22] = (uint8_t)arpTpose_; b[23] = amute_; b[24] = panel_;
+  b[22] = (uint8_t)arpTpose_; b[23] = amute_; b[24] = page_;
   b[25] = selVg_; b[26] = lane_; b[27] = orng_;
   return kSerialSize;
 }
@@ -597,8 +669,10 @@ bool ChordArp::deserialize(const uint8_t* b, size_t len) {
   glen_ = (uint8_t)gl; selT_ = (uint8_t)t; selS_ = (uint8_t)s; selD_ = (uint8_t)d; selSize_ = (uint8_t)sz;
   selG_ = (uint8_t)g; selMod_ = (uint8_t)mod; koct_ = (int8_t)b[13]; inv_ = (int8_t)b[14]; pon_ = b[15] != 0;
   parch_ = (uint8_t)pa; PW_[0] = b[17]; PW_[1] = b[18]; PW_[2] = b[19]; pseed_ = pseed;
-  arpTpose_ = (int8_t)b[22]; amute_ = b[23] != 0; panel_ = (uint8_t)pn;
-  selVg_ = b[25]; lane_ = b[26]; orng_ = b[27]; xh_[0] = xh_[1] = 0;
+  arpTpose_ = (int8_t)b[22]; amute_ = b[23] != 0; page_ = (uint8_t)pn; editPage_ = pn ? (uint8_t)pn : (uint8_t)PAGE_GROOVE;
+  selVg_ = b[25]; lane_ = b[26]; orng_ = b[27]; xh_[0] = xh_[1] = 0; vh_ = lh_ = 0; modHeld_ = false; padLock_ = false;
+  for (int i = 0; i < 4; ++i) held_[i] = false;
+  for (int i = 0; i < kPads; ++i) downPage_[i] = 0xFF;
   pgen();
   return true;
 }
@@ -634,43 +708,65 @@ void ChordArp::leds(uint8_t out[kPads], uint8_t* roles) const {
     out[row * 12 + col] = (uint8_t)led; ro[row * 12 + col] = role;
   }
   if (ql_.valid) out[(ql_.cx - 1) * 12 + (ql_.cy - 1)] = (uint8_t)pul;
-  // panel, cols 6..9
-  for (int row = 0; row < 4; ++row) for (int pc = 0; pc < 4; ++pc) {
-    int led = 0;
-    int idx = row * 4 + pc + 1;
-    if (panel_ == PANEL_TYPES) {
-      int eff = ql_.valid ? ql_.m : qMod_;
-      if (idx <= 15) led = (idx == selMod_) ? 15 : ((eff && idx == eff) ? pul : 3);
-    } else if (panel_ == PANEL_SETTINGS) {
-      int v = pc + 1;
-      if (row == 0) led = ((qT_ ? qT_ : selT_) == v) ? pul : 0;
-      else if (row == 1 || row == 2) {
-        int cur = row == 1 ? (qS_ ? qS_ : selS_) : (qD_ ? qD_ : selD_);
-        led = (cur == v || (cur >= 5 && (kP1[cur - 5] == v || kP2[cur - 5] == v))) ? pul : 0;
+  // right half: the visible page (cols 6..11)
+  auto put = [&](int col, int row, int led, uint8_t role) { out[row * 12 + col] = (uint8_t)led; ro[row * 12 + col] = role; };
+  // tab column (edit pages) / page pad (Play)
+  if (page_ == PAGE_PLAY) put(11, 0, 6, ROLE_CONTROL);
+  else for (int r = 0; r < 4; ++r) put(11, r, r == page_ ? 15 : 5, ROLE_CONTROL);
+  if (page_ == PAGE_PLAY) {
+    int eff = ql_.valid ? ql_.m : qMod_;
+    int selp = selMod_ <= 8 ? selMod_ : selMod_ - 7;
+    int effp = eff ? (eff <= 8 ? eff : eff - 7) : 0;
+    for (int c = 0; c < 2; ++c) for (int r = 0; r < 4; ++r) {
+      int mi = c * 4 + r + 1, led = 3;
+      if (selMod_ > 8 && mi == 1 && selp != 1) led = pul;  // an extended type: pad 1 (the modifier) pulses
+      if (effp && mi == effp && mi != selp) led = pul;
+      if (mi == selp) led = 15;
+      put(6 + c, r, led, ROLE_PANEL);
+    }
+    for (int c = 8; c <= 11; ++c) {
+      int v = c - 7;
+      if (c <= 10) put(c, 0, ((qT_ ? qT_ : selT_) == v) ? pul : 3, ROLE_PANEL);
+      for (int r = 1; r <= 2; ++r) {
+        int cur = r == 1 ? (qS_ ? qS_ : selS_) : (qD_ ? qD_ : selD_);
+        put(c, r, (cur == v || (cur >= 5 && (kP1[cur - 5] == v || kP2[cur - 5] == v))) ? pul : 3, ROLE_PANEL);
       }
-      else led = (kSm[pc] == (qSize_ ? qSize_ : selSize_)) ? pul : 0;
-    } else if (panel_ == PANEL_GROOVE) {
-      int ag = qG_ ? qG_ : selG_;
-      led = (idx == ag) ? (gbit(ag, lGptr_) ? 15 : 7) : 6;
-    } else {
-      if (row < 3) led = (pc == PW_[row]) ? (pon_ ? (((pmask_ >> ((lGptr_ - 1) % 16)) & 1) ? 15 : 10) : 5) : 2;
-      else led = ((pc + 1) == parch_) ? (pon_ ? 12 : 5) : 2;
     }
-    out[row * 12 + 6 + pc] = (uint8_t)led; ro[row * 12 + 6 + pc] = ROLE_PANEL;
-  }
-  // controls, cols 10..11
-  for (int i = 0; i < 8; ++i) {
-    int led;
-    switch (i) {
-      case 0: case 1: case 2: led = (panel_ == i) ? 15 : 4; break;
-      case 3: led = (panel_ == PANEL_PARAM) ? 15 : (pon_ ? 8 : 4); break;
-      case 4: led = inv_ < 0 ? (6 - inv_ * 3 > 15 ? 15 : 6 - inv_ * 3) : 2; break;
-      case 5: led = inv_ > 0 ? (6 + inv_ * 3 > 15 ? 15 : 6 + inv_ * 3) : 2; break;
-      case 6: led = koct_ == -1 ? 15 : 3; break;
-      default: led = koct_ == 1 ? 15 : 3; break;
+    put(8, 3, inv_ < 0 ? (6 - inv_ * 3 > 15 ? 15 : 6 - inv_ * 3) : 3, ROLE_CONTROL);
+    put(9, 3, inv_ > 0 ? (6 + inv_ * 3 > 15 ? 15 : 6 + inv_ * 3) : 3, ROLE_CONTROL);
+    put(10, 3, koct_ == -1 ? 15 : 3, ROLE_CONTROL);
+    put(11, 3, koct_ == 1 ? 15 : 3, ROLE_CONTROL);
+  } else if (page_ == PAGE_GROOVE) {
+    int ag = qG_ ? qG_ : selG_;
+    for (int r = 0; r < 4; ++r) for (int pc = 0; pc < 4; ++pc) {
+      int idx = r * 4 + pc + 1, led;
+      if (pon_) {
+        if (r < 3) led = (pc == PW_[r]) ? ((((pmask_ >> ((lGptr_ - 1) % 16)) & 1) ? 15 : 10)) : 3;
+        else led = ((pc + 1) == parch_) ? 12 : 3;
+      } else led = (idx == ag) ? (gbit(ag, lGptr_) ? 15 : 7) : 6;
+      put(6 + pc, r, led, ROLE_PANEL);
     }
-    int row = i / 2, col = 10 + (i % 2);
-    out[row * 12 + col] = (uint8_t)led; ro[row * 12 + col] = ROLE_CONTROL;
+    put(10, 0, pon_ ? 15 : 3, ROLE_CONTROL);
+    put(10, 1, glen_ == 1 ? 6 : (glen_ == 2 ? 3 : 15), ROLE_CONTROL);  // gate: normal / short / legato
+    put(10, 2, sw_ > 0 ? 6 + sw_ * 3 : 3, ROLE_CONTROL);
+    put(10, 3, sw_ < 3 ? 6 + sw_ * 3 : 15, ROLE_CONTROL);
+  } else if (page_ == PAGE_FEEL) {
+    int va = (selVg_ - 1) % 8 + 1, vq = (selVg_ - 1) / 8;
+    for (int r = 0; r < 2; ++r) for (int pc = 0; pc < 4; ++pc) {
+      int k = r * 4 + pc + 1;
+      put(6 + pc, r, (k == va || (vq > 0 && k == vq)) ? 15 : 3, ROLE_PANEL);
+    }
+    for (int pc = 0; pc < 4; ++pc) {
+      put(6 + pc, 2, (pc + 1 == lane_ % 8 || pc + 1 == lane_ / 8) ? 15 : 3, ROLE_PANEL);
+      put(6 + pc, 3, orng_ == pc + 1 ? 15 : 3, ROLE_PANEL);
+    }
+    for (int r = 0; r < 4; ++r) put(10, r, kSm[r] == (qSize_ ? qSize_ : selSize_) ? pul : 3, ROLE_PANEL);
+  } else {
+    for (int m = 1; m <= 3; ++m) put(5 + m, 0, pmode_ == m ? 15 : (m == 2 && centerHeld_ ? 9 : 4), ROLE_CONTROL);
+    put(6, 1, arpTpose_ < 0 ? 9 : 4, ROLE_CONTROL);
+    put(7, 1, arpTpose_ > 0 ? 9 : 4, ROLE_CONTROL);
+    put(8, 1, arpTpose_ == 0 ? 4 : 8, ROLE_CONTROL);
+    put(6, 2, amute_ ? 15 : 4, ROLE_CONTROL);
   }
 }
 

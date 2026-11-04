@@ -48,13 +48,25 @@ struct Rig {
   // c31 Camelot cell (x 1..4 row, y 1..6 column)
   void rootDown(int x, int y) { ca.pad(y - 1, x - 1, true); }
   void rootUp(int x, int y) { ca.pad(y - 1, x - 1, false); }
-  void panel(int p) { if (ca.getParam(ChordArp::P_PANEL) != p) press(10 + (p % 2), p / 2); }
-  void type(int n) { panel(ChordArp::PANEL_TYPES); press(6 + (n - 1) % 4, (n - 1) / 4); }
-  void setT(int v) { panel(ChordArp::PANEL_SETTINGS); press(6 + v - 1, 0); }
-  void setS(int v) { panel(ChordArp::PANEL_SETTINGS); press(6 + v - 1, 1); }
-  void setD(int v) { panel(ChordArp::PANEL_SETTINGS); press(6 + v - 1, 2); }
-  void setZ(int v) { panel(ChordArp::PANEL_SETTINGS); press(6 + v - 1, 3); }
-  void groove(int g) { panel(ChordArp::PANEL_GROOVE); press(6 + (g - 1) % 4, (g - 1) / 4); }
+  // page(p): go to a page with the tabs (Play -> the page pad opens the last edit page; edit pages have the tab column)
+  void page(int p) {
+    int cur = ca.getParam(ChordArp::P_PAGE);
+    if (cur == p) return;
+    if (p == 0) { press(11, 0); return; }
+    if (cur == 0) press(11, 0);
+    if (ca.getParam(ChordArp::P_PAGE) != p) press(11, p);
+  }
+  // chord type pad m (1..8): cols 6-7, rows 0-3; types 9..15 = hold pad 1 and tap pad (n-7)
+  void type(int n) {
+    page(ChordArp::PAGE_PLAY);
+    if (n <= 8) { press(6 + (n - 1) / 4, (n - 1) % 4); return; }
+    ca.pad(6, 0, true); press(6 + (n - 8) / 4, (n - 8) % 4); ca.pad(6, 0, false);
+  }
+  void setT(int v) { page(ChordArp::PAGE_PLAY); press(7 + v, 0); }
+  void setS(int v) { page(ChordArp::PAGE_PLAY); press(7 + v, 1); }
+  void setD(int v) { page(ChordArp::PAGE_PLAY); press(7 + v, 2); }
+  void setZ(int v) { page(ChordArp::PAGE_FEEL); press(10, v - 1); }
+  void groove(int g) { page(ChordArp::PAGE_GROOVE); press(6 + (g - 1) % 4, (g - 1) / 4); }
   void pulses(int n) { for (int i = 0; i < n; ++i) { ca.pulse(); mono.pulse(); } }
   void ticks(int n) { for (int i = 0; i < n; ++i) { ca.tick(); mono.tick(); } }
   void toBar() { ca.start(); }  // meas = 0
@@ -274,3 +286,4 @@ static int arpNotes(Rig& r, int* out, int steps) {
 }
 #include "test_playhead.inc"
 #include "test_cases2.inc"
+#include "test_pads.inc"

@@ -24,6 +24,7 @@ class Mono : public SeqBase {
     P_DIV,        // pulses per step (read-only, SPD[speed])
     P_PLAYING,    // sounding note or -1 (read-only)
     P_VG,         // velocity pattern 1..72 (c34 tk.vg; a, or a + 8*b blend)
+    P_MENU,       // 1 = the menu view is shown (c34 menu overlay), 0 = the note view
     P_COUNT
   };
   enum { kSerialVersion = 2, kSerialSize = 12 + 128 };
@@ -56,6 +57,11 @@ class Mono : public SeqBase {
   void killNote();
   void toggleAt(int x, int row);
   void loopPad(int x, bool down);
+  void notePad(int col, int row, bool down);
+  void menuPad(int col, int row, bool down);
+  void pagePad(int x, bool down);
+  void setMenu(bool on);
+  void clearAll();
   int degAtRow(int row) const { return win_ + (3 - row); }
 
   const SeqContext* ctx_;
@@ -68,9 +74,10 @@ class Mono : public SeqBase {
   uint8_t fc_;
   bool bl_;
   // gesture state
-  bool loopHeld_;
+  bool loopHeld_, menu_, ra_;
   int8_t lpS_, lpE_;      // 0 = none
-  int8_t downX_[4][8];    // step pad press memo: x (edit) or x+32 (loop gesture); 0 = not down
+  uint8_t fp_;            // menu page pad held first (c34 fp), 0 = none; ra_ = a page count was set with it
+  int8_t downX_[4][8];    // pad press memo (cols 0..7): x (edit) or x+32 (loop gesture) or x+64 (menu page pad); 0 = not down
 };
 
 }  // namespace seqgen

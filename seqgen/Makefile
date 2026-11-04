@@ -15,7 +15,7 @@ FUZZ ?= 40
 test: build/seqgen_tests$(EXE)
 	build/seqgen_tests$(EXE)
 
-build/seqgen_tests$(EXE): test/test_main.cpp test/test_cases2.inc test/test_cases3.inc test/test_playhead.inc $(SRC) seqgen.h chordarp.h mono.h playhead.h
+build/seqgen_tests$(EXE): test/test_main.cpp test/test_cases2.inc test/test_cases3.inc test/test_pads.inc test/test_playhead.inc $(SRC) seqgen.h chordarp.h mono.h playhead.h
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) test/test_main.cpp $(SRC) -o $@
 

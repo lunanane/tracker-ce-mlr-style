@@ -493,11 +493,22 @@ void SeqPlayOverlay::refreshView()
         view_.mode = SeqPlayViewData::LEGEND;
         view_.type = seqEngine.type(sel);
         if (view_.type == seqlogic::TYPE_CHORDARP)
-            view_.panel = (uint8_t)seqEngine.chordArp(sel).getParam(seqgen::ChordArp::P_PANEL);
+        {
+            const seqgen::ChordArp& ca = seqEngine.chordArp(sel);
+            view_.page = (uint8_t)ca.getParam(seqgen::ChordArp::P_PAGE);
+            view_.pon = (uint8_t)ca.getParam(seqgen::ChordArp::P_PON);
+        }
         else
         {
-            view_.half = (uint8_t)seqEngine.mono(sel).getParam(seqgen::Mono::P_HALF);
-            view_.win = (int8_t)seqEngine.mono(sel).getParam(seqgen::Mono::P_WIN);
+            const seqgen::Mono& mo = seqEngine.mono(sel);
+            view_.half = (uint8_t)mo.getParam(seqgen::Mono::P_HALF);
+            view_.win = (int8_t)mo.getParam(seqgen::Mono::P_WIN);
+            view_.menu = (uint8_t)mo.getParam(seqgen::Mono::P_MENU);
+            view_.ep = (uint8_t)mo.getParam(seqgen::Mono::P_EP);
+            view_.np = (uint8_t)mo.getParam(seqgen::Mono::P_NP);
+            view_.speed = (uint8_t)mo.getParam(seqgen::Mono::P_SPEED);
+            view_.vel = (uint8_t)mo.getParam(seqgen::Mono::P_VG);
+            view_.tie = (uint8_t)mo.getParam(seqgen::Mono::P_TIE);
         }
     }
     else

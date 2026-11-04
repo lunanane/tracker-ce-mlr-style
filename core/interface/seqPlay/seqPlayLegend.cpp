@@ -111,12 +111,20 @@ void cSeqPlayLegend::update()
     // ---- legend ----
     seqplay::LegendState st;
     st.type = view->type;
-    st.panel = view->panel;
+    st.page = view->page;
+    st.pon = view->pon;
     st.half = view->half;
+    st.menu = view->menu;
+    st.ep = view->ep;
+    st.np = view->np;
+    st.speed = view->speed;
+    st.vel = view->vel;
+    st.tie = view->tie;
+    st.win = view->win;
 
-    // backing panel
+    // backing panel: two caption lines (state, how to play) above the 12 x 4 cells
     API_COLOR(th.backgroundColor);
-    box(kLegendX - 4, kLegendY - 16, 12 * kLegendCellW + 8, 4 * kLegendCellH + 18);
+    box(kLegendX - 4, kLegendY - 38, 12 * kLegendCellW + 8, 4 * kLegendCellH + 40);
 
     // cells: one RECTS batch per zone (one colour, one BEGIN / END); the active mode pad is white
     static const uint8_t kZones[] = { seqplay::Z_NONE, seqplay::Z_NOTE, seqplay::Z_STEP, seqplay::Z_PANEL,
@@ -131,6 +139,7 @@ void cSeqPlayLegend::update()
                                zone == seqplay::Z_STEP       ? th.green :
                                zone == seqplay::Z_PANEL      ? th.cyan :
                                zone == seqplay::Z_MODE       ? th.orange :
+                               zone == seqplay::Z_HOLD       ? th.orange :
                                zone == seqplay::Z_ADJ        ? th.yellow :
                                zone == seqplay::Z_ACTION     ? th.red :
                                                                th.white;
@@ -154,14 +163,12 @@ void cSeqPlayLegend::update()
 
     API_BLEND_FUNC(SRC_ALPHA, ONE_MINUS_SRC_ALPHA);
 
-    // caption above (short), labels in the cells (dark text on the bright cells)
-    char cap[40];
-    if (view->type == seqlogic::TYPE_CHORDARP)
-        snprintf(cap, sizeof cap, "%s %s", seqplay::legendCaption(view->type), seqplay::panelName(view->panel));
-    else
-        snprintf(cap, sizeof cap, "%s %+d", seqplay::legendCaption(view->type), (int)view->win);
+    // caption above: line 1 = what is shown + the state, line 2 = how to play it; labels in the cells (dark text on the bright cells)
+    char cap[96];
+    seqplay::legendTitle(st, cap, sizeof cap);
     API_COLOR(th.white);
-    API_CMD_TEXT(kLegendX, (int16_t)(kLegendY - 8), font1, OPT_CENTERY, cap);
+    API_CMD_TEXT(kLegendX, (int16_t)(kLegendY - 27), font3, OPT_CENTERY, cap);
+    API_CMD_TEXT(kLegendX, (int16_t)(kLegendY - 9), font1, OPT_CENTERY, seqplay::legendHelp(st));
     API_COLOR(0x000000);
     for (uint8_t row = 0; row < 4; row++)
     {
