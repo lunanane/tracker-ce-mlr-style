@@ -16,8 +16,9 @@ static View noView()
     return v;
 }
 
-Cut::Cut() : activeMask_(0), holdMask_(0), stopMask_(0)
+Cut::Cut() : activeMask_(0), holdMask_(0), stopMask_(0), snapMask_(0), handMask_(0)
 {
+    memset(hand_, 0, sizeof(hand_));
     memset(stock_, 0, sizeof(stock_));
     memset(&hooks_, 0, sizeof(hooks_));
     memset(scratch_, 0, sizeof(scratch_));
@@ -43,9 +44,18 @@ void Cut::setStopped(uint8_t t, bool s)
     stopMask_ = m;
 }
 
+void Cut::setSnap(uint8_t t, bool s)
+{
+    uint16_t m = snapMask_;
+    m = s ? (uint16_t)(m | (1u << t)) : (uint16_t)(m & ~(1u << t));
+    snapMask_ = m;
+    rt_[t].snap = s;
+}
+
 void Cut::activate(uint8_t t)
 {
     if ((activeMask_ >> t) & 1u) return;
+    handMask_ = (uint16_t)(handMask_ & ~(1u << t));
     Playhead& p = ph_[t];
     p.reset();
     int steps = hooks_.trackSteps ? hooks_.trackSteps(hooks_.user, t) : 16;
@@ -61,6 +71,7 @@ void Cut::activate(uint8_t t)
 void Cut::deactivate(uint8_t t)
 {
     activeMask_ = (uint16_t)(activeMask_ & ~(1u << t));
+    snapMask_ = (uint16_t)(snapMask_ & ~(1u << t));
     setHold(t, false);
     setStopped(t, false);
     memset(&rt_[t], 0, sizeof(Rt));
@@ -107,13 +118,51 @@ View Cut::view(uint8_t track) const
         v.flags = (uint8_t)(1 << VF_RATE_SHIFT); // rate 1
         return v;
     }
+    if ((snapMask_ >> track) & 1u)
+    {
+        v.flags = (uint8_t)(1 << VF_RATE_SHIFT); // SYNC ALL done: shown as stock until the boundary / Play hands the track back
+        return v;
+    }
     return views_[track];
+}
+
+// SYNC ALL: one pass over all tracks (so they all switch in the same audio block). Every active track drops what keeps it off the
+// grid: held pads, a recorded loop or open take, rate, reverse, STOP, a queued second half-step / retrigger. Its next step boundary
+// aligns it to the global position (r.resync) and, being plain then, hands it back to the stock sequencer (boundary()).
+void Cut::syncAll()
+{
+    for (uint8_t i = 0; i < kCutTracks; i++)
+    {
+        if (!((activeMask_ >> i) & 1u)) continue;
+        Playhead& p = ph_[i];
+        Rt& r = rt_[i];
+        for (int col = 0; col < kPosCols; col++)
+            if ((r.held >> col) & 1u) p.release(col); // the held pads (and with them a two-pad loop gesture) end
+        r.held = 0;
+        p.clearRecording();
+        p.setRate(Playhead::RATE_NORMAL);
+        p.setReverse(false);
+        r.stopped = false;
+        setStopped(i, false);
+        setHold(i, false);
+        r.has2 = false;
+        r.retrig = false;
+        r.resync = true;
+        publish(i);
+        setSnap(i, true);
+    }
 }
 
 void Cut::apply(uint8_t t, uint8_t arg)
 {
     if (argSub(arg) == SUB_RESET)
     {
+        if (argIsSyncAll(arg))
+        {
+            syncAll();
+            return;
+        }
+        if (argCol(arg) != 0) return; // col 0 = RESET, col 1 = SYNC ALL, anything else is not a command
         for (uint8_t i = 0; i < kCutTracks; i++)
             if ((activeMask_ >> i) & 1u) deactivate(i);
         return;
@@ -130,6 +179,7 @@ void Cut::apply(uint8_t t, uint8_t arg)
     activate(t);
     Playhead& p = ph_[t];
     Rt& r = rt_[t];
+    if (down && sub != SUB_RESYNC) setSnap(t, false); // a new gesture after SYNC ALL: the track is wanted off the grid again (a late release is not one)
     switch (sub)
     {
         case SUB_PAD:
@@ -218,10 +268,12 @@ StepPlan Cut::boundary(uint8_t t, int steps, int globalPos, bool frozen)
     if (r.resync)
     {
         r.resync = false;
+        setSnap(t, false);
         r.stopped = false;
         setStopped(t, false);
         r.held = 0;
-        p.resync((uint32_t)globalPos);
+        // the track's own stock position (its own length: performance track lengths, launched clips), not the global counter
+        p.resync((uint32_t)(stock_[t] >= 0 && stock_[t] < steps ? stock_[t] : globalPos % steps));
         resynced = true;
     }
     else if (r.stopped)
@@ -251,7 +303,18 @@ StepPlan Cut::boundary(uint8_t t, int steps, int globalPos, bool frozen)
     r.elapsed = plan.elapsed;
     publish(t);
     if (resynced && isPlain(p, r.held))
-        deactivate(t); // back on the global grid with nothing special left: the stock sequencer takes over again
+    {
+        // back on the grid with nothing special left: the stock sequencer takes over again. Its retrigger ("as if at") survives
+        // the hand-back: consumeRetrigger() still serves it at the step start (hookMask keeps the audio hooks on until then).
+        const bool keep = plan.retrigger;
+        deactivate(t);
+        if (keep)
+        {
+            hand_[t].noteStep = plan.noteStep;
+            hand_[t].elapsed = plan.elapsed;
+            handMask_ = (uint16_t)(handMask_ | (1u << t));
+        }
+    }
     return plan;
 }
 
@@ -274,6 +337,15 @@ bool Cut::mid(uint8_t t, int steps, StepPlan& out, bool frozen)
 
 bool Cut::consumeRetrigger(uint8_t t, StepPlan& out)
 {
+    if (t < kCutTracks && ((handMask_ >> t) & 1u) && !((activeMask_ >> t) & 1u))
+    {
+        handMask_ = (uint16_t)(handMask_ & ~(1u << t));
+        memset(&out, 0, sizeof(out));
+        out.retrigger = true;
+        out.noteStep = hand_[t].noteStep;
+        out.elapsed = hand_[t].elapsed;
+        return true;
+    }
     if (t >= kCutTracks || !((activeMask_ >> t) & 1u) || !rt_[t].retrig) return false;
     rt_[t].retrig = false;
     memset(&out, 0, sizeof(out));
@@ -302,9 +374,15 @@ void Cut::launched(uint8_t t, int steps, int pos)
 
 void Cut::transportStart(int fromPos)
 {
+    handMask_ = 0;
     for (uint8_t t = 0; t < kCutTracks; t++)
     {
         if (!((activeMask_ >> t) & 1u)) continue;
+        if (rt_[t].snap)
+        {
+            deactivate(t); // SYNC ALL while stopped (or Stop = panic): no boundary came, Play starts the track on the grid
+            continue;
+        }
         Rt& r = rt_[t];
         ph_[t].restart((uint32_t)(fromPos + 1)); // the stock sequencer plays step fromPos right now
         stock_[t] = (int16_t)fromPos;

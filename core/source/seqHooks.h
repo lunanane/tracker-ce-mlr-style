@@ -44,4 +44,7 @@ void seqPanic();
 void seqPanicPlay();   // R1: end a recording, release held pads / takeovers / latched arps
 void seqPanicClips();  // R2: drop queued launches, stop-all, clips back to the pattern, LIVE -> song
 void seqPanicFx();     // R3: all perform FX off (faders back to "not dialled in", latches released)
-void seqPanicCut();    // R4: SYNC ALL (SUB_SYNCALL), release MLR holds and recordings
+void seqPanicCut();    // R4: SYNC ALL (cutPanic), release MLR holds and recordings
+
+// ---- R4: once per main loop pass (seqTracksUpdate), any view: retries a SYNC ALL / releases that did not fit into the queue. ----
+void seqCutUpdate();

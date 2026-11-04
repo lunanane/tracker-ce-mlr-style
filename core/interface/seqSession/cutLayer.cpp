@@ -42,11 +42,23 @@ void flushPending()
     s_nPending = keep;
 }
 
-void post(uint8_t track, uint8_t sub, bool down, uint8_t col)
+// SYNC ALL is one ring entry that must not be lost: kept until the queue accepts it, behind the releases that wait.
+bool s_syncPending = false;
+
+void trySync()
 {
     flushPending();
+    if (s_syncPending && s_nPending == 0 && seqEngine.postCut(0, packSyncAll()))
+        s_syncPending = false;
+}
+
+void post(uint8_t track, uint8_t sub, bool down, uint8_t col)
+{
+    trySync();
     uint8_t arg = packArg(sub, down, col);
-    if (s_nPending == 0 && seqEngine.postCut(track, arg))
+    if (s_syncPending && down)
+        return; // a press must not overtake a SYNC ALL that is still waiting (it would be wiped by it)
+    if (s_nPending == 0 && !s_syncPending && seqEngine.postCut(track, arg))
         return;
     if (!down && (sub == SUB_PAD || sub == SUB_REC) && s_nPending < sizeof(s_pending) / sizeof(s_pending[0]))
     {
@@ -63,7 +75,7 @@ void cutSetGroup(uint8_t firstTrack)
     s_first = groupFirst(firstTrack); // held pads keep the track they were pressed on
 }
 
-void cutPad(uint8_t col, uint8_t row, bool down)
+void cutPad(uint8_t col, uint8_t row, bool down, bool shift)
 {
     if (col >= kCols || row >= kRows)
         return;
@@ -100,6 +112,11 @@ void cutPad(uint8_t col, uint8_t row, bool down)
         case COL_REVERSE: post(track, SUB_REVERSE, true, 0); break;
         case COL_RATE: post(track, SUB_RATE, true, 0); break;
         case COL_RESYNC:
+            if (shift)
+            {
+                cutSyncAll(); // Shift + RESYNC: all tracks
+                break;
+            }
             s_recTracks = (uint16_t)(s_recTracks & ~(1u << track)); // a resync ends a take in progress
             post(track, SUB_RESYNC, true, 0);
             break;
@@ -125,7 +142,7 @@ void cutRec(bool down)
 void cutLeds(uint8_t* out48)
 {
     init();
-    flushPending(); // called on every redraw: also retries lost releases
+    trySync(); // called on every redraw: also retries lost releases and a SYNC ALL
     View views[kRows];
     Cut* c = seqEngine.cut();
     for (uint8_t r = 0; r < kRows; r++)
@@ -139,6 +156,33 @@ void cutLeds(uint8_t* out48)
     }
     s_blink++;
     fillLeds(views, ((s_blink >> 3) & 1u) != 0, out48);
+}
+
+void cutSyncAll()
+{
+    init();
+    // local state first: the audio side drops held pads and takes with the command, so no per-pad releases are posted for them
+    memset(s_heldTrack, -1, sizeof(s_heldTrack));
+    s_recTracks = 0;
+    s_syncPending = true;
+    trySync();
+}
+
+void cutUpdate()
+{
+    if (!s_init)
+        return;
+    trySync();
+}
+
+bool cutRecHeld() { return s_rec; }
+bool cutSyncPending() { return s_syncPending; }
+
+void cutPanic()
+{
+    init();
+    cutReleaseAll(); // holds and open takes end (the releases go first, in order)
+    cutSyncAll();
 }
 
 void cutReleaseAll()

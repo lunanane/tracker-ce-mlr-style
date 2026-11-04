@@ -1342,6 +1342,18 @@ int main()
     test_cut_layer();
     test_cut_session_freeze_and_launch();
     test_cut_session_layer_adapter();
+    test_syncall_encoding();
+    test_syncall_one_pass_mixed_state();
+    test_syncall_edge_cases();
+    test_syncall_layer_paths();
+    test_syncall_session_layer_adapter();
+    test_syncall_ring_full_is_retried();
+    test_survival_and_panic();
+    test_group_arrows();
+    test_lane_geometry();
+    test_lane_palette();
+    test_lane_draw_budget_and_bounds();
+    test_r4_handback_retrigger_and_stock_phase();
     printf("%d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

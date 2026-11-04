@@ -17,6 +17,19 @@ inline uint8_t argSub(uint8_t a) { return (uint8_t)(a & 7); }
 inline bool argDown(uint8_t a) { return (a & 8) != 0; }
 inline uint8_t argCol(uint8_t a) { return (uint8_t)(a >> 4); }
 
+// SYNC ALL (plan 005 R4): every track back onto the global playhead, in one pass of the audio context. It shares the sub slot of
+// SUB_RESET (col 1; col 0 = RESET): the last free 3-bit slot (7) stays "invalid" for Engine::postCut and its ring test.
+//   RESET    : all cut rows back to stock at once (project load / new project)
+//   SYNC ALL : held pads, recorded loops, rate and reverse of every cut track are dropped, STOP ends; each track snaps to the
+//              global position at its next step boundary and is then handed back to the stock sequencer. With the transport
+//              stopped there is no boundary: the next Play hands every such track back (Cut::transportStart).
+inline uint8_t packSyncAll() { return packArg(SUB_RESET, false, 1); }
+inline bool argIsSyncAll(uint8_t a) { return argSub(a) == SUB_RESET && argCol(a) == 1; }
+
+// Screen button (0-based) of SYNC ALL in the CUT layer: button 6 = seqsession::kButtonLayer (the layer's own button; static_assert in
+// cutSessionLayer.h); 7 is an empty gap and 8 switches CLIPS <-> CUT (both owned by the host).
+enum { kScreenButtonSyncAll = 5 };
+
 // Group of 4 tracks: firstTrack is clamped to 0, 4, 8, 12 (anything in between rounds down).
 inline uint8_t groupFirst(uint8_t firstTrack) { return (uint8_t)((firstTrack > 15 ? 12 : firstTrack) & ~3); }
 inline uint8_t trackOfRow(uint8_t firstTrack, uint8_t row) { return (uint8_t)(groupFirst(firstTrack) + (row & 3)); }
@@ -138,6 +151,142 @@ inline void fillLeds(const View views[kRows], bool blink, uint8_t out[kCutPads])
         else
             row[COL_RESYNC] = (v.flags & VF_ACTIVE) ? LED_MID : LED_DIM; // off the global grid: resync is useful
     }
+}
+
+// ================================================================ lane screen (plan 005 R4)
+// One lane per pad row (4 tracks of the group), the lane split into the 8 pad segments. Pure geometry and models: the drawing
+// itself is laneDraw.h (templates), the firmware controls are laneView.*.
+constexpr int kLaneX = 100;        // x of the lane (segments), 8 x 75 px
+constexpr int kLaneW = 600;
+constexpr int kSegW = 75;
+constexpr int kLaneTop = 70;       // y of the first lane (the stock title bar occupies y 0..28, the header y 32..62)
+constexpr int kLaneH = 80;
+constexpr int kLaneStride = 84;
+constexpr int kCellX = 704;        // right block: the pad columns 9..12 as 2 x 2 cells
+constexpr int kMaxSteps = 128;     // MAXSTEP + 1
+constexpr int kNoteRects = 32;     // most note marks drawn per lane (steps are merged into buckets above that)
+constexpr bool kRedrawPerStep = false; // fallback if the 25 fps playhead disturbs the SD streams: true = redraw once per step (one-line switch)
+constexpr int kRedrawGapMs = 40;   // playhead strips: at most 25 frames per second
+
+// First step of pad column `col` (0..8) in a pattern of `steps` steps (Playhead::columnPosition with 8 columns).
+inline int laneColStart(int col, int steps) { return (col * steps) / kPosCols; }
+
+// x offset (0..kLaneW-1) inside the lane of position `pos` plus frac48/48 of a step. Piecewise linear per pad segment, so the line
+// is inside the segment whose pad it is, and moves smoothly (1/48 step) from one segment to the next.
+inline int laneOffset(int pos, int frac48, int steps)
+{
+    if (steps < 1) return 0;
+    if (pos < 0) pos = 0;
+    if (pos >= steps) pos = steps - 1;
+    if (frac48 < 0) frac48 = 0;
+    if (frac48 > 47) frac48 = 47;
+    const int c = columnOf(pos, steps, kPosCols);
+    int span = laneColStart(c + 1, steps) - laneColStart(c, steps);
+    if (span < 1) span = 1;
+    const int within = (pos - laneColStart(c, steps)) * 48 + frac48; // 1/48 steps from the segment start
+    int x = c * kSegW + (within * kSegW) / (span * 48);
+    return x >= kLaneW ? kLaneW - 1 : x;
+}
+
+// Micro step 1..48 of the step -> 0..47 (reverse runs through the step backwards).
+inline int laneFrac(int uStep, bool reverse)
+{
+    int f = uStep < 1 ? 0 : (uStep > 48 ? 47 : uStep - 1);
+    return reverse ? 47 - f : f;
+}
+
+// Bit set of the steps that hold a note (up to 128 steps).
+inline void noteBitSet(uint32_t w[4], int i) { if (i >= 0 && i < kMaxSteps) w[i >> 5] |= (1u << (i & 31)); }
+inline bool noteBitGet(const uint32_t w[4], int i) { return i >= 0 && i < kMaxSteps && ((w[i >> 5] >> (i & 31)) & 1u) != 0; }
+// Steps per note mark: 1 up to 32 steps, above that several steps share a mark (never more than kNoteRects marks).
+inline int noteBucket(int steps) { return steps <= kNoteRects ? 1 : (steps + kNoteRects - 1) / kNoteRects; }
+
+// The static part of the lanes (redrawn on events: group, flags, loop range, pattern edits).
+struct LaneInfo
+{
+    uint8_t track, flags, loopLo, loopHi, steps, pad_[3];
+    uint32_t notes[4];
+};
+struct LaneModel
+{
+    uint8_t first, recHeld, pad_[2];
+    LaneInfo lane[kRows];
+};
+// The moving part (redrawn at most every kRedrawGapMs when something moved).
+struct HeadInfo
+{
+    int16_t x;     // playhead offset in the lane
+    int16_t ghost; // where the track would be on the grid, -1 = same place / not cut-active
+    uint8_t seg;   // pad segment the playhead is in
+    uint8_t flags; // View flags
+};
+struct HeadModel
+{
+    HeadInfo h[kRows];
+    uint8_t bar, beat, recHeld, pad_; // bar and beat (1-based) from the stock position of track 1
+};
+
+inline HeadInfo makeHead(const View& v, int pos, int uStep, int stock, int steps)
+{
+    HeadInfo h;
+    h.flags = v.flags;
+    h.x = (int16_t)laneOffset(pos, laneFrac(uStep, (v.flags & VF_REVERSE) != 0), steps);
+    h.seg = columnOf(pos, steps, kPosCols);
+    h.ghost = -1;
+    if ((v.flags & VF_ACTIVE) && stock != pos && stock >= 0 && stock < steps)
+        h.ghost = (int16_t)laneOffset(stock, laneFrac(uStep, false), steps); // the stock sequencer runs forward
+    return h;
+}
+
+// Pattern bar of 16 steps (not the song's time signature) and beat of 4 steps, from the stock position of track 1.
+inline void barBeat(int stockPos, uint8_t& bar, uint8_t& beat)
+{
+    if (stockPos < 0) stockPos = 0;
+    int b = stockPos / 16 + 1;
+    bar = (uint8_t)(b > 255 ? 255 : b);
+    beat = (uint8_t)((stockPos % 16) / 4 + 1);
+}
+
+// Redraw gate for the moving part: something moved and the last frame is old enough (now/last in ms, wrap safe).
+inline bool redrawDue(bool moved, uint32_t nowMs, uint32_t lastMs) { return moved && (uint32_t)(nowMs - lastMs) >= (uint32_t)kRedrawGapMs; }
+
+// Colours derived from the theme (RGB 0xRRGGBB): works for dark and light themes.
+inline uint32_t mixRgb(uint32_t a, uint32_t b, int t256)
+{
+    uint32_t out = 0;
+    for (int sh = 0; sh <= 16; sh += 8)
+    {
+        int ca = (int)((a >> sh) & 255), cb = (int)((b >> sh) & 255);
+        out |= (uint32_t)((ca * (256 - t256) + cb * t256) >> 8) << sh;
+    }
+    return out;
+}
+// Text / line colour that reads on `bg` (dark theme -> light grey, light theme -> dark grey).
+inline uint32_t contrastFg(uint32_t bg)
+{
+    int lum = (int)(((bg >> 16) & 255) * 30 + ((bg >> 8) & 255) * 59 + (bg & 255) * 11) / 100;
+    return lum < 128 ? 0xE6E6E6u : 0x1E1E1Eu;
+}
+struct Palette
+{
+    uint32_t bg, lane, segAlt, grid, note, text, textDim, head, ghost, loop, rec, recText;
+};
+inline Palette makePalette(uint32_t bg, uint32_t fg, uint32_t red, uint32_t orange, uint32_t cyan)
+{
+    Palette p;
+    p.bg = bg;
+    p.lane = mixRgb(bg, fg, 20);
+    p.segAlt = mixRgb(bg, fg, 38);
+    p.grid = mixRgb(bg, fg, 90);
+    p.note = mixRgb(bg, fg, 150);
+    p.text = fg;
+    p.textDim = mixRgb(bg, fg, 110);
+    p.head = fg;
+    p.ghost = cyan;
+    p.loop = orange;
+    p.rec = red;
+    p.recText = 0xFFFFFF;
+    return p;
 }
 
 } // namespace seqcut

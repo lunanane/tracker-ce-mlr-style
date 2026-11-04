@@ -403,7 +403,7 @@ void SeqPlayOverlay::refreshStrip(bool force)
     seqrec::Planner::State rs = seqEngine.recState();
     uint8_t recTrack = seqEngine.recTrack();
     uint8_t hints = seqEngine.recHints();
-    uint16_t cut = seqEngine.cutMask();
+    uint16_t cut = seqEngine.cutOffGridMask(); // really off the grid: not tracks SYNC ALL has snapped or that only wait for a hand-back retrigger
     if (!stripKeyValid_)
         force = true;
 

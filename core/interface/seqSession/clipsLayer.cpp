@@ -231,7 +231,7 @@ bool ClipsLayer::buttonLabel(uint8_t i, char out[12])
         case 5:
             out[0] = 0;
             return true;
-        default: return false; // 7 = CLIPS, 8 = CUT: the host
+        default: return false; // 7 = gap, 8 = CLIPS <-> CUT switch: the host
     }
 }
 

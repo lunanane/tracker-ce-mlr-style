@@ -18,7 +18,7 @@ Do these first (the full list below is the detail):
 8. Reflash the stock .ptf to confirm the recovery path.
 9. R2: Song double tap opens the launcher; with the song playing launch a clip (LIVE, song frozen), BACK:SONG resumes; a Play 1x clip chains into the next row; Stop = panic (section 9, 9b, 9c).
 
-Contents: 1-6 Play mode | 7 Record | 8 save / load | 9 Session CLIPS | 10 Session CUT | 11 alt Performance page | 12 stock-behaviour checks.
+Contents: 1-6 Play mode | 7 Record | 8 save / load | 9 Session CLIPS | 10 Session CUT (10c lane screen, SYNC ALL, panic) | 11 alt Performance page | 12 stock-behaviour checks.
 
 ## 1. Enter / leave Play mode (v0.2: Play mode is the 4th action-button page of the pattern editor)
 Naming: the bottom-right key printed "Perform" is the firmware's **Pattern** key. The pattern view (tracks, playhead, title bar, mutes) stays on screen in Play mode; only the 8 labels under the screen and the pads change.
@@ -302,6 +302,39 @@ Setup: patterns 1-4 with different notes on tracks 1-3 (CLIPS needs them), track
 | CLIPS: launch a scene while CUT rows are active | At the pattern end the new pattern plays; CUT rows keep their settings (position inside the new pattern, clamped). |
 | In CUT hold two pads (loop), then press screen button 8 (CLIPS) | The loop ends at once (pads are released by the layer switch). Rec held while switching: the take is closed. |
 | Leave the Session view (any module button) while a CUT pad is held / Rec is held | Nothing hangs: loop ends, take closed. |
+
+### 10c. CUT lane screen, SYNC ALL, survival and panic (plan 005 R4, v0.2)
+The CUT layer draws its own screen: header (y 32-62) "CUT 1-4", **four lanes** (one per pad row), each split into the 8 pad segments (alternating shade), note marks, beat / bar ticks on the lower edge, a thin **playhead line** that moves smoothly (not
+per segment) and the segment it is in lightly filled, a cyan **grid ghost** (small pin) where the track would be without the jam, an orange **loop bracket** over the held loop, and the right block (two by two cells = pad columns 9-12: STOP, REVERSE, RATE, RESYNC).
+Left of a lane: the track number and what makes it special (`OFF GRID`, `LOOP`, `REPLAY`, `STOP`, `REC`, `REV`, `1/2 speed`, `2x speed`). Nothing is drawn over the stock title bar. Bottom labels in CUT: `1-4 | 5-8 | 9-12 | 13-16 | | SYNC ALL | (empty) | CLIPS`
+(SYNC ALL on screen button 6, button 7 is empty, button 8 switches back to CLIPS).
+Use the project of section 10 (track 1 loop sample, track 2 drums, track 3 MIDI) and a second group with a few more tracks.
+
+| Press | Expected |
+|---|---|
+| Open CUT, transport running, touch nothing | Four lanes, one playhead line per lane running left to right in step with the pattern, all in the same segment rhythm (bar.beat in the header counts on). Tracks you have not touched show no label under the number and no ghost. |
+| Pattern with 12, 24, 40, 100 steps | The line always stays inside the segment of its pad (LED column = filled segment); with fewer steps than 8 the extra segments stay empty. |
+| Jam: press pad 5 on lane 1 | The line jumps to segment 5; label `OFF GRID`; a cyan ghost keeps running where the stock pattern would be; the RESYNC cell fills. Press RESYNC: line and ghost meet again, label gone. |
+| Hold two pads | Orange bracket over the loop segments, label `LOOP`; release: bracket gone. |
+| Reverse / rate / STOP | The matching right-block cell lights (reverse triangle points backwards, 2x / 1/2 text bright, STOP = square and the lane dimmed, line dim); labels `REV`, `1/2 speed`, `2x speed`, `STOP`. |
+| Hold Rec, jam | Header turns red with `REC`, the touched lanes get a red edge and a red RESYNC disc; release Rec: header normal, the lane shows `REPLAY` and a ring in the RESYNC cell while the recorded loop runs. |
+| Pattern edit (another view) and back | Note marks follow the notes (they are re-read about every 100 ms, redraw only when they changed). |
+| Group 5-8 (button 2 or Right), 13-16, Left | Header and lanes show the group; Left / Right page the groups, nothing happens past the ends. Jams of other groups keep running. |
+| Playhead smoothness / sequencer timing | While the transport runs, the line moves smoothly (about 25 frames per second) and pads, arps, Mono and the pattern stay on time. Listen for audible stalls with long SD-streamed samples (the main loop also refills the streams): note them. |
+| **SYNC ALL** (screen button 6) with several lanes jammed, reversed, 2x, looped, one recorded, one stopped | Within one step (next step boundary, never mid-note) every track is back on the stock position: lines on the ghost, all labels gone, all right-block cells normal, the bracket gone, the stopped lane plays again. The label of button 6 shows `[SYNC ALL]` only while some track is off the grid. Check by ear: all tracks play exactly the stock pattern. |
+| Same with a track of another group (open 9-12 first, jam, go back to 1-4, press SYNC ALL, open 9-12 again) | That track was synced too (SYNC ALL covers all 16 tracks). |
+| Shift + RESYNC pad of any row | Same as SYNC ALL (all tracks, not only that row). RESYNC without Shift: that row only. |
+| SYNC ALL while holding a pad / while Rec is held | The held pads and the open take are dropped; letting go afterwards does nothing (no stray loop, no late take). Pressing a pad again starts a new jam. |
+| SYNC ALL with the transport stopped, then Play | Every track starts on the grid (no jam left over). |
+| SYNC ALL while a Session STOP (clip launcher) holds a track | That track stays silent until a clip is launched; the snap waits for it (Session STOP wins). |
+| Jam on rows with CUT, switch to CLIPS (screen button 8) and launch clips, switch back | **M5:** the jams, reverse, rate, STOP and recorded loops of the CUT tracks kept running while CLIPS was shown (only a pad held in your hand is released and an open take closed). The lanes show them again. |
+| Leave the Session view with jams running, play the pattern editor | The jammed tracks still play their jam (stock editor does not touch them) until SYNC ALL or Stop. |
+| **Transport Stop** (panic, plan 005 M6) with jams, reverse, a recorded loop, held pads, Rec held | Everything CUT ends: nothing is left off the grid; **Stop then Play always gives the stock pattern**. Releasing the pads / Rec afterwards does nothing. Works from any view (check from the pattern editor and from CLIPS too). |
+| Stop pressed when CUT was never used | Nothing visible happens (the command is a no-op). |
+| **SYNC ALL landing on a note** (jam a long loop sample on track 1 to another position, press SYNC ALL) | The sample is struck again from the matching offset at the boundary: it does not keep playing off the grid. Same for plain RESYNC. |
+| Panic (Stop) while stopped, with jams | Lanes and the R1 strip show the tracks as normal at once (no OFF GRID, label without brackets). |
+| Display-list worst case: 128-step patterns on all four lanes, every flag set (stopped, reverse, rate, Rec) | No truncated or missing shapes (the whole frame must fit 8172 bytes: read `lastMemoryUsed` in a DEBUG build; host estimate for the lanes alone is about 3.6 KB). |
+| Main-loop gap with the 25 fps playhead (Profiler: longest main-loop pass while CUT is visible and the transport runs, long SD-streamed sample playing) | No audible stream underrun. If there is one, set `kRedrawPerStep = true` in `seqCutLogic.h` (one redraw per step instead of 25 fps) and repeat. |
 
 # Alt Performance page (8-step faders) — plans/004-perform-faders.md, reworked in plan 005 R3 (v0.2)
 

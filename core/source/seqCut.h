@@ -54,6 +54,10 @@ class Cut
     int stock(uint8_t track) const { return track < kCutTracks ? stock_[track] : 0; }
     void setStock(uint8_t track, int pos) { if (track < kCutTracks) stock_[track] = (int16_t)pos; }
     uint16_t activeMask() const { return activeMask_; }
+    // Mask for the audio hooks: driven tracks plus tracks whose hand-back retrigger is still to be played (see consumeRetrigger).
+    uint16_t hookMask() const { return (uint16_t)(activeMask_ | handMask_); }
+    // Tracks that really are off the grid: driven and not already snapped by SYNC ALL (UI, R1 strip).
+    uint16_t offGridMask() const { return (uint16_t)(activeMask_ & ~snapMask_); }
 
     // ---- main loop ----
     View view(uint8_t track) const;
@@ -62,12 +66,14 @@ class Cut
   private:
     struct Rt
     {
-        bool stopped, resync, hold, has2, jumped2, retrig;
+        bool stopped, resync, hold, has2, jumped2, retrig, snap; // snap: SYNC ALL is pending / done (cleared by any later gesture)
         uint8_t pos2, noteStep, elapsed, heldCols;
         uint16_t held;
         View view;
     };
     void activate(uint8_t t);
+    void syncAll();
+    void setSnap(uint8_t t, bool s);
     void deactivate(uint8_t t);
     void planJump(uint8_t t, int steps, uint8_t pos, StepPlan& p);
     void publish(uint8_t t);
@@ -81,6 +87,9 @@ class Cut
     volatile uint16_t activeMask_;
     volatile uint16_t holdMask_;
     volatile uint16_t stopMask_;
+    volatile uint16_t snapMask_; // SYNC ALL done / pending: the view shows the stock state
+    volatile uint16_t handMask_; // retrigger of a track that was just handed back to the stock sequencer
+    struct Hand { uint8_t noteStep, elapsed; } hand_[kCutTracks];
     int16_t stock_[kCutTracks];
     View views_[kCutTracks];
 };
