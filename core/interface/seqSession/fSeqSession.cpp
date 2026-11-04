@@ -20,6 +20,7 @@ static void functActionButton(uint8_t button, uint8_t state);
 static void functPads(uint8_t pad, uint8_t state, int16_t velo);
 static void functEncoder(int16_t value);
 static void functPlayAction();
+static void functRecButton(uint8_t state);
 
 //----------------------------------------------------------------------------------------------
 void cSeqSession::start(uint32_t options)
@@ -41,6 +42,7 @@ void cSeqSession::start(uint32_t options)
     ip->setButtonObj(interfaceButtonGame, buttonPress, functSwitchModule);
 
     ip->setButtonObj(interfaceButtonPlay, buttonPress, functPlayAction);
+    ip->setButtonObj(interfaceButtonRec, functRecButton); // forwarded to the active layer (press and release)
 
     ip->setButtonObj(interfaceButton0, functActionButton);
     ip->setButtonObj(interfaceButton1, functActionButton);
@@ -75,15 +77,7 @@ void cSeqSession::start(uint32_t options)
 void cSeqSession::stop()
 {
     moduleRefresh = 0;
-    for (int i = 0; i < 48; i++)
-    {
-        if (padHeld[i])
-        {
-            padHeld[i] = false;
-            if (!seqsession::isLayerSwitchPad(seqlogic::padCol((uint8_t)i), seqlogic::padRow((uint8_t)i)))
-                layers[layerIndex]->pad(seqlogic::padCol((uint8_t)i), seqlogic::padRow((uint8_t)i), false);
-        }
-    }
+    releaseHeldPads();
     layers[layerIndex]->leave();
     seqSessionActive(false);
     padsBacklight.clearGlobalPads(1, 1, 1);
@@ -104,9 +98,21 @@ void cSeqSession::update()
     }
 }
 
+void cSeqSession::releaseHeldPads()
+{
+    for (int i = 0; i < 48; i++)
+    {
+        if (padHeld[i])
+        {
+            padHeld[i] = false;
+            layers[layerIndex]->pad(seqlogic::padCol((uint8_t)i), seqlogic::padRow((uint8_t)i), false);
+        }
+    }
+}
+
 void cSeqSession::selectGroup(uint8_t first)
 {
-    if (first != 0 && first != 8)
+    if (first >= seqsession::kTracks)
         return;
     if (first != groupFirst)
     {
@@ -119,18 +125,10 @@ void cSeqSession::selectLayer(uint8_t index)
 {
     if (index > 1 || index == layerIndex)
         return;
-    // held pads of the old layer end here
-    for (int i = 0; i < 48; i++)
-    {
-        if (padHeld[i])
-        {
-            padHeld[i] = false;
-            if (!seqsession::isLayerSwitchPad(seqlogic::padCol((uint8_t)i), seqlogic::padRow((uint8_t)i)))
-                layers[layerIndex]->pad(seqlogic::padCol((uint8_t)i), seqlogic::padRow((uint8_t)i), false);
-        }
-    }
+    releaseHeldPads(); // held pads of the old layer end here
     layers[layerIndex]->leave();
     layerIndex = index;
+    groupFirst = seqsession::alignGroup(groupFirst, layers[layerIndex]->groupSize());
     layers[layerIndex]->enter(groupFirst);
     for (int i = 0; i < 48; i++)
         ledShown[i] = 0xFF;
@@ -144,18 +142,14 @@ void cSeqSession::padEvent(uint8_t pad, uint8_t state)
     if (state == 1)
     {
         padHeld[pad] = true;
-        if (seqsession::isLayerSwitchPad(col, row))
-            selectLayer(row); // row 0 = CLIPS, row 1 = CUT
-        else
-            layers[layerIndex]->pad(col, row, true);
+        layers[layerIndex]->pad(col, row, true);
     }
     else if (state == 0)
     {
         if (!padHeld[pad])
             return;
         padHeld[pad] = false;
-        if (!seqsession::isLayerSwitchPad(col, row))
-            layers[layerIndex]->pad(col, row, false);
+        layers[layerIndex]->pad(col, row, false);
     }
 }
 
@@ -170,9 +164,6 @@ void cSeqSession::refreshPads()
 {
     uint8_t out[48];
     layers[layerIndex]->leds(out);
-    // the layer-switch pads belong to the module
-    out[0 * 12 + 10] = layerIndex == 0 ? 15 : 4;
-    out[1 * 12 + 10] = layerIndex == 1 ? 15 : 4;
     for (int i = 0; i < 48; i++)
     {
         uint8_t level = out[i] > 15 ? 15 : out[i];
@@ -189,7 +180,8 @@ void cSeqSession::refreshScreen(bool force)
 {
     bool changed = force;
 
-    snprintf(titleText, sizeof(titleText), "Session: %s   tracks %d-%d", layers[layerIndex]->name(), groupFirst + 1, groupFirst + 8);
+    uint8_t gs = layers[layerIndex]->groupSize();
+    snprintf(titleText, sizeof(titleText), "Session: %s   tracks %d-%d", layers[layerIndex]->name(), groupFirst + 1, groupFirst + gs);
     if (strcmp(titleText, shownTitle) != 0)
     {
         strcpy(shownTitle, titleText);
@@ -198,13 +190,18 @@ void cSeqSession::refreshScreen(bool force)
         changed = true;
     }
 
-    // screen buttons: button 1 = tracks 1-8, button 2 = tracks 9-16
+    // screen buttons: group choice (1-2 for 8 tracks, 1-4 for 4 tracks), 7 = CLIPS, 8 = CUT
     for (uint8_t i = 0; i < 8; i++)
     {
-        if (i < 2)
+        if (i < seqsession::kTracks / gs)
         {
-            bool sel = groupFirst == (i == 0 ? 0 : 8);
-            snprintf(buttonText[i], sizeof(buttonText[i]), "%s%s%s", sel ? "[" : "", i == 0 ? "1-8" : "9-16", sel ? "]" : "");
+            bool sel = groupFirst == i * gs;
+            snprintf(buttonText[i], sizeof(buttonText[i]), "%s%d-%d%s", sel ? "[" : "", i * gs + 1, i * gs + gs, sel ? "]" : "");
+        }
+        else if (i == seqsession::kButtonClips || i == seqsession::kButtonCut)
+        {
+            bool sel = layerIndex == (i == seqsession::kButtonClips ? 0 : 1);
+            snprintf(buttonText[i], sizeof(buttonText[i]), "%s%s%s", sel ? "[" : "", i == seqsession::kButtonClips ? "CLIPS" : "CUT", sel ? "]" : "");
         }
         else
         {
@@ -246,10 +243,16 @@ static void functActionButton(uint8_t button, uint8_t state)
 {
     if (state == buttonPress)
     {
-        bool shift = SS->buttons->isButtonPressed(interfaceButtonShift);
-        uint8_t first = seqsession::groupFromButton(button, shift);
-        if (first != 0xFF)
-            SS->selectGroup(first);
+        if (button == seqsession::kButtonClips)
+            SS->selectLayer(0);
+        else if (button == seqsession::kButtonCut)
+            SS->selectLayer(1);
+        else
+        {
+            uint8_t first = seqsession::groupFromButton(button, SS->layers[SS->layerIndex]->groupSize());
+            if (first != 0xFF)
+                SS->selectGroup(first);
+        }
     }
 }
 
@@ -261,6 +264,11 @@ static void functPads(uint8_t pad, uint8_t state, [[maybe_unused]] int16_t velo)
 static void functEncoder(int16_t value)
 {
     SS->jog(value);
+}
+
+static void functRecButton(uint8_t state)
+{
+    SS->layers[SS->layerIndex]->rec(state == buttonPress);
 }
 
 static void functPlayAction()

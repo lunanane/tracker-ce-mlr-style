@@ -52,7 +52,7 @@ static void test_leds_and_pads()
     SCHECK(clipLevel(CS_NOTES, true) == 3 && clipLevel(CS_EMPTY, true) == 0);
     SCHECK(blinkPhase(0) != blinkPhase(150));
 
-    int clips = 0, scenes = 0, stopT = 0, stopA = 0, lc = 0, lu = 0, qu = 0, none = 0;
+    int clips = 0, scenes = 0, stopT = 0, stopA = 0, qu = 0, none = 0;
     for (uint8_t r = 0; r < 4; r++)
         for (uint8_t c = 0; c < 12; c++)
         {
@@ -62,18 +62,18 @@ static void test_leds_and_pads()
                 case PK_SCENE: scenes++; break;
                 case PK_STOP_T: stopT++; break;
                 case PK_STOP_ALL: stopA++; break;
-                case PK_LAYER_CLIPS: lc++; break;
-                case PK_LAYER_CUT: lu++; break;
                 case PK_QUANT: qu++; break;
                 default: none++; break;
             }
         }
-    SCHECK(clips == 32 && scenes == 4 && stopT == 1 && stopA == 1 && lc == 1 && lu == 1 && qu == 1 && none == 7);
+    SCHECK(clips == 32 && scenes == 4 && stopT == 1 && stopA == 1 && qu == 1 && none == 9);
     SCHECK(mapPad(9, 0).kind == PK_STOP_T && mapPad(9, 3).kind == PK_STOP_ALL && mapPad(11, 0).kind == PK_QUANT);
-    SCHECK(isLayerSwitchPad(10, 0) && isLayerSwitchPad(10, 1) && !isLayerSwitchPad(10, 2) && !isLayerSwitchPad(9, 0));
 
-    SCHECK(groupFromButton(0, false) == 0 && groupFromButton(1, false) == 8 && groupFromButton(2, false) == 0xFF);
-    SCHECK(groupFromButton(5, true) == 8);
+    SCHECK(groupFromButton(0, 8) == 0 && groupFromButton(1, 8) == 8 && groupFromButton(2, 8) == 0xFF);
+    SCHECK(groupFromButton(0, 4) == 0 && groupFromButton(1, 4) == 4 && groupFromButton(2, 4) == 8 && groupFromButton(3, 4) == 12);
+    SCHECK(groupFromButton(4, 4) == 0xFF && groupFromButton(6, 4) == 0xFF && groupFromButton(0, 0) == 0xFF);
+    SCHECK(alignGroup(12, 8) == 8 && alignGroup(4, 8) == 0 && alignGroup(8, 4) == 8 && alignGroup(0, 4) == 0);
+    SCHECK(kButtonClips == 6 && kButtonCut == 7);
 }
 
 static void test_cache()
@@ -217,6 +217,63 @@ static void test_launcher_ring_overflow()
     SCHECK(!l.postClip(16, 2) && !l.postClip(0, 0)); // bad track / pattern 0 rejected
 }
 
+static void test_save_merge_and_launched()
+{
+    Launcher l;
+    uint8_t p = 0;
+    SCHECK(l.launchedMask(5) == 0);
+    l.postClip(2, 7);
+    l.postClip(3, 5); // the loaded pattern: not "launched" (its data is the pattern's own)
+    l.drain();
+    l.onStep(2, 0, p);
+    l.onStep(3, 0, p);
+    SCHECK(l.launchedMask(5) == 0x0004);
+    SCHECK(l.launchedMask(7) == 0x0008);
+    l.postClip(15, 1);
+    l.drain();
+    l.onStep(15, 0, p);
+    SCHECK(l.launchedMask(5) == 0x8004);
+    SCHECK(saveSource(0x8004, 2, true) == SRC_FILE && saveSource(0x8004, 15, false) == SRC_CLEAR);
+    SCHECK(saveSource(0x8004, 3, true) == SRC_RAM && saveSource(0, 0, false) == SRC_RAM);
+    l.onPatternSwitched();
+    SCHECK(l.launchedMask(5) == 0);
+}
+
+static void test_cancel_and_counter()
+{
+    Launcher l;
+    uint8_t p = 0;
+    l.postClip(1, 4);
+    l.postStop(2);
+    l.drain();
+    l.postCancel(1);
+    l.postCancel(2);
+    SCHECK(!l.postCancel(16));
+    l.drain();
+    SCHECK(l.queuedKind(1) == Launcher::K_NONE && l.queuedKind(2) == Launcher::K_NONE);
+    SCHECK(l.onStep(1, 16, p) == Launcher::A_NONE);
+
+    // own counter follows the global position until the first launch, then runs on with the frozen length
+    Launcher c;
+    SCHECK(c.advance(0, 32) == 0 && c.advance(1, 32) == 1 && c.length() == 32);
+    c.postClip(0, 3);
+    c.drain();
+    SCHECK(c.advance(16, 32) == 16);
+    SCHECK(c.onStep(0, 16, p) == Launcher::A_CLIP); // frozen from here
+    // the clip on track 1 is 8 steps long: the global position now wraps at 8, the counter keeps the old length
+    uint16_t g = 17, last = 0;
+    for (int i = 0; i < 15; i++)
+    {
+        last = c.advance((uint16_t)(g % 8), 8);
+        g++;
+    }
+    SCHECK(last == 31);
+    SCHECK(c.advance(0, 8) == 0); // wrapped at the frozen length 32
+    SCHECK(c.advance(1, 8) == 1);
+    c.onPatternSwitched();
+    SCHECK(c.advance(5, 64) == 5 && c.length() == 64);
+}
+
 int sessionTests(int& checks)
 {
     test_quant();
@@ -229,6 +286,8 @@ int sessionTests(int& checks)
     test_launcher_stop();
     test_launcher_switch_and_transport();
     test_launcher_ring_overflow();
+    test_save_merge_and_launched();
+    test_cancel_and_counter();
     checks += s_checks;
     return s_fail;
 }

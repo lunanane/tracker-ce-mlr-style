@@ -813,6 +813,7 @@ int main()
     test_engine_rec_loop_and_stop();
     test_sidecar_roundtrip_and_corruption();
     test_state_change_detection();
+    g_fail += sessionTests(g_checks);
     printf("%d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

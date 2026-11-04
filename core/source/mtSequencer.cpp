@@ -3751,7 +3751,10 @@ bool Sequencer::copyCurrentPatternToBuff(uint8_t* destBuff)
 {
     uint8_t* srcPattern = (uint8_t*)currentPattern;
 
-    memcpy(destBuff, srcPattern, sizeof(Sequencer::strPattern));
+    if (seqSessionHasLaunched())
+        seqSessionMergeForSave(destBuff); // Session clips: those tracks are written from the pattern file
+    else
+        memcpy(destBuff, srcPattern, sizeof(Sequencer::strPattern));
 
     sequencer.setPatternHeader((Sequencer::strPattern*)destBuff);
 

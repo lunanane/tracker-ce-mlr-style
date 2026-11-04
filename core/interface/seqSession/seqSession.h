@@ -26,6 +26,7 @@ class cSeqSession : public ModuleBase
     void setCutLayer(seqsession::SessionLayer* layer) { layers[1] = layer; }
 
     void selectGroup(uint8_t first);
+    void releaseHeldPads();
     void selectLayer(uint8_t index);
     void padEvent(uint8_t pad, uint8_t state);
     void jog(int16_t value);

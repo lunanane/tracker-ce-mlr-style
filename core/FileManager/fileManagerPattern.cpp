@@ -4,6 +4,7 @@
 
 #include "fileManager.h"
 #include "fileManagerDefs.h"
+#include "seqLauncher.h"
 #include "fileTransfer.h"
 #include "patternFileValidation.h"
 
@@ -237,9 +238,18 @@ bool cFileManager::saveWorkspacePatternNow(uint8_t index)
 
     if (changesFlags.pattern[index] == 1)
     {
+        // sequencer tracks mod: tracks of launched Session clips are written from the pattern file, not from RAM
+        Sequencer::strPattern* patternToWrite = sequencer.getPatternToSaveToFile();
+        if (index == mtProject.values.actualPattern && seqSessionHasLaunched())
+        {
+            if (!isIdleForScratch())
+                return false; // the scratch buffer is in use: the changed flag stays, a later save does it
+            seqSessionMergeForSave(&fileManagerPatternBuffer);
+            patternToWrite = &fileManagerPatternBuffer;
+        }
         changesFlags.pattern[index] = 0;
         snprintf(patternToSave, PATCH_SIZE, cWorkspacePatternFileFormat, index);
-        status = writePatternFile(patternToSave, sequencer.getPatternToSaveToFile());
+        status = writePatternFile(patternToSave, patternToWrite);
         sequencer.saveToFileDone();
 
         mtProject.values.projectNotSavedFlag |= 1;
@@ -628,18 +638,49 @@ bool cFileManager::loadPerformanceTrackToBuffer(uint8_t pattIndex, uint8_t track
     return true;
 }
 
-/// sequencer tracks mod (Session view): reads a workspace pattern into the pattern buffer and reports which tracks hold notes
-bool cFileManager::getPatternTracksWithNotes(uint8_t pattIndex, uint16_t& mask)
+/// sequencer tracks mod (Session view): a clip is one track of a workspace pattern. The file is read into the file manager scratch
+/// buffer (not into the next-pattern buffer); the track lands in the performance buffer for the stock track switch.
+bool cFileManager::loadClipTrackToBuffer(uint8_t pattIndex, uint8_t trackIndex)
+{
+    assert(trackIndex < kPerformanceTracks);
+    if (!isIdleForScratch())
+        return false;
+
+    char patternToLoad[PATCH_SIZE]{ 0 };
+    snprintf(patternToLoad, PATCH_SIZE, cWorkspacePatternFileFormat, pattIndex);
+
+    Sequencer::strPattern* patternFrom = &fileManagerPatternBuffer;
+    Sequencer::strPattern* patternTo = &fileManagerPerformancePatternBuffer;
+
+    if (fileSystem->exists(patternToLoad))
+    {
+        if (!readPatternFile(patternToLoad, patternFrom))
+            return false;
+    }
+    else
+    {
+        sequencer.clearPattern(patternFrom);
+    }
+
+    patternTo->track[trackIndex] = patternFrom->track[trackIndex];
+    patternTo->track[trackIndex].length = patternFrom->track[0].length;
+    return true;
+}
+
+/// sequencer tracks mod (Session view): which tracks of a workspace pattern hold content (a note or an fx)
+int cFileManager::getPatternTracksWithNotes(uint8_t pattIndex, uint16_t& mask)
 {
     mask = 0;
+    if (!isIdleForScratch())
+        return -1;
     char patternToLoad[PATCH_SIZE]{ 0 };
     snprintf(patternToLoad, PATCH_SIZE, cWorkspacePatternFileFormat, pattIndex);
     if (!fileSystem->exists(patternToLoad))
-        return false;
+        return 0;
 
-    Sequencer::strPattern* pattern = sequencer.getPatternToLoadFromFile();
+    Sequencer::strPattern* pattern = &fileManagerPatternBuffer;
     if (!readPatternFile(patternToLoad, pattern))
-        return false;
+        return 0;
 
     uint8_t len = pattern->track[0].length;
     if (len > Sequencer::MAXSTEP)
@@ -648,14 +689,33 @@ bool cFileManager::getPatternTracksWithNotes(uint8_t pattIndex, uint16_t& mask)
     {
         for (uint8_t s = 0; s <= len; s++)
         {
-            if (pattern->track[t].step[s].note >= Sequencer::STEP_NOTE_MIN)
+            const Sequencer::strPattern::strTrack::strStep& st = pattern->track[t].step[s];
+            if (st.note >= Sequencer::STEP_NOTE_MIN || st.fx[0].type != 0 || st.fx[1].type != 0)
             {
                 mask = (uint16_t)(mask | (1u << t));
                 break;
             }
         }
     }
-    return true;
+    return 1;
+}
+
+/// sequencer tracks mod (Session view): the workspace file of a pattern into the caller buffer (cleared when missing)
+int cFileManager::readWorkspacePatternTo(uint8_t pattIndex, Sequencer::strPattern* dest)
+{
+    char patternToLoad[PATCH_SIZE]{ 0 };
+    snprintf(patternToLoad, PATCH_SIZE, cWorkspacePatternFileFormat, pattIndex);
+    if (!fileSystem->exists(patternToLoad))
+    {
+        sequencer.clearPattern(dest);
+        return 0;
+    }
+    if (!readPatternFile(patternToLoad, dest))
+    {
+        sequencer.clearPattern(dest);
+        return -1;
+    }
+    return 1;
 }
 
 uint8_t cFileManager::getCurrentPatternIndex()

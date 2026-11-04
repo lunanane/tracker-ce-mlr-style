@@ -78,7 +78,7 @@ inline uint8_t clipLevel(ClipState s, bool blinkOn)
 inline bool blinkPhase(uint32_t ms) { return ((ms / 150u) & 1u) == 0; } // ~3.3 Hz
 
 // ---- pad map (0-based col 0..11, row 0..3; pad index = row * 12 + col) ---------------------------
-enum PadKind : uint8_t { PK_NONE = 0, PK_CLIP, PK_SCENE, PK_STOP_T, PK_STOP_ALL, PK_LAYER_CLIPS, PK_LAYER_CUT, PK_QUANT };
+enum PadKind : uint8_t { PK_NONE = 0, PK_CLIP, PK_SCENE, PK_STOP_T, PK_STOP_ALL, PK_QUANT };
 
 struct PadAction
 {
@@ -93,22 +93,28 @@ inline PadAction mapPad(uint8_t col, uint8_t row)
     else if (col == 8) a.kind = PK_SCENE;
     else if (col == 9 && row == 0) a.kind = PK_STOP_T;
     else if (col == 9 && row == 3) a.kind = PK_STOP_ALL;
-    else if (col == 10 && row == 0) a.kind = PK_LAYER_CLIPS;
-    else if (col == 10 && row == 1) a.kind = PK_LAYER_CUT;
     else if (col == 11 && row == 0) a.kind = PK_QUANT;
     return a;
 }
-// The two layer-switch pads belong to the Session module in every layer.
-inline bool isLayerSwitchPad(uint8_t col, uint8_t row) { return col == 10 && row < 2; }
-
-// Group of 8 tracks from the screen buttons (0..7): button 1 = tracks 1-8, button 2 = tracks 9-16.
-// Shift + any button = tracks 9-16. Returns the first track, or 0xFF when the button does nothing.
-inline uint8_t groupFromButton(uint8_t button, bool shift)
+// Screen buttons of the Session view (0-based): 0..3 choose the group, 6 = CLIPS layer, 7 = CUT layer.
+// A layer shows groupSize tracks: 8 -> buttons 0, 1 = tracks 1-8, 9-16; 4 -> buttons 0..3 = 1-4, 5-8, 9-12, 13-16.
+// Returns the first track of the group, or 0xFF when the button does not choose a group.
+inline uint8_t groupFromButton(uint8_t button, uint8_t groupSize)
 {
-    if (shift) return 8;
-    if (button == 0) return 0;
-    if (button == 1) return 8;
-    return 0xFF;
+    if (groupSize == 0 || button >= kTracks / groupSize) return 0xFF;
+    return (uint8_t)(button * groupSize);
+}
+// Keep a group valid after the group size changed (CLIPS 8 <-> CUT 4).
+inline uint8_t alignGroup(uint8_t first, uint8_t groupSize) { return (uint8_t)(first - first % groupSize); }
+enum { kButtonClips = 6, kButtonCut = 7 };
+
+// ---- merge for saving the pattern (launched clips never reach the pattern file) ------------------------------
+// Tracks whose RAM data comes from a launched clip are written from the pattern FILE (cleared when there is no file).
+enum SaveSource : uint8_t { SRC_RAM = 0, SRC_FILE = 1, SRC_CLEAR = 2 };
+inline SaveSource saveSource(uint16_t launchedMask, uint8_t track, bool fileExists)
+{
+    if (!((launchedMask >> track) & 1u)) return SRC_RAM;
+    return fileExists ? SRC_FILE : SRC_CLEAR;
 }
 
 // ---- "has notes" cache of the window: one 16-bit track mask per pattern row -----------------------
@@ -160,6 +166,9 @@ class Launcher
         }
         stopped_ = 0;
         loading_ = 0;
+        frozen_ = false;
+        pos_ = 0;
+        len_ = 1;
         head_ = 0;
         tail_ = 0;
         quant_ = Q_BAR;
@@ -174,6 +183,7 @@ class Launcher
     bool postClip(uint8_t t, uint8_t pattern) { return t < kTracks && pattern >= 1 && push(CMD_CLIP, t, pattern); }
     bool postStop(uint8_t t) { return t < kTracks && push(CMD_STOP, t, 0); }
     bool postStopAll() { return push(CMD_STOPALL, 0, 0); }
+    bool postCancel(uint8_t t) { return t < kTracks && push(CMD_CANCEL, t, 0); } // drop a queued clip / stop of the track
 
     // 0 = the pattern's own track (never launched since the last pattern switch)
     uint8_t current(uint8_t t) const { return cur_[t]; }
@@ -189,6 +199,33 @@ class Launcher
         if (kind_[t] == K_STOP) return isPlaying(t, p, own);
         return false;
     }
+    // Tracks whose pattern data in RAM comes from a launched clip of another pattern (own = loaded pattern).
+    uint16_t launchedMask(uint8_t own) const
+    {
+        uint16_t m = 0;
+        for (int i = 0; i < kTracks; i++)
+            if (cur_[i] != 0 && cur_[i] != own) m = (uint16_t)(m | (1u << i));
+        return m;
+    }
+    // Own step counter for the quantise points: the global position wraps at the length of track 1's clip once a clip
+    // was launched, so after the first launch the counter runs on its own with the length frozen (the last bar may be short).
+    // Call once per step from the hook of track 0 (before the other tracks).
+    uint16_t advance(uint16_t globalPos, uint16_t patternLen)
+    {
+        if (!frozen_)
+        {
+            pos_ = globalPos;
+            len_ = patternLen ? patternLen : 1;
+        }
+        else
+        {
+            pos_ = (uint16_t)(pos_ + 1);
+            if (pos_ >= len_) pos_ = 0;
+        }
+        return pos_;
+    }
+    uint16_t position() const { return pos_; }
+    uint16_t length() const { return len_; }
     bool anyQueued() const
     {
         for (int i = 0; i < kTracks; i++)
@@ -201,12 +238,18 @@ class Launcher
     {
         while (tail_ != head_)
         {
+            __asm__ __volatile__("" ::: "memory");
             const Cmd c = ring_[tail_];
             tail_ = (uint8_t)((tail_ + 1) % kRing);
             if (c.kind == CMD_CLIP)
             {
                 kind_[c.track] = K_CLIP;
                 pat_[c.track] = c.pattern;
+            }
+            else if (c.kind == CMD_CANCEL)
+            {
+                kind_[c.track] = K_NONE;
+                pat_[c.track] = 0;
             }
             else if (c.kind == CMD_STOP)
             {
@@ -225,11 +268,11 @@ class Launcher
     }
     // One call per track at its step boundary. A_CLIP: copy the loaded clip into the pattern (pattern = source),
     // A_STOP: silence the track.
-    Action onStep(uint8_t t, uint16_t globalPos, uint8_t& pattern)
+    Action onStep(uint8_t t, uint16_t pos, uint8_t& pattern)
     {
         if (kind_[t] == K_NONE) return A_NONE;
         if (kind_[t] == K_CLIP && ((loading_ >> t) & 1u)) return A_NONE;
-        if (!quantHit(quant_, globalPos)) return A_NONE;
+        if (!quantHit(quant_, pos)) return A_NONE;
         return apply(t, pattern);
     }
     // Transport not running: a pending launch applies at once (no quantise).
@@ -249,18 +292,20 @@ class Launcher
             kind_[i] = K_NONE;
         }
         stopped_ = 0;
+        frozen_ = false;
     }
     // Transport stop: stopped tracks play again, queued stops are dropped.
     void onTransportStop()
     {
         stopped_ = 0;
+        frozen_ = false;
         for (int i = 0; i < kTracks; i++)
             if (kind_[i] == K_STOP) kind_[i] = K_NONE;
     }
 
   private:
     enum { kRing = 32 };
-    enum CmdKind : uint8_t { CMD_CLIP = 1, CMD_STOP = 2, CMD_STOPALL = 3 };
+    enum CmdKind : uint8_t { CMD_CLIP = 1, CMD_STOP = 2, CMD_STOPALL = 3, CMD_CANCEL = 4 };
     struct Cmd
     {
         uint8_t kind, track, pattern;
@@ -272,6 +317,7 @@ class Launcher
         ring_[head_].kind = kind;
         ring_[head_].track = t;
         ring_[head_].pattern = p;
+        __asm__ __volatile__("" ::: "memory"); // the entry must be written before the audio side sees the new head
         head_ = next;
         return true;
     }
@@ -283,6 +329,7 @@ class Launcher
             cur_[t] = pat_[t];
             pattern = pat_[t];
             stopped_ = (uint16_t)(stopped_ & ~(1u << t));
+            frozen_ = true; // from now on the pattern length may change under us
             a = A_CLIP;
         }
         else
@@ -301,6 +348,8 @@ class Launcher
     volatile uint16_t stopped_;
     volatile uint16_t loading_;
     volatile Quant quant_;
+    volatile bool frozen_;
+    volatile uint16_t pos_, len_;
     Cmd ring_[kRing];
     volatile uint8_t head_, tail_;
 };

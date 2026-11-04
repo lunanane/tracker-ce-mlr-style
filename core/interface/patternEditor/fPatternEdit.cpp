@@ -19,6 +19,7 @@
 #include "TrackerImpl.h"
 #include "log.h"
 #include "seqTracks.h"
+#include "seqLauncher.h"
 
 #include <cr_section_macros.h>
 
@@ -1223,7 +1224,7 @@ void cPatternEditor::changeActualPattern(int16_t value)
     sequencer.sequencialSwitch_Reset();
     sequencer.setOnGlobalStep(nullCallback);
 
-    if (value && sequencer.getSeqState() != sequencer.SEQ_STATE_PLAY_PERFORMANCE)
+    if (value && (sequencer.getSeqState() != sequencer.SEQ_STATE_PLAY_PERFORMANCE || seqSessionOwnsPerformance()))
     {
         newFileManager.saveWorkspacePatternNow(mtProject.values.actualPattern);
     }
@@ -1250,7 +1251,7 @@ void cPatternEditor::changeActualPattern(int16_t value)
 
 void cPatternEditor::setActualPattern(int16_t value)
 {
-    if (sequencer.getSeqState() != sequencer.SEQ_STATE_PLAY_PERFORMANCE)
+    if (sequencer.getSeqState() != sequencer.SEQ_STATE_PLAY_PERFORMANCE || seqSessionOwnsPerformance())
     {
         newFileManager.saveWorkspacePatternNow(mtProject.values.actualPattern);
     }

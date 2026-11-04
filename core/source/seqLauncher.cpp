@@ -3,37 +3,49 @@
 #include "mtSequencer.h"
 #include "mtStructs.h"
 #include "fileManager.h"
+#include "interruptsControl.h"
 #include "patternEditor/patternEditor.h"
+#include <stddef.h>
+#include <string.h>
 
 extern Sequencer sequencer;
 extern strMtProject mtProject;
+extern Sequencer::strPattern fileManagerPatternBuffer;
 
 seqsession::Launcher seqLauncher;
 
 namespace
 {
 seqsession::NoteCache s_cache;
-bool s_active = false;          // Session view is on screen: the cache is kept up to date
-volatile bool s_used = false;   // a clip was applied since the last pattern switch (we switched performance mode on)
+bool s_active = false;   // Session view is on screen: the cache is kept up to date
+bool s_ownsPerf = false; // Session switched performance mode on (only then it switches it off again)
 bool s_wasPlay = false;
 
-// The pattern buffer (Sequencer::bufferPattern) is also the target of the next-pattern load: never touch it while a
-// pattern switch is queued or loading.
-bool bufferBusy()
+// Main-loop code that touches the audio-side state of the launcher stops the audio callback for a moment.
+// (IPSR != 0 means we already run in an interrupt, i.e. the audio callback itself.)
+bool inInterrupt()
 {
-    return newFileManager.isPatternLoading() || sequencer.sequencialSwitch_GetNext() > 0 ||
-           (sequencer.isSongMode() && sequencer.isLastPatternStep());
+#if defined(__arm__)
+    uint32_t ipsr;
+    __asm__ volatile("mrs %0, ipsr" : "=r"(ipsr));
+    return ipsr != 0;
+#else
+    return false;
+#endif
 }
 
-bool ramTrackHasNotes(uint8_t t)
+bool ramTrackHasContent(uint8_t t)
 {
     Sequencer::strPattern* p = sequencer.getActualPattern();
     uint8_t len = p->track[0].length;
     if (len > Sequencer::MAXSTEP)
         len = Sequencer::MAXSTEP;
     for (uint8_t s = 0; s <= len; s++)
-        if (p->track[t].step[s].note >= Sequencer::STEP_NOTE_MIN)
+    {
+        const Sequencer::strPattern::strTrack::strStep& st = p->track[t].step[s];
+        if (st.note >= Sequencer::STEP_NOTE_MIN || st.fx[0].type != 0 || st.fx[1].type != 0)
             return true;
+    }
     return false;
 }
 
@@ -46,10 +58,35 @@ void flushNow()
         uint8_t p = 0;
         seqsession::Launcher::Action a = seqLauncher.flush(t, p);
         if (a == seqsession::Launcher::A_CLIP)
-            sequencer.seqSessionApplyClip(t, false);
+            sequencer.seqSessionApplyClip(t, true);
         else if (a == seqsession::Launcher::A_STOP)
             sequencer.seqSessionApplyStop(t);
     }
+}
+
+// Somebody else switched performance mode off while launched clips are mixed into the pattern: put the original tracks
+// back from the pattern file (like the stock turn-off, which reloads the pattern).
+void restoreLaunched()
+{
+    if (!newFileManager.isIdleForScratch())
+        return; // try again on a later pass
+    uint8_t own = seqSessionOwnPattern();
+    uint16_t mask = seqLauncher.launchedMask(own);
+    int r = newFileManager.readWorkspacePatternTo(own, &fileManagerPatternBuffer);
+    Sequencer::strPattern* cur = sequencer.getActualPattern();
+    DISABLE_AUDIO_INTERRUPTS();
+    for (uint8_t t = 0; t < seqsession::kTracks; t++)
+    {
+        if (!((mask >> t) & 1u))
+            continue;
+        if (r == 1)
+            cur->track[t] = fileManagerPatternBuffer.track[t];
+        else
+            sequencer.clearSingleTrack(&cur->track[t]);
+    }
+    seqLauncher.onPatternSwitched();
+    ENABLE_AUDIO_INTERRUPTS();
+    s_ownsPerf = false;
 }
 
 void scanOneRow()
@@ -58,7 +95,7 @@ void scanOneRow()
     if (row < 0 || s_cache.first == 0)
         return;
     uint8_t pattern = (uint8_t)(s_cache.first + row);
-    uint8_t own = (uint8_t)mtProject.values.actualPattern;
+    uint8_t own = seqSessionOwnPattern();
 
     bool allRam = false;
     if (pattern == own)
@@ -68,19 +105,17 @@ void scanOneRow()
             if (seqLauncher.current(t) != 0 && seqLauncher.current(t) != pattern)
                 allRam = false;
     }
-    if (!allRam && bufferBusy())
-        return; // try again on a later pass
 
     uint16_t mask = 0;
-    if (!allRam)
-        newFileManager.getPatternTracksWithNotes(pattern, mask);
+    if (!allRam && newFileManager.getPatternTracksWithNotes(pattern, mask) < 0)
+        return; // a file operation runs: try again on a later pass
     if (pattern == own)
     {
         for (uint8_t t = 0; t < seqsession::kTracks; t++)
         {
             if (seqLauncher.current(t) == 0 || seqLauncher.current(t) == pattern)
             {
-                if (ramTrackHasNotes(t))
+                if (ramTrackHasContent(t))
                     mask = (uint16_t)(mask | (1u << t));
                 else
                     mask = (uint16_t)(mask & ~(1u << t));
@@ -91,14 +126,58 @@ void scanOneRow()
 }
 } // namespace
 
+// ---------------------------------------------------------------- saving (file manager, main loop)
+bool seqSessionHasLaunched()
+{
+    return seqLauncher.launchedMask(seqSessionOwnPattern()) != 0;
+}
+
+// dest := the pattern to write: header and the tracks of the loaded pattern from RAM, the tracks that came from launched
+// clips from the pattern FILE (cleared when there is none), so a launched clip never ends up in the user's pattern file.
+void seqSessionMergeForSave(void* destPtr)
+{
+    Sequencer::strPattern* dest = (Sequencer::strPattern*)destPtr;
+    Sequencer::strPattern* cur = sequencer.getActualPattern();
+    uint8_t own = seqSessionOwnPattern();
+    uint16_t mask = seqLauncher.launchedMask(own);
+
+    bool fromFile = newFileManager.readWorkspacePatternTo(own, dest) == 1; // dest = file (or cleared)
+    if (fromFile)
+    {
+        memcpy(dest, cur, offsetof(Sequencer::strPattern, track));
+        for (uint8_t t = 0; t < seqsession::kTracks; t++)
+            if (seqsession::saveSource(mask, t, true) == seqsession::SRC_RAM)
+                dest->track[t] = cur->track[t];
+    }
+    else
+    {
+        memcpy(dest, cur, sizeof(Sequencer::strPattern));
+        for (uint8_t t = 0; t < seqsession::kTracks; t++)
+        {
+            if (seqsession::saveSource(mask, t, false) == seqsession::SRC_CLEAR)
+            {
+                dest->track[t].length = cur->track[0].length;
+                sequencer.clearSingleTrack(&dest->track[t]);
+            }
+        }
+    }
+}
+
+bool seqSessionOwnsPerformance()
+{
+    return s_ownsPerf;
+}
+
 // ---------------------------------------------------------------- Sequencer members (audio context)
 void Sequencer::seqSessionStep(uint8_t row)
 {
     if (row >= seqsession::kTracks)
         return;
+    if (row == 0)
+        seqLauncher.advance((uint16_t)player.globalPos, (uint16_t)(currentPattern->track[0].length + 1));
     seqLauncher.drain();
     uint8_t pattern = 0;
-    switch (seqLauncher.onStep(row, (uint16_t)player.globalPos, pattern))
+    switch (seqLauncher.onStep(row, seqLauncher.position(), pattern))
     {
         case seqsession::Launcher::A_CLIP: seqSessionApplyClip(row, seqLauncher.quant() != seqsession::Q_NOW); break;
         case seqsession::Launcher::A_STOP: seqSessionApplyStop(row); break;
@@ -107,17 +186,22 @@ void Sequencer::seqSessionStep(uint8_t row)
 }
 
 // The clip that was read into the performance buffer replaces this track of the playing pattern.
+// restart (bar / pattern end): the clip starts at its first step, which is on the bar. Immediate: it joins in phase with
+// the pattern position (the position is the new step the track is entering).
 void Sequencer::seqSessionApplyClip(uint8_t track, bool restart)
 {
+    seqTakeoverBegin(track);          // the old clip's sounding note ends (sample and MIDI tracks)
     switchPerformanceTrackNow(track); // copies the track, takes its length, realigns when the playhead is beyond it
     player.track[track].performanceSourcePattern = -1;
     cancelFxes(track);
-    if (restart && player.track[track].performancePlayMode == PLAYMODE_FORWARD)
+    if (player.track[track].performancePlayMode == PLAYMODE_FORWARD)
     {
-        player.track[track].actual_pos = MINSTEP; // a clip starts at its first step
-        player.track[track].actual_pos_absolute = 0;
+        uint16_t ph = 0;
+        if (!restart)
+            ph = (uint16_t)(seqLauncher.position() % (uint16_t)(player.performance.trackLength[track] + 1));
+        player.track[track].actual_pos = (int16_t)(MINSTEP + ph);
+        player.track[track].actual_pos_absolute = ph;
     }
-    s_used = true;
 }
 
 void Sequencer::seqSessionApplyStop(uint8_t track)
@@ -126,20 +210,33 @@ void Sequencer::seqSessionApplyStop(uint8_t track)
 }
 
 // The whole pattern changed (scene, song, Pattern page): clips are over, every track follows the pattern again.
+// Called from the audio callback (pattern end) and from the main loop (Pattern page switch): the main loop part runs with
+// the audio callback stopped.
 void Sequencer::seqSessionPatternSwitched()
 {
+    bool irq = inInterrupt();
+    if (!irq)
+        DISABLE_AUDIO_INTERRUPTS();
     seqLauncher.onPatternSwitched();
-    if (s_used)
+    if (s_ownsPerf)
     {
-        s_used = false;
+        s_ownsPerf = false;
         exitPerformanceMode(); // performance mode only carried the per-track clip lengths
     }
+    if (!irq)
+        ENABLE_AUDIO_INTERRUPTS();
 }
 
+// The per-track lengths are filled before the flag is set, so the audio side never sees the flag with stale lengths.
 void Sequencer::seqSessionEnterPerformance()
 {
-    if (!player.performanceMode)
-        enterPerformanceMode();
+    if (player.performanceMode)
+        return; // somebody else (Performance screen) has it on: it stays theirs
+    for (uint8_t a = 0; a < kAllTracks; a++)
+        player.performance.trackLength[a] = getActualPattern()->track[0].length;
+    __asm__ __volatile__("" ::: "memory");
+    player.performanceMode = 1;
+    s_ownsPerf = true;
 }
 
 // ---------------------------------------------------------------- main loop
@@ -148,14 +245,21 @@ bool seqSessionLaunchClip(uint8_t track, uint8_t pattern)
     if (track >= seqsession::kTracks || pattern < 1)
         return false;
     if (seqLauncher.current(track) == 0 && pattern == seqSessionOwnPattern() && !seqLauncher.stopped(track))
-        return true; // the track already plays its own pattern
-    if (bufferBusy())
+    {
+        // the track already plays its own pattern: the newest tap wins, so a queued clip / stop is dropped
+        bool ok = seqLauncher.postCancel(track);
+        if (ok && !sequencer.isPlay())
+            flushNow();
+        return ok;
+    }
+    if (!newFileManager.isIdleForScratch())
         return false;
 
     sequencer.seqSessionEnterPerformance();
     seqLauncher.beginLoad(track);
-    newFileManager.loadPerformanceTrackToBuffer(pattern, track);
-    bool ok = seqLauncher.postClip(track, pattern);
+    bool ok = newFileManager.loadClipTrackToBuffer(pattern, track);
+    if (ok)
+        ok = seqLauncher.postClip(track, pattern);
     seqLauncher.endLoad(track);
     if (ok && !sequencer.isPlay())
         flushNow();
@@ -204,12 +308,12 @@ bool seqSessionLaunchScene(uint8_t pattern)
         if (base == 0)
             base = (uint16_t)mtProject.values.actualPattern;
         int delta = (int)pattern - (int)base;
-        while (delta != 0)
+        do // at least once, also for delta 0: it is what sets the next pattern (the own pattern = all tracks back)
         {
             int step = delta > 100 ? 100 : (delta < -100 ? -100 : delta); // the stock call takes an int8_t
             sequencer.sequencialSwitch_changeNextPattern((int8_t)step);
             delta -= step;
-        }
+        } while (delta != 0);
         sequencer.sequencialSwitch_SetReady();
         return true;
     }
@@ -252,12 +356,16 @@ void seqSessionUpdate()
             {
                 uint8_t p = 0;
                 if (seqLauncher.flush(t, p) == seqsession::Launcher::A_CLIP)
-                    sequencer.seqSessionApplyClip(t, false);
+                    sequencer.seqSessionApplyClip(t, true);
             }
         }
         seqLauncher.onTransportStop();
     }
     s_wasPlay = play;
+
+    // performance mode went off (Performance screen / fader page) while launched clips are mixed into the pattern
+    if (!sequencer.isPerformanceMode() && seqSessionHasLaunched())
+        restoreLaunched();
 
     if (s_active)
         scanOneRow();

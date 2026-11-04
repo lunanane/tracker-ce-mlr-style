@@ -27,3 +27,8 @@ const seqsession::NoteCache& seqSessionCache();
 void seqSessionActive(bool on);
 
 void seqSessionUpdate(); // once per main loop pass (Tracker::update)
+
+// ---- saving: launched clips never reach the user's pattern file ----
+bool seqSessionHasLaunched();                // some track of the loaded pattern holds a launched clip (RAM != file)
+void seqSessionMergeForSave(void* destPattern); // fills a strPattern with RAM + the launched tracks read from the pattern file
+bool seqSessionOwnsPerformance();            // Session switched performance mode on (the pattern may then be saved normally)
