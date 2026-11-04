@@ -86,9 +86,9 @@ From the repository root:
 make all
 
 # Or build a single target:
-make original   # -> build/PolyendTracker_CE_1.0.0.ptf
-make plus       # -> build/TrackerPlus_CE_1.0.0.ptf
-make mini       # -> build/TrackerMini_CE_1.0.0.ptf
+make original   # -> build/PolyendTracker_SEQ_0.1.ptf
+make plus       # -> build/TrackerPlus_SEQ_0.1.ptf
+make mini       # -> build/TrackerMini_SEQ_0.1.ptf
 
 # Build reference .ptfx Sample Editor effects into editor-fx-sdk/build/Effects/:
 make ptfx
