@@ -9,6 +9,7 @@
 #include "mtPadsBacklight.h"
 #include "mtSequencer.h"
 #include "seqLauncher.h"
+#include "seqRecLogic.h"
 #include "seqTracks.h"
 
 cSeqSession seqSession;
@@ -349,7 +350,11 @@ static void functEncoder(int16_t value)
 
 static void functRecButton(uint8_t state)
 {
-    SS->layers[SS->layerIndex]->rec(state == buttonPress);
+    // the keys driver sends press, hold (while down, every 333 ms and faster) and release: a hold is not a release (v0.2.4 closed an
+    // MLR take on the first hold event). The layer gets the press and the release; Rec is a toggle on the press (plan 008 A).
+    const int8_t e = seqrecui::layerEvent(state);
+    if (e >= 0)
+        SS->layers[SS->layerIndex]->rec(e != 0);
 }
 
 static void functPlayAction()

@@ -14,7 +14,7 @@ test: build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tes
 	build/seq_play_tests$(EXE)
 	build/seq_fx_tests$(EXE)
 
-build/seq_glue_tests$(EXE): test_main.cpp test_session.cpp test_cut.inc ../source/seqSessionLogic.h ../source/seqClipsLogic.h ../source/seqCut.h ../source/seqCutLogic.h ../interface/seqSession/cutLayer.h ../interface/seqSession/cutSessionLayer.h ../interface/seqSession/laneDraw.h ../interface/seqSession/laneView.h ../source/seqTracksCore.h ../source/seqTracksLogic.h ../source/seqTracksRec.h $(GLUE) $(SEQ)
+build/seq_glue_tests$(EXE): test_main.cpp test_session.cpp test_cut.inc ../source/seqSessionLogic.h ../source/seqClipsLogic.h ../source/seqCut.h ../source/seqCutLogic.h ../interface/seqSession/cutLayer.h ../interface/seqSession/cutSessionLayer.h ../interface/seqSession/laneDraw.h ../interface/seqSession/laneView.h ../source/seqTracksCore.h ../source/seqTracksLogic.h ../source/seqTracksRec.h ../source/seqRecLogic.h test_rec.inc $(GLUE) $(SEQ)
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) test_main.cpp test_session.cpp $(GLUE) $(SEQ) -o $@
 

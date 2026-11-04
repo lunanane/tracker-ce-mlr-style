@@ -1,8 +1,8 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 // CUT (MLR) page as a Session layer: adapts the free functions of cutLayer.h to seqsession::SessionLayer
 // and owns the lane screen (laneView.*, plan 005 R4). Group of 4 tracks (screen buttons 1-4 = tracks 1-4 / 5-8 / 9-12 / 13-16,
-// Left / Right page the groups), all 12 pad columns belong to the layer. Screen button 6 = SYNC ALL (the layer's own button
-// kButtonLayer); 7 is an empty gap and 8 switches back to CLIPS (the host's, this layer returns false for them). The layer draws its own screen: the host hides its title and info lines.
+// Left / Right page the groups), all 12 pad columns belong to the layer. Screen button 5 = jump quantise (Q off / step / beat / bar), 6 = SYNC ALL (the layer's own button
+// kButtonLayer); 7 shows [REC] while a take is armed (otherwise an empty gap) and 8 switches back to CLIPS (the host's, this layer returns false for it). The layer draws its own screen: the host hides its title and info lines.
 #pragma once
 #include "cutLayer.h"
 #include "laneView.h"
@@ -39,13 +39,17 @@ class CutSessionLayer : public SessionLayer
     }
     void pad(uint8_t col, uint8_t row, bool down) override { cutPad(col, row, down, down && cutShiftHeld()); } // Shift + RESYNC = SYNC ALL
     void leds(uint8_t out[48]) override { cutLeds(out); }
-    void rec(bool down) override { cutRec(down); }
+    void rec(bool down) override
+    {
+        if (down)
+            cutRecToggle(); // Rec is a toggle: the press arms / closes the takes; the release (and the hold events the host drops) mean nothing
+    }
     void info(char lines[4][48]) override
     {
         snprintf(lines[0], 48, "Rows = tracks %d-%d", first_ + 1, first_ + 4);
         snprintf(lines[1], 48, "Pads 1-8: jump, two held: loop");
         snprintf(lines[2], 48, "9 STOP  10 REV  11 RATE  12 SYNC");
-        snprintf(lines[3], 48, "Hold Rec while jamming = record a loop");
+        snprintf(lines[3], 48, "Rec on, jam, Rec off = record a loop");
     }
 
     // ---- own screen ----
@@ -55,6 +59,12 @@ class CutSessionLayer : public SessionLayer
     bool drawsOwnScreen() const override { return true; }
     bool button(uint8_t i, bool down) override
     {
+        if (i == seqcut::kScreenButtonQuant)
+        {
+            if (down)
+                cutQuantCycle(); // jump quantise: off -> step -> beat -> bar
+            return true;
+        }
         if (i != seqcut::kScreenButtonSyncAll)
             return false;
         if (down)
@@ -63,6 +73,16 @@ class CutSessionLayer : public SessionLayer
     }
     bool buttonLabel(uint8_t i, char out[12]) override
     {
+        if (i == seqcut::kScreenButtonQuant)
+        {
+            snprintf(out, 12, "Q %s", seqcut::quantName(cutQuantMode())); // the value is the label
+            return true;
+        }
+        if (i == seqcut::kScreenButtonRec)
+        {
+            snprintf(out, 12, "%s", cutRecHeld() ? "[REC]" : ""); // a take is armed: the first pad of a row starts its take
+            return true;
+        }
         if (i != seqcut::kScreenButtonSyncAll)
             return false;
         snprintf(out, 12, "%s", laneViewAnyOffGrid() ? "[SYNC ALL]" : "SYNC ALL"); // brackets: some track is off the grid

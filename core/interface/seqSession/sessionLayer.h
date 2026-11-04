@@ -21,7 +21,7 @@ struct SessionLayer
     virtual void pad(uint8_t col, uint8_t row, bool down) = 0;  // all 48 pads
     virtual void leds(uint8_t out[48]) = 0;                     // levels 0..15 for all 48 pads
     virtual uint8_t groupSize() const { return 8; }             // tracks per group: 8 (buttons 1-2) or 4 (buttons 1-4)
-    virtual void rec(bool down) { (void)down; }                 // Rec button pressed / released (CLIPS ignores it)
+    virtual void rec(bool down) { (void)down; }                 // Rec key: true = press, false = release (hold events are not passed); CUT toggles on the press, CLIPS ignores it
     virtual void update(uint32_t nowMs) { (void)nowMs; }       // main loop, once per pass while visible
     virtual bool jog(int16_t value, bool shift) { (void)value; (void)shift; return false; } // true = handled
     virtual void info(char lines[4][48]) = 0;                   // the four text lines under the title ("" = nothing)

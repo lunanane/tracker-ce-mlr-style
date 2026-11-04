@@ -18,7 +18,7 @@ enum
 
 Engine::Engine()
   : host_(0), head_(0), tail_(0), takenMask_(0), activeCount_(0), playing_(false), barPulse_(0), idleCount_(0), usAcc_(0), clockSilentUs_(0), epoch_(1),
-    rHead_(0), rTail_(0), recDrops_(0), recState_(seqrec::Planner::IDLE), recTrack_(0), recHints_(0), recEnds_(0), loading_(false), cut_(0), cutRestart_(false), cutRestartPos_(0)
+    rHead_(0), rTail_(0), recDrops_(0), recState_(seqrec::Planner::IDLE), recTrack_(0), recHints_(0), recEnds_(0), recWhy_(0), loading_(false), cut_(0), cutRestart_(false), cutRestartPos_(0)
 {
     memset(ring_, 0, sizeof(ring_));
     memset(recRing_, 0, sizeof(recRing_));
@@ -173,6 +173,7 @@ void Engine::recPublish()
     recTrack_ = rec_.track();
     recHints_ = (uint8_t)(rec_.hints() | (recDrops_ ? seqrec::HINT_OVERFLOW : 0));
     recEnds_ = rec_.ends();
+    recWhy_ = rec_.why();
 }
 
 void Engine::applyRec(uint8_t track, uint8_t mode)
@@ -309,7 +310,7 @@ void Engine::applyType(uint8_t track, uint8_t type)
         activeCount_--;
         if (rec_.active() && rec_.track() == track)
         {
-            rec_.stop();
+            rec_.stop(3); // the track was set Off
             recPublish();
         }
     }
@@ -439,7 +440,7 @@ void Engine::idleLogic()
     drain();
     if (rec_.active())
     {
-        rec_.stop(); // the transport stopped: recording ends
+        rec_.stop(2); // the transport stopped: recording ends
         recPublish();
     }
     if (activeCount_ == 0)
@@ -717,13 +718,14 @@ void Engine::resetState()
 {
     loading_ = true;
     SEQ_COMPILER_BARRIER(); // t_ / activeCount_ are plain variables: do not let the compiler move their writes out of the guard
+    rec_.stop(4); // (before the tracks go Off: the reason of the end is the reset)
     for (uint8_t i = 0; i < kTracks; i++)
     {
         if (t_[i].type != TYPE_OFF)
             applyType(i, TYPE_OFF);
         initTrack(i);
     }
-    rec_.stop();
+    rec_.stop(4);
     recPublish();
     tail_ = head_;
     activeCount_ = 0;

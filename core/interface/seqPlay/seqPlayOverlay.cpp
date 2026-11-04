@@ -76,6 +76,8 @@ void SeqPlayOverlay::enter()
     }
     stripKeyValid_ = false;
     late_ = seqplay::LateRelease();
+    recKey_.reset();
+    recStopPending_ = false;
     msg_ = nullptr;
     lastTrack_ = selected();
     ledTime_ = 0;
@@ -90,6 +92,8 @@ void SeqPlayOverlay::leave()
         return;
     // a recording ends with Play mode (punch-in would otherwise keep clearing the track while the user edits)
     applyPlan(seqplay::EV_LEAVE);
+    recKey_.reset();
+    recStopPending_ = false;
     active_ = false;
     view_.mode = SeqPlayViewData::HIDDEN;
     view_.edge = 0;
@@ -101,8 +105,13 @@ void SeqPlayOverlay::leave()
 void SeqPlayOverlay::panic()
 {
     // transport Stop: the whole mod lets go (M6). Pads are released even when Play mode is not on screen any more.
+    const bool wasRec = recKey_.on() || seqEngine.recState() != seqrec::Planner::IDLE;
     applyPlan(seqplay::EV_STOP);
+    recKey_.reset();
+    recStopPending_ = false;
     msg_ = nullptr;
+    if (wasRec && active_)
+        setMessage("rec: Stop event");
     stripKeyValid_ = false;
 }
 
@@ -112,8 +121,12 @@ void SeqPlayOverlay::applyPlan(seqplay::Event e)
     seqplay::Plan p = seqplay::planFor(e);
     if (p.closeList)
         closeList(false);
-    if (p.endRecording && seqEngine.recState() != seqrec::Planner::IDLE)
-        seqRecStop();
+    if (p.endRecording && (recKey_.on() || seqEngine.recState() != seqrec::Planner::IDLE))
+    {
+        if (!seqRecStop())
+            recStopPending_ = true; // the queue was full: update() sends it again
+        recKey_.reset();
+    }
     if (p.releasePads)
         releaseAllPads();
     if (p.clearHold)
@@ -238,20 +251,31 @@ void SeqPlayOverlay::jog(int16_t value)
         hold_.listBtn = (int8_t)btn;
 }
 
-// Rec: instant punch-in on the selected track; Shift + Rec: exactly one loop. Rec again ends a punch-in.
+// Rec is a toggle (plan 008 A): a press starts a take on the selected track (instant punch-in; Shift + Rec: exactly one loop),
+// the next press ends it. Holding the key means nothing: the keys driver sends hold events while it is down, and the release.
 void SeqPlayOverlay::recPressed()
 {
     msg_ = nullptr;
     stripKeyValid_ = false;
     uint8_t track = selected();
-    if (seqEngine.recState() != seqrec::Planner::IDLE)
+    switch (recKey_.press(seqNowMs(), seqEngine.recState() != seqrec::Planner::IDLE))
     {
-        seqRecStop();
-        return;
+        case seqrecui::RecToggle::STOP:
+            recStopPending_ = !seqRecStop();
+            break;
+        case seqrecui::RecToggle::START:
+        {
+            bool oneLoop = PE().buttons->isButtonPressed(interfaceButtonShift);
+            recStopPending_ = false;
+            if (!seqRecStart(oneLoop, track))
+            {
+                recKey_.cancel();
+                setMessage(seqRecTrackLaunched(track) ? "on a clip" : seqEngine.type(track) == seqlogic::TYPE_OFF ? "pick a type" : "cannot rec");
+            }
+            break;
+        }
+        default: break; // a bounce of the key
     }
-    bool oneLoop = PE().buttons->isButtonPressed(interfaceButtonShift);
-    if (!seqRecStart(oneLoop, track))
-        setMessage(seqRecTrackLaunched(track) ? "on a clip" : seqEngine.type(track) == seqlogic::TYPE_OFF ? "pick a type" : "cannot rec");
 }
 
 bool SeqPlayOverlay::button(uint8_t b, uint8_t state)
@@ -310,9 +334,9 @@ bool SeqPlayOverlay::button(uint8_t b, uint8_t state)
             }
             return true;
         case interfaceButtonRec:
-            if (state == buttonPress)
+            if (seqrecui::isToggle(state))
                 recPressed();
-            return true;
+            return true; // hold events and the release are the sequencer's too, they do nothing
         case interfaceButtonNote:
         case interfaceButtonInstr:
         case interfaceButtonFx1:
@@ -532,6 +556,17 @@ void SeqPlayOverlay::update()
     if (!routable() && list_.open)
         applyPlan(seqplay::EV_POPUP); // a popup took the inputs: the list closes, pads and recording go on
     legend_.shiftChanged(shift, now);
+
+    // the Rec toggle follows the audio side: a take that ended by itself (loop done, transport stop, track Off) clears it
+    if (recStopPending_ && seqRecStop())
+        recStopPending_ = false;
+    if (recKey_.update(now, seqEngine.recState() != seqrec::Planner::IDLE))
+    {
+        const char* why = seqrecui::endText(seqEngine.recWhy());
+        if (why && !msg_)
+            setMessage(why);
+        stripKeyValid_ = false;
+    }
 
     // the cursor moved by other means (a reload): the pads follow the visible selection
     if (selected() != lastTrack_)

@@ -91,7 +91,7 @@ class Planner
     typedef void (*Sink)(void* user, const Op& op);
     enum State : uint8_t { IDLE = 0, ARMED = 1, PUNCH = 2, LOOP = 3 };
 
-    Planner() : sink_(0), user_(0), ends_(0) { reset(); }
+    Planner() : sink_(0), user_(0), ends_(0), why_(0) { reset(); }
     void setSink(Sink f, void* user)
     {
         sink_ = f;
@@ -103,6 +103,7 @@ class Planner
     uint8_t track() const { return track_; }
     uint8_t hints() const { return hints_; }
     uint8_t ends() const { return ends_; } // counts finished sessions (wraps)
+    uint8_t why() const { return why_; }   // why the last session ended: 0 asked for (Rec, panic ...), 1 loop complete, 2 transport / clock, 3 track Off, 4 reset
 
     // Punch-in: records from now on. One loop: armed until the track's playhead is at step 0.
     // fromStart: the transport starts with this recording (step `curPos` has not been entered yet): that step belongs to the
@@ -127,10 +128,11 @@ class Planner
         }
     }
 
-    void stop()
+    void stop(uint8_t why = 0)
     {
         if (state_ == IDLE)
             return;
+        why_ = why;
         flush();
         if (open_)
         {
@@ -162,7 +164,7 @@ class Planner
         }
         else if (state_ == LOOP && pos == 0 && stepsSeen_ > 0)
         {
-            stop(); // exactly one loop
+            stop(1); // exactly one loop
             return;
         }
         flush(); // nothing should be pending here
@@ -336,6 +338,7 @@ class Planner
     Sink sink_;
     void* user_;
     uint8_t ends_;
+    uint8_t why_;
     State state_;
     uint8_t track_;
     uint8_t hints_;

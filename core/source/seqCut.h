@@ -54,6 +54,7 @@ class Cut
     int stock(uint8_t track) const { return track < kCutTracks ? stock_[track] : 0; }
     void setStock(uint8_t track, int pos) { if (track < kCutTracks) stock_[track] = (int16_t)pos; }
     uint16_t activeMask() const { return activeMask_; }
+    uint8_t quant() const { return quant_; } // jump quantise mode (seqcut::Quant), audio context writes it, any context may read it
     // Mask for the audio hooks: driven tracks plus tracks whose hand-back retrigger is still to be played (see consumeRetrigger).
     uint16_t hookMask() const { return (uint16_t)(activeMask_ | handMask_); }
     // Tracks that really are off the grid: driven and not already snapped by SYNC ALL (UI, R1 strip).
@@ -91,6 +92,7 @@ class Cut
     volatile uint16_t handMask_; // retrigger of a track that was just handed back to the stock sequencer
     struct Hand { uint8_t noteStep, elapsed; } hand_[kCutTracks];
     int16_t stock_[kCutTracks];
+    volatile uint8_t quant_; // the engine starts on every step; the CUT layer (cutLayer.cpp) sets the user's default (beat) when it is first used
     View views_[kCutTracks];
 };
 
