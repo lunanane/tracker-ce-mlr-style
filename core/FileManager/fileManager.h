@@ -287,6 +287,7 @@ class cFileManager
     bool loadWorkspacePatternNow(uint8_t index);
     bool saveWorkspacePatternNow(uint8_t index);
     bool loadPerformanceTrackToBuffer(uint8_t pattIndex, uint8_t trackIndex);
+    bool getPatternTracksWithNotes(uint8_t pattIndex, uint16_t& mask); // Session view: bit per track holding a note
     bool isPatternLoading();
     bool isPatternEmpty(uint8_t index);
 

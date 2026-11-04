@@ -25,6 +25,7 @@
 #include "polyassert.h"
 
 #include "seqTracks.h"
+#include "seqLauncher.h"
 
 #include <cr_section_macros.h>
 
@@ -404,8 +405,8 @@ AUDIO_CORE_FLASH void Sequencer::play_microStep(int row)
     //			to reszta sie nie wykonuje
     // ************************************
 
-    if (seqEngine.isTakenOver(row))
-        return; // sequencer tracks mod: a sequencer plays this track, the pattern step is ignored
+    if (seqEngine.isTakenOver(row) || seqSessionStopped(row))
+        return; // sequencer tracks mod: a sequencer plays this track (or the Session view stopped it), the pattern step is ignored
     if (!playerRow.isActive)
         return;
     if (isTrackEngineMuted(row))
@@ -2326,6 +2327,7 @@ AUDIO_CORE_RAM void Sequencer::inc_uStep(uint8_t row)
     {
         player.track[row].uStep = 1;
         switchRowStep(row);
+        seqSessionStep(row); // clip launcher: queued clip / stop of this track at the quantise point
     }
 }
 
@@ -3355,6 +3357,8 @@ void Sequencer::switchRamPatternsNow()
     {
         mtProject.song.playlistPos = (uint8_t)newSlotMaybe;
     }
+
+    seqSessionPatternSwitched(); // clip launcher: every track follows the new pattern again
 }
 
 int16_t Sequencer::findSlotWithPattern()

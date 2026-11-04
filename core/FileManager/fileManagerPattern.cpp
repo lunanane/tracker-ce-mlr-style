@@ -628,6 +628,36 @@ bool cFileManager::loadPerformanceTrackToBuffer(uint8_t pattIndex, uint8_t track
     return true;
 }
 
+/// sequencer tracks mod (Session view): reads a workspace pattern into the pattern buffer and reports which tracks hold notes
+bool cFileManager::getPatternTracksWithNotes(uint8_t pattIndex, uint16_t& mask)
+{
+    mask = 0;
+    char patternToLoad[PATCH_SIZE]{ 0 };
+    snprintf(patternToLoad, PATCH_SIZE, cWorkspacePatternFileFormat, pattIndex);
+    if (!fileSystem->exists(patternToLoad))
+        return false;
+
+    Sequencer::strPattern* pattern = sequencer.getPatternToLoadFromFile();
+    if (!readPatternFile(patternToLoad, pattern))
+        return false;
+
+    uint8_t len = pattern->track[0].length;
+    if (len > Sequencer::MAXSTEP)
+        len = Sequencer::MAXSTEP;
+    for (uint8_t t = 0; t < kPerformanceTracks; t++)
+    {
+        for (uint8_t s = 0; s <= len; s++)
+        {
+            if (pattern->track[t].step[s].note >= Sequencer::STEP_NOTE_MIN)
+            {
+                mask = (uint16_t)(mask | (1u << t));
+                break;
+            }
+        }
+    }
+    return true;
+}
+
 uint8_t cFileManager::getCurrentPatternIndex()
 {
     return currentPattern;

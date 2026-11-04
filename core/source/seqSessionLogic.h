@@ -160,7 +160,8 @@ class Launcher
         }
         stopped_ = 0;
         loading_ = 0;
-        head_ = tail_ = 0;
+        head_ = 0;
+        tail_ = 0;
         quant_ = Q_BAR;
     }
 

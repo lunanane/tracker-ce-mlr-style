@@ -14,6 +14,7 @@
 #include "masterParams/masterParams.h"
 #include "patternEditor/patternEditor.h"
 #include "seqPlay/seqPlay.h"
+#include "seqSession/seqSession.h"
 #include "performanceMode/performanceMode.h"
 #include "projectEditor/projectEditor.h"
 #include "sampleEditor/sampleEditor.h"
@@ -594,6 +595,12 @@ void interfaceEnvents(uint8_t event, void* param1, void* param2, void* param3)
         {
             mtInterface.deactivateModule((hModule)param1);
             mtInterface.activateModule(&seqPlay, 0);
+            break;
+        }
+        case eventActivateSeqSession:
+        {
+            mtInterface.deactivateModule((hModule)param1);
+            mtInterface.activateModule(&seqSession, 0);
             break;
         }
         case eventToggleActiveModule:
