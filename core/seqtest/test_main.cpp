@@ -43,6 +43,8 @@ struct MockHost : Host
     bool sample = false;
     uint8_t instr = 3;
     seqrec::Params prm = { true, true };
+    int16_t pib = -1; // pulseInBar() answer
+    int16_t pulseInBar() { return pib; }
     void trackPos(uint8_t, seqrec::TrackPos& o) { o = tp; }
     bool sampleTrack(uint8_t) { return sample; }
     uint8_t instrument(uint8_t) { return instr; }
@@ -242,6 +244,66 @@ static void test_mono_follows_transport()
     CHECK(!e->takenOver(8));
     CHECK(h.count('+', 8) == h.count('-', 8));
     delete e;
+}
+
+// run n uSteps with a position (16-step pattern) so the host can answer pulseInBar(); absU = uSteps since the pattern start
+static void playPos(Engine& e, MockHost& h, int n, long& absU)
+{
+    for (int i = 0; i < n; i++)
+    {
+        int uStep = (int)(absU % 48) + 1;
+        int pos = (int)((absU / 48) % 16);
+        h.tp.pos = (uint8_t)pos;
+        h.tp.uStep = (uint8_t)uStep;
+        h.pib = (int16_t)((pos * 6 + (uStep - 1) / 8) % 96);
+        e.stepClock((uint16_t)uStep);
+        e.advanceUs(2604);
+        absU++;
+    }
+}
+
+// Generators started mid-playback start on a pulse boundary, in phase with the bar of the pattern.
+static void test_midplay_start_is_on_grid()
+{
+    MockHost h;
+    Engine* e = mk(h);
+    long u = 5 * 48 + 19; // step 5, uStep 20: not a pulse boundary ((20-1)%8 = 3)
+    playPos(*e, h, 1, u); // transport "playing" with nothing active
+    e->postType(4, TYPE_MONO);
+    e->postPad(4, 0 + 3 * 12, true);
+    e->postPad(4, 0 + 3 * 12, false);
+    size_t before = h.log.size();
+    playPos(*e, h, 4, u); // uSteps 21..24 of step 5: the boundary is uStep 25
+    for (size_t i = before; i < h.log.size(); i++)
+        CHECK(h.log[i].kind != '+'); // no note off the grid
+    CHECK(e->type(4) == TYPE_MONO);
+    playPos(*e, h, 1, u); // uStep 25
+    CHECK(h.count('+', 4) >= 1);
+    delete e;
+
+    // Chord/Arp: its bar phase follows the pattern (pulse 33 + 1 after the first pulse)
+    MockHost h2;
+    Engine* e2 = mk(h2);
+    long u2 = 5 * 48 + 19;
+    playPos(*e2, h2, 1, u2);
+    e2->postType(1, TYPE_CHORDARP);
+    playPos(*e2, h2, 5, u2); // uSteps 21..25: the pulse at uStep 25 = pulse 5*6+3 = 33 of the bar
+    CHECK(e2->chordArp(1).pulsesIntoBar() == 34);
+    delete e2;
+
+    // next-bar type change counts the pattern's bars, not the time since the transport started
+    MockHost h3;
+    Engine* e3 = mk(h3);
+    long u3 = 0;
+    e3->postType(1, TYPE_CHORDARP);
+    playPos(*e3, h3, 48 * 3, u3);
+    long u3b = u3; // mid bar 0 (step 3)
+    e3->postType(1, TYPE_MONO);
+    playPos(*e3, h3, 48 * 13 - 1, u3); // until the last uStep of step 15
+    CHECK(e3->type(1) == TYPE_CHORDARP && e3->pendingType(1) == TYPE_MONO);
+    playPos(*e3, h3, 8, u3);
+    CHECK(e3->type(1) == TYPE_MONO && (u3b > 0));
+    delete e3;
 }
 
 // External MIDI clock: with the transport stopped no idleTick / stepClock runs; blockTick (once per audio block) must still
@@ -1004,6 +1066,7 @@ int main()
     test_chord_takeover_stopped();
     test_chord_takeover_playing_and_pattern_returns();
     test_mono_follows_transport();
+    test_midplay_start_is_on_grid();
     test_block_tick_without_clock();
     test_clock_timeout_silences_mono();
     test_type_change_next_bar();

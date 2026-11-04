@@ -27,6 +27,9 @@ class Host
     virtual bool sampleTrack(uint8_t track) = 0;
     virtual uint8_t instrument(uint8_t track) = 0; // instrument a taken-over track plays
     virtual seqrec::Params recParams() = 0;
+    // Pulse (0..95) of the bar the NEXT clock pulse falls on, derived from the pattern position; -1 = unknown (the engine counts
+    // its own pulses from the transport start).
+    virtual int16_t pulseInBar() { return -1; }
 
   protected:
     ~Host() {}
@@ -100,6 +103,7 @@ class Engine
         uint8_t type;
         uint8_t pending;
         bool monoSteps;
+        bool needStart; // started mid-playback: generator starts on the next pulse boundary, aligned to the bar
         uint8_t nSounding;
         uint8_t padBits[seqlogic::kPads / 8];
         uint8_t sounding[16];
@@ -112,6 +116,7 @@ class Engine
     void refresh(uint8_t track);
     void releaseAll(uint8_t track);
     void applyPending();
+    void startTrack(uint8_t track);
     void recomputeContext();
     void initTrack(uint8_t i);
     void recSink(const seqrec::Op& op);

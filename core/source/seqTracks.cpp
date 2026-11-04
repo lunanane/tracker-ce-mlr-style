@@ -67,6 +67,13 @@ class SeqHost : public seqtracks::Host
     }
     bool sampleTrack(uint8_t track) override { return isSampleTrack(track); }
     uint8_t instrument(uint8_t track) override { return s_instrument[track]; }
+    // Pulse of the bar the next clock pulse falls on: 6 pulses per step, 16 steps per bar (track 0 is the clock source).
+    int16_t pulseInBar() override
+    {
+        uint8_t pos, uStep, last;
+        sequencer.seqTrackPos(0, pos, uStep, last);
+        return (int16_t)((pos * 6 + (uStep > 0 ? (uStep - 1) / 8 : 0)) % seqgen::kBarPulses);
+    }
     seqrec::Params recParams() override
     {
         seqrec::Params p;

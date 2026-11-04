@@ -33,6 +33,7 @@ void Engine::initTrack(uint8_t i)
     t.type = TYPE_OFF;
     t.pending = 0xFF;
     t.monoSteps = false;
+    t.needStart = false;
     t.nSounding = 0;
     memset(t.padBits, 0, sizeof(t.padBits));
     memset(t.sounding, 0, sizeof(t.sounding));
@@ -279,15 +280,24 @@ void Engine::applyType(uint8_t track, uint8_t type)
     recomputeContext();
     if (type == TYPE_MONO)
         scanMono(t);
+    t.needStart = playing_ && type != TYPE_OFF; // starts on the next pulse boundary, aligned to the bar (pulseAll)
     refresh(track);
-    if (playing_)
+}
+
+// Pulse boundary of a playing transport: start the generator on the bar grid.
+void Engine::startTrack(uint8_t track)
+{
+    Track& t = t_[track];
+    t.needStart = false;
+    if (t.type == TYPE_CHORDARP)
     {
-        if (type == TYPE_CHORDARP)
-            t.ca.start();
-        else if (type == TYPE_MONO)
-            t.mo.start();
+        t.ca.start();
+        t.ca.setBarPos(barPulse_); // phase of the bar the pulse about to run falls on
     }
-    refresh(track);
+    else if (t.type == TYPE_MONO)
+    {
+        t.mo.start();
+    }
 }
 
 void Engine::applyPending()
@@ -311,13 +321,11 @@ void Engine::setPlaying(bool p)
         if (p)
         {
             refresh((uint8_t)i);
-            if (t.type == TYPE_CHORDARP)
-                t.ca.start();
-            else
-                t.mo.start();
+            t.needStart = true; // the first pulse boundary starts it (the transport starts on one)
         }
         else
         {
+            t.needStart = false;
             if (t.type == TYPE_MONO)
                 t.mo.stop(); // Chord/Arp keeps running while stopped (free-running clock)
             refresh((uint8_t)i);
@@ -329,10 +337,15 @@ void Engine::pulseAll()
 {
     if (playing_)
     {
+        int16_t hp = host_ ? host_->pulseInBar() : (int16_t)-1;
+        if (hp >= 0)
+            barPulse_ = (uint8_t)(hp % seqgen::kBarPulses); // position-derived: bars of the pattern, wherever we started
         if (isBarStart(barPulse_))
             applyPending();
-        barPulse_ = (uint8_t)((barPulse_ + 1) % seqgen::kBarPulses);
     }
+    for (int i = 0; i < kTracks; i++)
+        if (t_[i].needStart && playing_)
+            startTrack((uint8_t)i);
     for (int i = 0; i < kTracks; i++)
         if (t_[i].type == TYPE_CHORDARP)
         {
@@ -340,12 +353,15 @@ void Engine::pulseAll()
             refresh((uint8_t)i);
         }
     if (playing_)
+    {
+        barPulse_ = (uint8_t)((barPulse_ + 1) % seqgen::kBarPulses);
         for (int i = 0; i < kTracks; i++)
             if (t_[i].type == TYPE_MONO)
             {
                 t_[i].mo.pulse();
                 refresh((uint8_t)i);
             }
+    }
 }
 
 void Engine::stepClock(uint16_t trackUStep)

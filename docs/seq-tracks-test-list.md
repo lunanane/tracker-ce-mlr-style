@@ -63,6 +63,7 @@ Use a MIDI track (9-16) with a synth/hardware on its channel, and a sample track
 |---|---|
 | Muted track | A muted track makes no sound from the sequencer either. |
 | Two Chord/Arp tracks | The lower-numbered one supplies the scale to Mono tracks (C major if none). |
+| Transport running, Mono track with steps set while another Chord/Arp track already runs: change the type of a third track | The change happens at the start of a pattern bar (every 16 steps), not 16 steps after Play was pressed. |
 | Reboot | Track types and sequencer settings come back (see section 8). |
 | Pattern playback timing with some tracks set to Mono/Chord | Pattern timing of the other tracks is steady (no hiccups). |
 | **External MIDI clock** (Config: clock source external, a drum machine as master). Transport stopped, hold a root pad on a Chord/Arp track, release it | The chord stops at the release, the pattern comes back. Pad releases never wait for a clock pulse. |

@@ -152,7 +152,9 @@ Built around immediate playability; no separate Seq page, no Off/Live/Rec modes.
   at least one step. The pattern resumes at the **next step** boundary, not mid-step. [provisional]
 - Instrument of a taken-over track = last used instrument (as pads do), picked when the takeover begins. Sample tracks are
   monophonic (last chord note wins); MIDI tracks get every note. [provisional]
-- Type change while playing: applied on the first pulse of the next bar counted from Play (96 pulses). Per track one ChordArp
+- Type change while playing: applied on the first pulse of the next bar of the pattern (bar = 16 steps = 96 pulses, counted from the
+  player position of track 0: `(actual_pos*6 + (uStep-1)/8) % 96`, `Host::pulseInBar`). A generator that starts mid-playback (first track set
+  to a type, clock resumed) waits for the next pulse boundary and a Chord/Arp takes its bar phase from that position. Per track one ChordArp
   and one Mono state live side by side (8.3 KB RAM for 16 tracks).
 - External clock: `Sequencer::tick` calls `Engine::blockTick` once per audio block for every clock source: it drains the command queue
   and, while the transport is stopped or no clock pulse came for 500 ms, runs the stopped-transport logic (Mono silenced, recording
