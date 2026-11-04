@@ -138,6 +138,16 @@ static void test_nearest()
     CHECK(nearestStep(P_TIME, 99999) == 8);
 }
 
+static void test_nearest_fx()
+{
+    for (int s = 1; s <= 8; s++)
+        CHECK(nearestFxStep(fxValue((uint8_t)s, -100, 100), -100, 100) == s);
+    CHECK(nearestFxStep(0, -100, 100) == 4);
+    CHECK(nearestFxStep(100, 0, 100) == 8);
+    CHECK(nearestFxStep(-500, -100, 100) == 1);
+    CHECK(nearestFxStep(500, -100, 100) == 8);
+}
+
 static void test_pad_lit()
 {
     PadInfo g1 = mapPad(padOf(1, 8)), ping = mapPad(padOf(0, 9)), rev = mapPad(padOf(1, 9));
@@ -159,6 +169,7 @@ int main()
     test_send_value();
     test_params();
     test_nearest();
+    test_nearest_fx();
     test_pad_lit();
     printf("seqperf: %d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;

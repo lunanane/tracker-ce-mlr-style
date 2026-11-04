@@ -1935,7 +1935,7 @@ void Sequencer::switchRowStep(uint8_t row) // przełączamy stepy w zależności
         if (!isNextPatternAvailable)
             player.onSongEnd();
 
-        if (patternSwitched && mtInterface.isPerformanceModeScreenActive())
+        if (patternSwitched && (mtInterface.isPerformanceModeScreenActive() || mtInterface.isSeqPerformScreenActive()))
         {
             for (uint8_t a = 0; a < kPerformanceTracks; a++)
             {

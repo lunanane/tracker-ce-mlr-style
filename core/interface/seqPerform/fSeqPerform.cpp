@@ -6,6 +6,7 @@
 
 #include "fileManager.h"
 #include "mtAudioEngine.h"
+#include "mtPadBoard.h"
 #include "mtPadsBacklight.h"
 #include "mtSequencer.h"
 #include "mtStructs.h"
@@ -76,7 +77,24 @@ void cSeqPerform::start(uint32_t options)
 
     for (int i = 0; i < 48; i++)
         ledShown[i] = 0xFF;
+    PM->dontClearPerformanceMode = 0; // set again only when we hand over to the stock page / Master / Params
     memset(fxStep, 0, sizeof(fxStep));
+    memset(fxVal, 0, sizeof(fxVal));
+    memset(stockVal, 0, sizeof(stockVal));
+    stockOn = 0;
+    // The stock page latches the pad row of a slot: FX already playing from it show up as lit faders
+    for (uint8_t slot = 0; slot < 12; slot++)
+    {
+        int16_t mn, mx;
+        int16_t v = performance.getSlotTempValue(slot);
+        if (v != 0 && performance.getSelectedRow(slot) > 0 && performance.getSlotRange(slot, mn, mx))
+        {
+            stockOn |= (uint16_t)(1u << slot);
+            stockVal[slot] = v;
+            fxVal[slot] = v;
+            fxStep[slot / 4][slot % 4] = nearestFxStep(v, mn, mx);
+        }
+    }
     memset(sendStep, 0, sizeof(sendStep));
     memset(latch, 0, sizeof(latch));
     padHeld = 0;
@@ -96,6 +114,17 @@ void cSeqPerform::stop()
 {
     moduleRefresh = 0;
     releaseAll();
+    // like cPerformanceMode::stop: when the target does not keep the perform FX they end here
+    if (!PM->dontClearPerformanceMode)
+    {
+        if (performance.turnOff())
+        {
+            newFileManager.loadWorkspacePatternNow(mtProject.values.actualPattern);
+            sequencer.switchRamPatternsNow();
+        }
+        mtPadBoard.releaseAllInstruments();
+    }
+    performance.forceSaveConfig();
     padsBacklight.clearGlobalPads(1, 1, 1);
 }
 
@@ -256,7 +285,9 @@ void cSeqPerform::faderPress(uint8_t row, uint8_t step)
         if (!performance.getSlotRange(slot, mn, mx))
             return; // empty slot: nothing to play
         fxStep[page][row] = step;
-        performance.setSlotValueDirect(slot, fxValue(step, mn, mx));
+        fxVal[slot] = fxValue(step, mn, mx);
+        performance.setSlotValueDirect(slot, fxVal[slot]);
+        syncKnockedOut(slot);
     }
     else if (row == 0)
     {
@@ -275,10 +306,21 @@ void cSeqPerform::releaseRow(uint8_t row)
 {
     if (page <= PAGE_FX3)
     {
-        if (fxStep[page][row] != 0)
+        uint8_t slot = slotOf(page, row);
+        int16_t mn, mx;
+        if (stockOn & (1u << slot))
+        {
+            // the stock page latched a pad row here: back to its value, not to silence
+            fxVal[slot] = stockVal[slot];
+            if (performance.getSlotRange(slot, mn, mx))
+                fxStep[page][row] = nearestFxStep(stockVal[slot], mn, mx);
+            performance.setSlotValueDirect(slot, stockVal[slot]);
+        }
+        else if (fxStep[page][row] != 0 || fxVal[slot] != 0)
         {
             fxStep[page][row] = 0;
-            performance.releaseSlotDirect(slotOf(page, row));
+            fxVal[slot] = 0;
+            performance.releaseSlotDirect(slot);
         }
     }
     else if (row == 0 && sendStep[page - PAGE_PING] != 0)
@@ -286,16 +328,20 @@ void cSeqPerform::releaseRow(uint8_t row)
         sendStep[page - PAGE_PING] = 0;
         perfApplySend(page == PAGE_REV, 0);
     }
+    reapplyActive(); // a stock send FX / another fader may share the per-track override that was just cleared
     screenDirty = true;
 }
 
 void cSeqPerform::faderRelease(uint8_t row)
 {
-    // other pads of this fader still held: the last pressed value stays
-    for (uint8_t c = 0; c < 8; c++)
+    // other pads of this fader still held: the value falls back to the highest of them
+    for (int c = 7; c >= 0; c--)
     {
-        if (padHeld & (1ULL << padOf(row, c)))
+        if (padHeld & (1ULL << padOf(row, (uint8_t)c)))
+        {
+            faderPress(row, (uint8_t)(c + 1));
             return;
+        }
     }
     // momentary like the stock page, except LATCH; project values (PING / REV faders 2-4) always stay
     bool momentary = page <= PAGE_FX3 || row == 0;
@@ -306,6 +352,17 @@ void cSeqPerform::faderRelease(uint8_t row)
 void cSeqPerform::faderReset(uint8_t row)
 {
     latch[page][row] = false;
+    if (page <= PAGE_FX3)
+    {
+        uint8_t slot = slotOf(page, row);
+        if (stockOn & (1u << slot))
+        {
+            // RESET also clears the stock pad row
+            stockOn &= (uint16_t)~(1u << slot);
+            stockVal[slot] = 0;
+            performance.setSelectedRow(slot, 0);
+        }
+    }
     if (page > PAGE_FX3 && row > 0)
         setParamDefault(page, row);
     else
@@ -338,9 +395,9 @@ void cSeqPerform::reapplyActive()
     {
         for (uint8_t r = 0; r < 4; r++)
         {
-            int16_t mn, mx;
-            if (fxStep[p][r] && performance.getSlotRange(slotOf(p, r), mn, mx))
-                performance.setSlotValueDirect(slotOf(p, r), fxValue(fxStep[p][r], mn, mx));
+            uint8_t slot = slotOf(p, r);
+            if (fxStep[p][r] && fxVal[slot] != 0)
+                performance.setSlotValueDirect(slot, fxVal[slot]);
         }
     }
     for (uint8_t i = 0; i < 2; i++)
@@ -350,16 +407,38 @@ void cSeqPerform::reapplyActive()
     }
 }
 
+// Slots the engine switched off because another slot took the same FX: their faders go dark
+void cSeqPerform::syncKnockedOut(uint8_t keepSlot)
+{
+    for (uint8_t s = 0; s < 12; s++)
+    {
+        if (s == keepSlot || fxVal[s] == 0 || fxStep[s / 4][s % 4] == 0)
+            continue;
+        if (performance.getSlotTempValue(s) == 0)
+        {
+            fxVal[s] = 0;
+            fxStep[s / 4][s % 4] = 0;
+            stockOn &= (uint16_t)~(1u << s);
+        }
+    }
+}
+
 void cSeqPerform::releaseAll()
 {
     for (uint8_t p = 0; p <= PAGE_FX3; p++)
     {
         for (uint8_t r = 0; r < 4; r++)
         {
-            if (fxStep[p][r])
+            uint8_t slot = slotOf(p, r);
+            if (stockOn & (1u << slot))
+            {
+                performance.setSlotValueDirect(slot, stockVal[slot]); // the stock page's own state stays
+            }
+            else if (fxStep[p][r] || fxVal[slot])
             {
                 fxStep[p][r] = 0;
-                performance.releaseSlotDirect(slotOf(p, r));
+                fxVal[slot] = 0;
+                performance.releaseSlotDirect(slot);
             }
         }
     }
@@ -390,6 +469,8 @@ void cSeqPerform::padEvent(uint8_t pad, uint8_t state)
             case CELL_PING:
             case CELL_REV: setPage(pageForCell(p.cell, p.index, page)); break;
             case CELL_LATCH:
+                if (page > PAGE_FX3 && p.index > 0)
+                    break; // project values stay anyway: LATCH only exists for FX and the send fader
                 latch[page][p.index] = !latch[page][p.index];
                 if (!latch[page][p.index])
                 {
@@ -476,6 +557,12 @@ void cSeqPerform::leaveToStock()
 {
     releaseAll();
     PM->dontClearPerformanceMode = 1;
+    // stock state and sound must match: reapply the selected pad rows on the selected tracks
+    for (uint8_t t = 0; t < kPerformanceTracks; t++)
+    {
+        if (performance.getTrackState(t))
+            performance.loadAllSlotsFxOnTrack(t);
+    }
     uint8_t b = interfaceButtonPerformance;
     eventFunct(eventSwitchModule, this, &b, 0);
 }
@@ -499,7 +586,7 @@ void cSeqPerform::refreshPads()
         {
             out[padOf(row, c)] = (mask & (1u << c)) ? 24 : 0;
         }
-        out[padOf(row, 10)] = latch[page][row] ? 30 : 4;
+        out[padOf(row, 10)] = (page > PAGE_FX3 && row > 0) ? 0 : (latch[page][row] ? 30 : 4);
         out[padOf(row, 11)] = 8;
     }
     for (uint8_t i = 0; i < 48; i++)
@@ -647,7 +734,7 @@ static void functPerformanceButton(uint8_t state)
 {
     if (state == buttonPress)
     {
-        bool othersHeld = false;
+        bool othersHeld = seqPadsHeld > 0;
         for (int b = 0; b < interfaceButtonsCount; b++)
         {
             if (b != interfaceButtonPerformance && SP->buttons->isButtonPressed(b))
@@ -683,8 +770,26 @@ static void functEncoder(int16_t value)
 
 static void functPlayAction()
 {
+    bool shift = SP->buttons->isButtonPressed(interfaceButtonShift);
     if (sequencer.getSeqState() == Sequencer::SEQ_STATE_STOP)
-        sequencer.playPattern();
+    {
+        if (!shift)
+        {
+            sequencer.playPattern();
+        }
+        else
+        {
+            sequencer.playSong();
+            for (uint8_t a = 0; a < kPerformanceTracks; a++)
+                mtProject.perfTracksPatterns[a] = mtProject.values.actualPattern;
+        }
+    }
+    else if (shift)
+    {
+        sequencer.setOnGlobalStep(cbkPerformancePlaybackModeToggle);
+    }
     else
+    {
         sequencer.stop();
+    }
 }

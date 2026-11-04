@@ -13,6 +13,7 @@ extern strMtProject mtProject;
 
 seqlogic::TapDetector seqPatternTap;
 seqlogic::TapDetector seqPerformTap;
+uint8_t seqPadsHeld = 0;
 
 namespace
 {

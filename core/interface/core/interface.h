@@ -54,6 +54,7 @@ class Interface
     bool isSongScreenActive();
     bool isPatternScreenActive();
     bool isPerformanceModeScreenActive();
+    bool isSeqPerformScreenActive();
     bool isMasterScreenActive();
     bool isInstrumentParamsScreenActive();
     bool isSamplePlayerScreenActive();

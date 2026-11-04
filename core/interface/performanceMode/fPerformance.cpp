@@ -684,11 +684,14 @@ static void functSwitchTracksPage()
 
 // Performance button: press = stock behaviour (tracks page / Shift = mute view); a plain tap (press and
 // release, nothing else touched) additionally opens the alt fader page (sequencer tracks mod, plan 004)
+static bool tapPending = false;
+static elapsedMillis tapAge;
+
 static void functPerformanceButton(uint8_t state)
 {
     if (state == buttonPress)
     {
-        bool othersHeld = false;
+        bool othersHeld = seqPadsHeld > 0;
         for (int b = 0; b < interfaceButtonsCount; b++)
         {
             if (b != interfaceButtonPerformance && PM->buttons->isButtonPressed(b))
@@ -698,16 +701,28 @@ static void functPerformanceButton(uint8_t state)
             }
         }
         seqPerformTap.down(!othersHeld);
+        if (othersHeld)
+            tapPending = false;
         functSwitchTracksPage();
     }
     else if (state == buttonRelease)
     {
 #ifndef TRACKER_MINI
-        if (seqPerformTap.up())
+        if (!seqPerformTap.up())
         {
-            PM->tracksPage = !PM->tracksPage; // undo the page flip of this tap
+            tapPending = false;
+        }
+        else if (tapPending && tapAge < 350)
+        {
+            // second tap within 350 ms: fader page. The two taps flipped the tracks page twice = unchanged.
+            tapPending = false;
             PM->dontClearPerformanceMode = 1; // the perform FX state moves over to the fader page
             PM->eventFunct(eventActivateSeqPerform, PM, 0, 0);
+        }
+        else
+        {
+            tapPending = true; // a single tap is the stock tracks-page flip
+            tapAge = 0;
         }
 #else
         seqPerformTap.up();

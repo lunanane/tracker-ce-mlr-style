@@ -36,10 +36,14 @@ class cSeqPerform : public ModuleBase
     void releaseRow(uint8_t row);
     void setPage(uint8_t newPage);
     void reapplyActive();
+    void syncKnockedOut(uint8_t keepSlot);
     uint8_t rowStep(uint8_t row) const;
 
     uint8_t page = seqperf::PAGE_FX1;
     uint8_t fxStep[3][4];         // FX pages: current step per fader (0 = off)
+    int16_t fxVal[12];            // value applied to each slot by the faders / stock page (0 = none)
+    int16_t stockVal[12];         // value a stock-page pad row had when the page opened
+    uint16_t stockOn = 0;         // slots that had a stock pad row selected (bit = slot)
     uint8_t sendStep[2];          // PING / REV fader 1 (send of the selected tracks)
     bool latch[seqperf::PAGE_COUNT][4];
     uint64_t padHeld = 0;         // fader pads currently held (bit = pad)

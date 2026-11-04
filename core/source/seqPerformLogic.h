@@ -84,6 +84,25 @@ inline int16_t fxValue(uint8_t step, int16_t mn, int16_t mx)
     return (int16_t)(mn + (span * step + (span >= 0 ? 4 : -4)) / 8);
 }
 
+// Which step (1..8) shows an FX value that was set outside the faders (stock page pad row): nearest step.
+inline uint8_t nearestFxStep(int16_t value, int16_t mn, int16_t mx)
+{
+    uint8_t best = 1;
+    int32_t bd = 0x7FFFFFFF;
+    for (uint8_t s = 1; s <= 8; s++)
+    {
+        int32_t d = (int32_t)fxValue(s, mn, mx) - value;
+        if (d < 0)
+            d = -d;
+        if (d < bd)
+        {
+            bd = d;
+            best = s;
+        }
+    }
+    return best;
+}
+
 // Send fader (PING / REV fader 1): perform send offset 0..100 on the selected tracks.
 inline int16_t sendValue(uint8_t step)
 {

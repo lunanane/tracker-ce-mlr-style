@@ -539,6 +539,11 @@ bool Interface::isPerformanceModeScreenActive()
     return isOnScreenModule(&performanceMode);
 }
 
+bool Interface::isSeqPerformScreenActive()
+{
+    return isOnScreenModule(&seqPerform);
+}
+
 bool Interface::isMasterScreenActive()
 {
     return isOnScreenModule(&masterParams);

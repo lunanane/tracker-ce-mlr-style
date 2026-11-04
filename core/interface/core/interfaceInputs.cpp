@@ -93,12 +93,16 @@ bool Interface::powerButtonChange(uint8_t state)
 void Interface::padPressed(uint8_t n, int8_t, int8_t, uint8_t velo)
 {
     seqNoteOtherInput();
+    if (seqPadsHeld < 255)
+        seqPadsHeld++;
     ip->processPadsInput(n, 1, velo);
 }
 
 //=======================================================================
 void Interface::padReleased(uint8_t n)
 {
+    if (seqPadsHeld > 0)
+        seqPadsHeld--;
     ip->processPadsInput(n, 0, 0);
 }
 

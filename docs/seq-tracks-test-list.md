@@ -129,8 +129,11 @@ slot 5 pan, slot 9 tune).
 | Press | Expected |
 |---|---|
 | **Performance** (tap, from any page) | Stock Performance page opens (as always). |
-| **Performance** (tap again, release without touching anything else) | Fader page: title "Perform faders: FX 1-4"; pad rows 1-4 lit only where a slot has an FX; group pad FX1-4 (col 9, row 1) bright, FX5-8 / FX9-12 dim, row 4 of column 9 dark; PING (col 10 row 1) and REV (col 10 row 2) dim; LATCH column dim, RESET column dim. |
-| **Performance** tap again | Back on the stock Performance page; the 8 buttons keep their state; tracks page is the one you had. |
+| **Performance** tapped ONCE | Stock behaviour: the tracks page flips (tracks 1-8 / 9-16) as always. |
+| **Performance** double tap (second tap within 350 ms, nothing else touched, no pad held) | Fader page (the tracks page is unchanged, the two taps flipped it twice). Title "Perform faders: FX 1-4"; pad rows 1-4 lit only where a slot has an FX; group pad FX1-4 (col 9, row 1) bright, FX5-8 / FX9-12 dim, row 4 of column 9 dark; PING (col 10 row 1) and REV (col 10 row 2) dim; LATCH column dim, RESET column dim. |
+| **Performance** single tap on the fader page | Back on the stock Performance page; the 8 buttons keep their state; tracks page is the one you had; FX that were playing from the stock pad rows still sound and their pads are lit. |
+| Leave the fader page for Pattern, then open the stock Performance page again | A fresh stock page (no old FX sounding, pad rows reset) - nothing leaks from the fader page. |
+| Hold a pad, tap Performance twice | No fader page (a held pad is not a tap). |
 | **Performance** held, then another button / a pad / the jog wheel, then release | Stock behaviour only (tracks page flip; Shift + Performance = mute view), the fader page does NOT open. |
 | Never tap twice: use the stock page for a while | Everything works exactly as before (pads, jog, edit mode, tracks page). |
 
@@ -141,7 +144,10 @@ slot 5 pan, slot 9 tune).
 | Hold pad 5 of fader 1 (row 1) | Bar lit from the left up to pad 5; info line shows the FX name and value; the FX is heard on tracks 1 and 2 only. |
 | Slide to pad 8 | Value rises to the FX maximum; pad 1 is about 1/8 of the range (a signed range gives 0 on pad 4). |
 | Release | Bar goes dark and the FX is cleared at once (momentary, like stock). |
-| Hold pad 3 of fader 2, then also pad 6 (two pads), release pad 6 | Value stays at pad 3 until the last pad is released. |
+| Hold pad 3 of fader 2, then also pad 6 (two pads), release pad 6 | Value falls back to the still-held pad 3 until the last pad is released. |
+| Stock page: press a pad of slot 1 (the stock page latches its row), double tap Performance | Fader 1 shows the bar for that value and the FX keeps playing. Pressing a fader pad changes it; release returns to the stock value (not to silence). RESET of row 1 clears the FX and the stock pad row (dark on the stock page too). |
+| Fader FX and a stock slot with the same FX | The newer fader takes over (stock rule); the older one goes dark. Releasing a fader re-applies the other active faders / sends. |
+| Song mode, pattern switch while on the fader page; Shift + Play | Same as the stock page (track patterns follow the song; Shift + Play starts the song / toggles loop). MIDI CC 41-48 / 51-62 (perform CC) are NOT handled on the fader page (known limit). |
 | Tap **LATCH** of row 1, then press and release pad 5 of fader 1 | FX stays; bar stays lit; info line shows LATCH. |
 | Tap **RESET** of row 1 | FX cleared, LATCH off, bar dark. |
 | LATCH on, then tap LATCH again | FX cleared when no pad is held. |
@@ -163,6 +169,7 @@ slot 5 pan, slot 9 tune).
 | Change PING / REV values, save the project, power off, open it | The values are saved with the project (same as changing them on the Master page); open the Master page: it shows the same values. |
 | No volume or panning on this page | Correct (owner decision). |
 
-Leaving the fader page (any other page): all fader FX and sends are released, latches cleared; PING / REV project values stay.
+LATCH pads of PING / REV rows 2-4 are dark and do nothing (project values always stay). Leaving the fader page (any other page): fader FX and sends are released and latches cleared; FX from the stock pad rows stay while the target keeps the perform FX (Master, Params, stock page), otherwise everything ends like on the stock page. PING / REV project values stay.
+Known: delay time jumps (no smoothing in the delay engine, same as the Master page), so a press may click while playing.
 Known limits: FX that exist only for synth tracks / global FX use the stock slot rules; two slots with the same FX exclude each other
 (stock rule), the older fader bar may stay lit.
