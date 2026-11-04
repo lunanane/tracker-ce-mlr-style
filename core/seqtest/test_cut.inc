@@ -876,8 +876,9 @@ static void test_syncall_session_layer_adapter()
     // screen button 6 (index 5) = SYNC ALL; its release and the other buttons are not it; the label shows when something is off grid
     char lab[12];
     CHECK(a.buttonLabel(kScreenButtonSyncAll, lab) && strcmp(lab, "[SYNC ALL]") == 0);
-    CHECK(!a.buttonLabel(0, lab) && !a.buttonLabel(4, lab) && !a.buttonLabel(6, lab) && !a.buttonLabel(7, lab));
-    CHECK(!a.button(4, true) && !a.button(6, true) && !a.button(7, true));
+    // (plan 008 A: button 5 = jump quantise and button 7 = the [REC] armed label are the layer's now; tested in test_rec.inc)
+    CHECK(!a.buttonLabel(0, lab) && !a.buttonLabel(7, lab));
+    CHECK(!a.button(6, true) && !a.button(7, true));
     CHECK(a.button(kScreenButtonSyncAll, false));
     seqEngine.idleTick();
     CHECK((c->activeMask() & 0x0D) == 0x0D); // the release does nothing
@@ -949,7 +950,10 @@ static void test_survival_and_panic()
     c->setStock(4, 2);
     c->boundary(4, 16, 2);
     a.pad(2, 0, false);
-    a.rec(false);                                               // ... and closes: a recorded playhead loop
+    a.rec(false);                                               // the Rec release means nothing (plan 008 A: Rec is a toggle)
+    seqEngine.idleTick();
+    CHECK(cutRecHeld());
+    a.rec(true);                                                // ... the next press closes: a recorded playhead loop
     seqEngine.idleTick();
     CHECK(c->view(4).flags & VF_RECORDED);
     a.pad(3, 2, true);                                          // track 6: a pad is held in the hand (loop gesture)

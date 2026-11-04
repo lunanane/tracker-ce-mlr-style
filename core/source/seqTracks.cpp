@@ -536,9 +536,10 @@ bool seqRecStart(bool oneLoop, uint8_t track)
     return seqEngine.postRec(track, oneLoop ? seqtracks::Engine::REC_LOOP : seqtracks::Engine::REC_PUNCH);
 }
 
-void seqRecStop()
+bool seqRecStop()
 {
-    seqEngine.postRec(seqEngine.recTrack(), seqtracks::Engine::REC_STOP);
+    // the track number only has to be valid: the audio side ends whatever take is on (also one that is queued but not published yet)
+    return seqEngine.postRec(seqEngine.recTrack(), seqtracks::Engine::REC_STOP);
 }
 
 namespace

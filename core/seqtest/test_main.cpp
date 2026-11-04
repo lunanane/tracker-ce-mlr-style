@@ -1348,6 +1348,7 @@ static void test_save_uses_critical_sections()
 }
 int sessionTests(int& checks);
 #include "test_cut.inc"
+#include "test_rec.inc"
 
 int main()
 {
@@ -1412,6 +1413,19 @@ int main()
     test_lane_palette();
     test_lane_draw_budget_and_bounds();
     test_r4_handback_retrigger_and_stock_phase();
+    test_rec_toggle_logic();
+    test_keys_driver_model();
+    test_mlr_rec_v024_bug_reproduced();
+    test_mlr_rec_toggle_keys_driver();
+    test_mlr_rec_takes_in_any_group();
+    test_mlr_gestures_through_layer();
+    test_mlr_quantise_screen_button();
+    test_mlr_quantise_grid();
+    test_play_rec_key_flow();
+    test_play_rec_punch_region_only();
+    test_play_rec_bounce_and_transport();
+    test_play_rec_shift_loop();
+    test_rec_end_reasons();
     printf("%d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

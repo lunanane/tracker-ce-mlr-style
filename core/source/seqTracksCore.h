@@ -71,6 +71,7 @@ class Engine
     uint8_t recTrack() const { return recTrack_; }
     uint8_t recHints() const { return recHints_; }
     uint8_t recEnds() const { return recEnds_; }
+    uint8_t recWhy() const { return recWhy_; } // why the last take ended (seqrecui::EndWhy)
     bool popRecOp(seqrec::Op& out); // ops from the audio side, in order
 
     // ---- project sidecar (main loop, with the audio engine idle or stopped) ----
@@ -166,7 +167,7 @@ class Engine
     volatile uint8_t rHead_, rTail_;
     volatile uint8_t recDrops_; // operations dropped because the queue was full (this recording)
     volatile seqrec::Planner::State recState_;
-    volatile uint8_t recTrack_, recHints_, recEnds_;
+    volatile uint8_t recTrack_, recHints_, recEnds_, recWhy_;
     volatile bool loading_;
     seqcut::Cut* cut_;
     volatile bool cutRestart_;

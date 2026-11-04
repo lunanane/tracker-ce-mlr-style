@@ -16,7 +16,7 @@ static View noView()
     return v;
 }
 
-Cut::Cut() : activeMask_(0), holdMask_(0), stopMask_(0), snapMask_(0), handMask_(0)
+Cut::Cut() : activeMask_(0), holdMask_(0), stopMask_(0), snapMask_(0), handMask_(0), quant_(Q_STEP)
 {
     memset(hand_, 0, sizeof(hand_));
     memset(stock_, 0, sizeof(stock_));
@@ -61,7 +61,8 @@ void Cut::activate(uint8_t t)
     int steps = hooks_.trackSteps ? hooks_.trackSteps(hooks_.user, t) : 16;
     int pos = hooks_.trackPos ? hooks_.trackPos(hooks_.user, t) : 0;
     p.setLength(steps);
-    p.restart((uint32_t)(pos + 1)); // the track continues where it is
+    p.setQuantise(quantSteps(quant_)); // queued jumps / loops wait for the grid (plan 008 A)
+    p.restart((uint32_t)(pos + 1)); // the track continues where it is (and the grid counter with it)
     stock_[t] = (int16_t)pos;
     memset(&rt_[t], 0, sizeof(Rt));
     rt_[t].view = noView();
@@ -160,6 +161,15 @@ void Cut::apply(uint8_t t, uint8_t arg)
         if (argIsSyncAll(arg))
         {
             syncAll();
+            return;
+        }
+        if (argIsQuant(arg))
+        {
+            // one grid for all tracks; gestures already queued keep waiting, they now wait for the new grid
+            quant_ = argQuant(arg);
+            for (uint8_t i = 0; i < kCutTracks; i++)
+                if ((activeMask_ >> i) & 1u)
+                    ph_[i].setQuantise(quantSteps(quant_));
             return;
         }
         if (argCol(arg) != 0) return; // col 0 = RESET, col 1 = SYNC ALL, anything else is not a command
