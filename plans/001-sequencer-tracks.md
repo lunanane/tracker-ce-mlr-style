@@ -140,6 +140,24 @@ Built around immediate playability; no separate Seq page, no Off/Live/Rec modes.
 - Copy / Paste in Play mode copy a track's sequencer (type + state) to another track.
 - No new letter hotkeys, only combinations of existing buttons.
 
+## Step A as built (2026-11-04, provisional where marked)
+- Code: `core/source/seqTracksCore.*` (engine, no Polyend includes, tested in `core/seqtest`), `seqTracksLogic.h` (pure helpers),
+  `seqTracks.*` (glue: instrument pick, note send), hooks in `mtSequencer.cpp`, Play mode = its own module
+  `core/interface/seqPlay/` (not a flag inside the pattern editor: the pattern editor is untouched except `functPattern`).
+- Pattern tap: armed on press when no other button is held; any other button/pad/jog input before the release cancels it.
+  Pattern again inside Play mode switches back to the editor on press (like every other module button).
+- Clock: pulses at the start of every 8th uStep of track 0 while playing; **free-running** (96 nano ticks) while the transport
+  is stopped, so Chord/Arp can be played without Play. Mono only runs with the transport. [provisional]
+- Takeover: Chord/Arp from the first note until all pads are released and nothing sounds; Mono while playing and the sequence has
+  at least one step. The pattern resumes at the **next step** boundary, not mid-step. [provisional]
+- Instrument of a taken-over track = last used instrument (as pads do), picked when the takeover begins. Sample tracks are
+  monophonic (last chord note wins); MIDI tracks get every note. [provisional]
+- Type change while playing: applied on the first pulse of the next bar counted from Play (96 pulses). Per track one ChordArp
+  and one Mono state live side by side (8.3 KB RAM for 16 tracks).
+- Scale: the lowest-numbered Chord/Arp track is the scale source (`SeqContext.chord`); other Chord/Arp tracks use their own.
+- No jog-wheel parameter pages yet (play mode, swing, gate, lock, velocity pattern etc.); LCK gesture not mapped. Pad LED
+  brightness = level * 2 on the single-colour pad LEDs.
+
 ## Script sequencers — parked (owner 2026-11-03)
 The owner decided against an embedded script engine on the original Tracker (flash too tight): all sequencers are
 built in (C++). The notes below stay for a possible Tracker+ version.
