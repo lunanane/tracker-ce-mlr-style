@@ -15,7 +15,7 @@ namespace seqgen {
 enum { kHrCols = 8, kHrRows = 4 };  // the HYPER_RASP pad is 8 x 4 = the pad columns 0..7 of the 12 x 4 Tracker pads; cols 8..11 are "extras"
 
 // Script types, in the order of the type list (after Off, Chord/Arp, Mono). Only ported scripts are listed.
-enum HrType : uint8_t { HR_ARP_LINES = 0, HR_CHORD_STABS, HR_ARP_SEQ, HR_CHORD_ARP, HR_COUNT };
+enum HrType : uint8_t { HR_ARP_LINES = 0, HR_CHORD_STABS, HR_ARP_SEQ, HR_CHORD_ARP, HR_BASS, HR_COUNT };
 
 // What the HYPER_RASP host shares between tracks: the scale (pitch classes, tonic first; none = no scale in force) and the root note
 // (set_root_note). Defaults of pad_script.py: DEFAULT_SCALE = D# natural minor, no root.

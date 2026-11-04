@@ -145,8 +145,8 @@ inline const char* recHintText(bool overflow, bool needMidi, bool reduced)
 }
 
 // The ported HYPER_RASP scripts (seqgen/hr.h order). "HR Chord/Arp" is HYPER_RASP chord_arp.lua: a different script from grid-composer Chord/Arp.
-static const char* const kHrShort[] = { "ARPL", "STAB", "ARSQ", "HRCA" };
-static const char* const kHrName[] = { "Arp Lines", "Chord Stabs", "Arp Seq", "HR Chord/Arp" };
+static const char* const kHrShort[] = { "ARPL", "STAB", "ARSQ", "HRCA", "BASS" };
+static const char* const kHrName[] = { "Arp Lines", "Chord Stabs", "Arp Seq", "HR Chord/Arp", "Bassline Seq" };
 static_assert(sizeof(kHrShort) / sizeof(kHrShort[0]) == seqlogic::kHrScripts && sizeof(kHrName) / sizeof(kHrName[0]) == seqlogic::kHrScripts,
               "one name per HYPER_RASP script");
 

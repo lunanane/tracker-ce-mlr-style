@@ -378,6 +378,59 @@ TEST(hr_chordarp_serialize_roundtrip) {
   }
 }
 
+// ======================= Bassline Seq =======================
+TEST(hr_bass_held_keys_are_notes_in_press_order_and_the_euclid_row_is_the_rhythm) {
+  HrRig r(HR_BASS);
+  r.s->pad(0, 2, true);  // lowest row, first key = degree 0 = D# (tonic of the default scale, in the octave of the default root 60) = 51
+  r.s->pad(1, 2, true);  // degree 1 = F = 53
+  r.tap(0, 3);           // E(1,8): one onset in eight steps
+  r.s->start();          // the first step sounds at once: the first held key
+  CHECK_EQ(countOn(), 1); CHECK_EQ(g_ev[0].note, 51); CHECK_EQ(g_ev[0].vel, 100); CHECK_EQ(g_ev[0].chan, 3);
+  clearEv();
+  r.pulses(6);           // step 2: no onset, the note ends
+  CHECK_EQ(g_nev, 1); CHECK_EQ(g_ev[0].kind, EV_NOTE_OFF); CHECK_EQ(g_ev[0].note, 51);
+  clearEv();
+  r.pulses(42);          // 7 more steps: the pattern wraps, the second held key follows (press order)
+  CHECK_EQ(countOn(), 1); CHECK_EQ(g_ev[g_nev - 1].note, 53);
+  CHECK_EQ(r.led(0, 3), 15);
+  r.s->pad(0, 2, false); r.s->pad(1, 2, false);
+  CHECK_EQ(countOff(), 1);   // the last key up stops the ringing note
+  r.s->stop();
+  CHECK_EQ(r.led(0, 3), 1);  // the live preset is gone: a plain preset pad
+}
+TEST(hr_bass_root_scale_octave_and_out_of_range_keys) {
+  HrRig r(HR_BASS);
+  r.bus.root = 62; r.bus.nScale = 0;  // no scale: chromatic from the root
+  r.s->setParam(HrBass::P_OCTAVE, 1);
+  r.tap(0, 2); r.s->pad(0, 2, true);
+  r.tap(0, 3); r.s->start();
+  CHECK_EQ(g_ev[g_nev - 1].note, 62 + 12);
+  r.bus.root = 127;                                     // the top keys leave MIDI: dark pads, dropped (never clamped)
+  CHECK_EQ(r.led(7, 0), 0);
+  r.s->silence();
+  CHECK(r.s->live());  // a key is still down
+}
+TEST(hr_bass_record_stores_the_preset_and_serialize_keeps_it) {
+  HrRig a(HR_BASS), b(HR_BASS);
+  a.tap(2, 3);                  // E(3,8)
+  a.s->start();
+  a.s->pad(7, 3, true);         // hold Rec
+  a.pulses(6 * 16);             // two chains of the live preset are stored
+  a.s->pad(7, 3, false);
+  CHECK_EQ(a.s->getParam(HrBass::P_CHAINS), 2);
+  a.s->stop();
+  uint8_t buf[HrScript::kMaxSerial];
+  size_t n = a.s->serialize(buf, sizeof buf);
+  CHECK_EQ(n, HrBass::kSerialSize);
+  CHECK(b.s->deserialize(buf, n));
+  CHECK_EQ(b.s->getParam(HrBass::P_CHAINS), 2);
+  uint8_t buf2[HrScript::kMaxSerial];
+  CHECK_EQ(b.s->serialize(buf2, sizeof buf2), n);
+  for (size_t i = 0; i < n; ++i) CHECK_EQ(buf[i], buf2[i]);
+  buf[3] = 99;                  // groove out of range
+  CHECK(!b.s->deserialize(buf, n));
+}
+
 // ======================= helpers, bus, slots, legends =======================
 TEST(hr_euclid_and_velocity_helpers) {
   uint8_t o[16];

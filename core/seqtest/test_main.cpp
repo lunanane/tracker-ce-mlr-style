@@ -1259,10 +1259,10 @@ static void test_sidecar_roundtrip_and_corruption()
     memset(bad, 0, sizeof(bad)); // empty file read into a zeroed buffer
     CHECK(!c->loadState(bad, sizeof(bad)));
     CHECK(c->type(7) == TYPE_MONO && c->stateHash() == hashC); // refused files change nothing
-    // a valid frame with an invalid block (type 7) and a fixed-up CRC: only that track falls back to Off, the rest loads
+    // a valid frame with an invalid block (type TYPE_COUNT, the first number past the last type) and a fixed-up CRC: only that track falls back to Off, the rest loads
     // (owner review 2026-11-04: a single bad block must not throw away the whole file)
     memcpy(bad, buf, n);
-    bad[8] = 7; // track 0
+    bad[8] = TYPE_COUNT; // track 0
     fixCrc(bad, n);
     CHECK(c->loadState(bad, n));
     CHECK(c->type(0) == TYPE_OFF && c->type(3) == TYPE_CHORDARP && c->type(9) == TYPE_MONO && c->type(7) == TYPE_OFF);

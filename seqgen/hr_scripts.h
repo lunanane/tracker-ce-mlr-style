@@ -5,3 +5,4 @@
 #include "hr_stab.h"
 #include "hr_arpseq.h"
 #include "hr_chordarp.h"
+#include "hr_bass.h"

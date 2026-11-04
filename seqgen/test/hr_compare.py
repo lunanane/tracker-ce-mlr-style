@@ -16,10 +16,10 @@ import argparse, os, random, subprocess, sys, tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 PRELUDE = r"""
-EV={}; PC=0; LED={}; for i=1,32 do LED[i]=0 end
+EV={}; PC=0; LED={}; BG={}; for i=1,32 do LED[i]=0; BG[i]=0 end
 GRID_WIDTH=8; GRID_HEIGHT=4
 function grid_led(x,y,l,role) if x>=1 and x<=8 and y>=1 and y<=4 then LED[(y-1)*8+x]=l end end
-function grid_led_bg(x,y,l,role) end
+function grid_led_bg(x,y,l,role) if x>=1 and x<=8 and y>=1 and y<=4 then BG[(y-1)*8+x]=l end end
 function grid_led_all(l) for i=1,32 do LED[i]=l end end
 function grid_refresh() end
 function midi_note_on(n,v,c) if n>=0 and n<=127 then EV[#EV+1]=string.format("p%d on %d %d",PC,n,v) end end
@@ -65,9 +65,13 @@ def bjorklund(pulses, steps):
     return [raw[(i + first) % n] for i in range(n)]
 
 
+RENDER_AFTER_PARAM = ("bassline_seq", "euclid_trigger", "grid_seq", "step_follower")
+
+
 class LuaSide:
     def __init__(self, path, name=""):
         # the HYPER_RASP host side of chord_arp.lua (ScriptedPad + ViewSwitcher): the function column x = 8
+        self.name = name
         self.switcher = name == "chord_arp"
         self.view, self.page, self.running, self.held, self.fired = 1, 1, False, set(), False
         from lupa import lua54
@@ -119,7 +123,8 @@ class LuaSide:
 
     def leds(self):
         led = self.g.LED
-        self.out.append("L " + " ".join(str(int(led[i])) for i in range(1, 33)))
+        bg = self.g.BG
+        self.out.append("L " + " ".join(str(int(led[i]) if int(led[i]) > 0 else int(bg[i])) for i in range(1, 33)))
 
     def run(self, cmd):
         w = cmd.split()
@@ -135,7 +140,9 @@ class LuaSide:
         elif c == "stop": self.rt.execute("call_opt('stop_playback')")
         elif c == "tick":
             for _ in range(int(w[1])): self.rt.execute("call_opt('framework_tick')")
-        elif c == "param": g.set_param(w[1], int(w[2]))
+        elif c == "param":
+            g.set_param(w[1], int(w[2]))
+            if self.name in RENDER_AFTER_PARAM: self.rt.execute("call_opt('render')")  # these scripts repaint on the next event only; the port paints live
         elif c == "busscale":
             self.rt.execute("BS={%s}" % ",".join(w[1:]))
             self.rt.execute("call_opt('scale_changed', current_scale())")
@@ -281,11 +288,43 @@ def gen_chordarp(rng, n):
     return cmds
 
 
+def bus_cmd(rng):
+    k = rng.random()
+    if k < 0.4: return "busscale " + " ".join(str(v) for v in rng.choice([[0, 2, 4, 5, 7, 9, 11], [9, 11, 0, 2, 4, 5, 7], [2, 4, 5, 7, 9, 10, 0], [0, 2, 3, 5, 7, 8, 10], [0, 2, 4, 7, 9], [0, 3, 5, 6, 7, 10], [5, 7, 9, 10, 0, 2, 4]]))
+    if k < 0.55: return "busnone"
+    if k < 0.85: return "busroot %d" % rng.randint(0, 127)
+    return "busclear"
+
+
+def gen_bass(rng, n):
+    cmds, held = [], []
+    for _ in range(n):
+        r = rng.random()
+        if r < 0.22:  # press keys (several: the press order is the sequence), release some
+            x, y = rng.randint(1, 8), rng.randint(1, 3)
+            cmds.append("grid %d %d 1" % (x, y)); held.append((x, y))
+        elif r < 0.34 and held:
+            k = held.pop(rng.randrange(len(held))); cmds.append("grid %d %d 0" % k)
+        elif r < 0.42: cmds += tap(rng.randint(1, 7), 4)  # E(k,8) preset
+        elif r < 0.47: cmds += ["grid 8 4 1"] + ["pulse %d" % rng.choice([6, 12, 48, 100, 400])] + ["grid 8 4 0"]  # record
+        elif r < 0.50: cmds += tap(rng.randint(1, 8), 4)
+        elif r < 0.70: cmds.append("pulse %d" % rng.choice([1, 1, 2, 3, 5, 6, 6, 12, 24, 40, 100]))
+        elif r < 0.75: cmds.append("param octave %d" % rng.randint(-2, 2))
+        elif r < 0.80: cmds.append("param direction %d" % rng.randint(1, 4))
+        elif r < 0.85: cmds.append("param groove %d" % rng.randint(1, 12))
+        elif r < 0.90: cmds.append(rng.choice(["start", "start", "stop"]))
+        elif r < 0.95: cmds.append(bus_cmd(rng))
+        else: cmds.append("sync")
+    cmds.append("sync")
+    return cmds
+
+
 SCRIPTS = {
     "arp_lines": ("arp_lines.lua", lambda rng, n: gen_stab(rng, n, True)),
     "chord_stabs": ("chord_stabs.lua", lambda rng, n: gen_stab(rng, n, False)),
     "arp_seq": ("arp_seq.lua", gen_arpseq),
     "chord_arp": ("chord_arp.lua", gen_chordarp),
+    "bassline_seq": ("bassline_seq.lua", gen_bass),
 }
 
 
