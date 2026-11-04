@@ -634,10 +634,6 @@ void cPatternEditor::refreshPattern()
         trackerPattern.inactive[trackIdx] = isSampleTrack(trackIdx)
                                               ? mtProject.values.trackMute[trackIdx]
                                               : mtProject.values.midiTrackMute[trackIdx % 8];
-        if (seqPlayOverlay.active() && ((seqPlayOverlay.dimMask() >> trackIdx) & 1u))
-        {
-            trackerPattern.inactive[trackIdx] = 1; // Play mode: this track plays a launched clip / MLR jam, not the drawn pattern (M7)
-        }
 
         for (uint8_t rowIdx = 0; rowIdx < 15; rowIdx++)
         {
@@ -5267,7 +5263,6 @@ void cPatternEditor::seqPlayLeave()
     seqPlayOverlay.leave();
     actualActionButtonsPage = s_pageBeforePlay < actionButtonsPagesCount ? s_pageBeforePlay : 0;
     refreshEditState();
-    refreshPattern(); // the dimmed columns of launched / jammed tracks go
     lightUpPadBoard();
 }
 

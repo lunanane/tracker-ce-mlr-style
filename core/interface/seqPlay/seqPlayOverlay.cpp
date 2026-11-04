@@ -75,7 +75,6 @@ void SeqPlayOverlay::enter()
         ledShown_[i] = 0xFF;
     }
     stripKeyValid_ = false;
-    dimMask_ = 0;
     late_ = seqplay::LateRelease();
     msg_ = nullptr;
     lastTrack_ = selected();
@@ -92,7 +91,6 @@ void SeqPlayOverlay::leave()
     // a recording ends with Play mode (punch-in would otherwise keep clearing the track while the user edits)
     applyPlan(seqplay::EV_LEAVE);
     active_ = false;
-    dimMask_ = 0;
     view_.mode = SeqPlayViewData::HIDDEN;
     view_.edge = 0;
     refreshView();
@@ -460,22 +458,6 @@ void SeqPlayOverlay::refreshStrip(bool force)
         display.synchronizeRefresh();
 }
 
-// M7: a track that plays a launched clip or an MLR jam is not what the pattern view draws: its column is dimmed (the same dim as a
-// muted column; the strip says clip / cut). trackerPattern.inactive is rebuilt by refreshPattern, which asks dimMask().
-void SeqPlayOverlay::updateDim()
-{
-    uint16_t cut = seqEngine.cutMask();
-    uint16_t mask = 0;
-    for (uint8_t t = 0; t < seqplay::kTracks; t++)
-        if (seqRecTrackLaunched(t) || ((cut >> t) & 1u))
-            mask |= (uint16_t)(1u << t);
-    if (mask != dimMask_)
-    {
-        dimMask_ = mask;
-        PE().refreshPattern();
-    }
-}
-
 void SeqPlayOverlay::refreshPads()
 {
     uint8_t out[48];
@@ -572,7 +554,6 @@ void SeqPlayOverlay::update()
     {
         stripTime = now;
         refreshStrip(false);
-        updateDim();
     }
 
     refreshView();

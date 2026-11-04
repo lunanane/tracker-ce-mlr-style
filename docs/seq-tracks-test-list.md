@@ -49,7 +49,7 @@ Naming: the bottom-right key printed "Perform" is the firmware's **Pattern** key
 | **Pattern held** + Left / Right in Play mode | Stock pattern queue / change (not swallowed). Plain Left / Right switch the strip. |
 | Hold **Rec**, press **Play** in Play mode | Plain play / stop (no stock live-rec arm, edit mode stays off). |
 | Select a track on strip 9-16, press **Left** | The strip shows 1-8 and a yellow `T12 >` marker sits at its right edge (`< T3` at the left edge for the other direction). Pressing Shift snaps the strip to the selected track's group so the mute labels match. |
-| A track plays a launched clip or an MLR jam | Its column in the pattern view is dimmed (same look as a muted column) while Play mode is on; back to normal when it ends / on leaving Play mode. |
+| A track plays a launched clip or an MLR jam | Only the strip says so (`clip` / `cut` on line 2). The pattern column is NOT dimmed (a dim would look like a mute); the pattern view shows the edit pattern, not what that track sounds. |
 | Note / Instr / FX1 / FX2 / Copy / Insert / Delete in Play mode | Nothing happens (no popups over the strip). Up / Down and Play work as in stock. |
 | Hold a pad, tap Pattern (leave), keep the finger down, then lift | No stray note-off / stock pad event on lift; the chord stopped at the tap. |
 | Pads on a track whose type is Off | Nothing (no stock notes either). |
