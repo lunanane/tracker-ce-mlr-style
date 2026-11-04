@@ -8,6 +8,7 @@
 #include "mono.h"
 #include "seqTracksLogic.h"
 #include "seqTracksRec.h"
+#include "seqCut.h"
 
 namespace seqtracks {
 
@@ -47,6 +48,13 @@ class Engine
     void leds(uint8_t track, uint8_t out[seqlogic::kPads]) const;
     bool playing() const { return playing_; }
 
+    // ---- CUT (MLR) layer, see seqCut.h (the Cut object lives outside the engine: the glue places it in external RAM) ----
+    void setCut(seqcut::Cut* c) { cut_ = c; }
+    seqcut::Cut* cut() const { return cut_; }
+    bool postCut(uint8_t track, uint8_t arg); // arg = seqcut::packArg(...); main loop
+    uint16_t cutMask() const { return cut_ ? cut_->activeMask() : 0; } // tracks driven by their playhead
+    void cutPlayStarted() { cutRestart_ = true; } // any context: Play was pressed (transport restarts at step 0)
+
     // ---- record (main loop side) ----
     bool postRec(uint8_t track, uint8_t mode); // mode: REC_STOP / REC_PUNCH / REC_LOOP
     seqrec::Planner::State recState() const { return recState_; }
@@ -64,7 +72,7 @@ class Engine
     uint16_t stateHash() const;                       // CRC of the serialized state (change detection)
 
     // ---- audio context ----
-    bool active() const { return !loading_ && (activeCount_ != 0 || head_ != tail_ || rec_.active()); }
+    bool active() const { return !loading_ && (activeCount_ != 0 || head_ != tail_ || rec_.active() || cutMask() != 0 || cutRestart_); }
     bool isTakenOver(int row) const { return (takenMask_ >> row) & 1u; }
     void stepClock(uint16_t trackUStep); // transport running: once per uStep of track 0, before play_microStep
     void idleTick();                     // transport stopped: once per nano tick
@@ -137,6 +145,8 @@ class Engine
     volatile seqrec::Planner::State recState_;
     volatile uint8_t recTrack_, recHints_, recEnds_;
     volatile bool loading_;
+    seqcut::Cut* cut_;
+    volatile bool cutRestart_;
 };
 
 } // namespace seqtracks

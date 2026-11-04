@@ -7,6 +7,12 @@
 using namespace seqtracks;
 using namespace seqlogic;
 
+// stand-ins for the firmware glue (seqTracks.cpp) used by the CUT layer
+static seqcut::Cut g_cutObj;
+seqtracks::Engine seqEngine;
+seqlogic::TapDetector seqPatternTap;
+void seqCutInit() { seqEngine.setCut(&g_cutObj); }
+
 static int g_fail = 0, g_checks = 0;
 #define CHECK(c)                                                                    \
     do                                                                              \
@@ -788,6 +794,8 @@ static void test_state_change_detection()
     delete e;
 }
 
+#include "test_cut.inc"
+
 int main()
 {
     test_tap();
@@ -811,6 +819,12 @@ int main()
     test_engine_rec_loop_and_stop();
     test_sidecar_roundtrip_and_corruption();
     test_state_change_detection();
+    test_cut_logic();
+    test_cut_jump_and_retrigger();
+    test_cut_loop_reverse_rate();
+    test_cut_stop_resync_transport();
+    test_cut_engine_ring();
+    test_cut_layer();
     printf("%d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }
