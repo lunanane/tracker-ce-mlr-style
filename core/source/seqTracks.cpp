@@ -256,6 +256,28 @@ void removeIfExists(const char* path)
 }
 } // namespace
 
+namespace
+{
+seqlogic::PendingReleases s_pendingRel;
+}
+
+bool seqPadPress(uint8_t track, uint8_t pad)
+{
+    if (s_pendingRel.has(track, pad))
+    {
+        if (!seqEngine.postPad(track, pad, false))
+            return false; // the old release goes first
+        s_pendingRel.remove(track, pad);
+    }
+    return seqEngine.postPad(track, pad, true);
+}
+
+void seqPadRelease(uint8_t track, uint8_t pad)
+{
+    if (!seqEngine.postPad(track, pad, false))
+        s_pendingRel.add(track, pad);
+}
+
 bool seqRecStart(bool oneLoop, uint8_t track)
 {
     if (seqEngine.recState() != seqrec::Planner::IDLE || seqEngine.type(track) == seqlogic::TYPE_OFF)
@@ -277,6 +299,9 @@ void seqRecStop()
 
 void seqTracksUpdate()
 {
+    if (s_pendingRel.any())
+        s_pendingRel.retry([](uint8_t t, uint8_t p) { return seqEngine.postPad(t, p, false); });
+
     // 1. operations planned in the audio context -> pattern (one undo step per recording)
     seqrec::Op op;
     bool wrote = false;

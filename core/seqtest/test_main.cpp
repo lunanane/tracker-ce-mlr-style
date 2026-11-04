@@ -126,6 +126,33 @@ static void test_sidecar_policy()
     CHECK(projectId("/Projects", "ab") != projectId("/Projectsa", "b"));
 }
 
+// Command queue full: the pad release must be kept and retried, the chord must not stay on.
+static void test_pending_release_retry()
+{
+    MockHost h;
+    Engine* e = mk(h);
+    e->postType(2, TYPE_CHORDARP);
+    e->idleTick();
+    CHECK(e->postPad(2, 0, true));
+    e->idleTick();
+    CHECK(e->takenOver(2));
+    for (int i = 0; i < 80; i++)
+        e->postType(5, TYPE_OFF); // fill the ring (harmless commands)
+    PendingReleases pr;
+    if (!e->postPad(2, 0, false))
+        pr.add(2, 0);
+    CHECK(pr.has(2, 0) && pr.any());
+    pr.retry([&](uint8_t t, uint8_t p) { return e->postPad(t, p, false); });
+    CHECK(pr.has(2, 0)); // still full
+    e->idleTick();       // audio drains the ring
+    pr.retry([&](uint8_t t, uint8_t p) { return e->postPad(t, p, false); });
+    CHECK(!pr.has(2, 0) && !pr.any());
+    idle(*e, 96 * 72);
+    CHECK(!e->takenOver(2) && e->soundingCount(2) == 0);
+    CHECK(h.count('+', 2) == h.count('-', 2));
+    delete e;
+}
+
 static void test_off_is_inert()
 {
     MockHost h;
@@ -972,6 +999,7 @@ int main()
     test_tap();
     test_logic();
     test_sidecar_policy();
+    test_pending_release_retry();
     test_off_is_inert();
     test_chord_takeover_stopped();
     test_chord_takeover_playing_and_pattern_returns();

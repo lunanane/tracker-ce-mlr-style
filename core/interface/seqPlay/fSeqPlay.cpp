@@ -125,7 +125,7 @@ void cSeqPlay::releaseAllPads()
     {
         if (padOwner[i] != kNoOwner)
         {
-            seqEngine.postPad(padOwner[i], (uint8_t)i, false);
+            seqPadRelease(padOwner[i], (uint8_t)i);
             padOwner[i] = kNoOwner;
         }
     }
@@ -156,14 +156,16 @@ void cSeqPlay::padEvent(uint8_t pad, uint8_t state)
     {
         if (seqEngine.type(track) == seqlogic::TYPE_OFF)
             return;
-        padOwner[pad] = track;
-        seqEngine.postPad(track, pad, true);
+        if (padOwner[pad] != kNoOwner)
+            return; // already down
+        if (seqPadPress(track, pad)) // a press may be dropped when the queue is full, a release never
+            padOwner[pad] = track;
     }
     else if (state == 0)
     {
         if (padOwner[pad] != kNoOwner)
         {
-            seqEngine.postPad(padOwner[pad], pad, false);
+            seqPadRelease(padOwner[pad], pad);
             padOwner[pad] = kNoOwner;
         }
     }

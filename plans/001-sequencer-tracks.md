@@ -157,6 +157,8 @@ Built around immediate playability; no separate Seq page, no Off/Live/Rec modes.
 - External clock: `Sequencer::tick` calls `Engine::blockTick` once per audio block for every clock source: it drains the command queue
   and, while the transport is stopped or no clock pulse came for 500 ms, runs the stopped-transport logic (Mono silenced, recording
   ended). Chord/Arp free-runs on the nano ticks only (with an external clock: only while clock pulses arrive).
+- Pads: a pad press that does not fit into the command queue (64) is dropped; a release is never lost: it is kept
+  (`seqlogic::PendingReleases`) and retried every main-loop pass until accepted, also after Play mode was left.
 - Scale: the lowest-numbered Chord/Arp track is the scale source (`SeqContext.chord`); other Chord/Arp tracks use their own.
 - No jog-wheel parameter pages yet (play mode, swing, gate, lock, velocity pattern etc.); LCK gesture not mapped. Pad LED
   brightness = level * 2 on the single-colour pad LEDs.

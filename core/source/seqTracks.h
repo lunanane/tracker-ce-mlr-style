@@ -12,6 +12,10 @@ inline void seqNoteOtherInput()
     seqPatternTap.other();
 }
 
+// ---- pads (main loop) ----
+bool seqPadPress(uint8_t track, uint8_t pad);   // false: dropped (queue full); a press may be lost
+void seqPadRelease(uint8_t track, uint8_t pad); // never lost: kept and retried from seqTracksUpdate until accepted
+
 // ---- record (main loop; Play mode screen calls these) ----
 bool seqRecStart(bool oneLoop, uint8_t track); // false: track is Off or already recording. Starts the transport if stopped.
 void seqRecStop();

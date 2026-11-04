@@ -64,6 +64,34 @@ inline bool wantTakeover(uint8_t type, int heldPads, int soundingNotes, bool mon
 // Pending type changes apply on the first pulse of a bar (96 pulses per bar).
 inline bool isBarStart(uint32_t pulseInBar) { return pulseInBar == 0; }
 
+// Pad releases that could not be posted (command queue full) are kept here and retried until they are accepted: a lost
+// release would leave a chord / takeover on forever. Presses may be dropped.
+struct PendingReleases
+{
+    uint64_t bits[kTracks];
+    PendingReleases() { clear(); }
+    void clear()
+    {
+        for (int i = 0; i < kTracks; i++) bits[i] = 0;
+    }
+    void add(uint8_t t, uint8_t pad) { if (t < kTracks && pad < kPads) bits[t] |= (uint64_t)1 << pad; }
+    void remove(uint8_t t, uint8_t pad) { if (t < kTracks && pad < kPads) bits[t] &= ~((uint64_t)1 << pad); }
+    bool has(uint8_t t, uint8_t pad) const { return t < kTracks && pad < kPads && ((bits[t] >> pad) & 1u); }
+    bool any() const
+    {
+        for (int i = 0; i < kTracks; i++) if (bits[i]) return true;
+        return false;
+    }
+    // post(track, pad) -> true when accepted (the release is then forgotten)
+    template <class F> void retry(F post)
+    {
+        for (uint8_t t = 0; t < kTracks; t++)
+            for (uint8_t p = 0; bits[t] && p < kPads; p++)
+                if (((bits[t] >> p) & 1u) && post(t, p))
+                    bits[t] &= ~((uint64_t)1 << p);
+    }
+};
+
 // What Save / Save As does with <project>/seqtracks.bin.
 //  WRITE:  the project used a sequencer -> write the current state.
 //  KEEP:   never used, and this is the project the sidecar was loaded from (it may be an unknown / newer file): leave it.
