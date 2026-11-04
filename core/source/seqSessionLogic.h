@@ -117,6 +117,16 @@ inline SaveSource saveSource(uint16_t launchedMask, uint8_t track, bool fileExis
     return fileExists ? SRC_FILE : SRC_CLEAR;
 }
 
+// What a read of the pattern's workspace file (readWorkspacePatternTo: -1 error, 0 no file, 1 ok) means for the merge:
+// only "no file" may clear the launched tracks; an unreadable file aborts the save and is retried (never overwritten).
+enum MergeMode : uint8_t { MERGE_ABORT = 0, MERGE_FROM_FILE = 1, MERGE_NO_FILE = 2 };
+inline MergeMode mergeMode(int readResult)
+{
+    return readResult < 0 ? MERGE_ABORT : (readResult == 0 ? MERGE_NO_FILE : MERGE_FROM_FILE);
+}
+// The pattern undo history is dropped when the last launched clip goes away (undo could restore another pattern's clip).
+inline bool clearUndoOnMask(uint16_t before, uint16_t after) { return before != 0 && after == 0; }
+
 // ---- "has notes" cache of the window: one 16-bit track mask per pattern row -----------------------
 struct NoteCache
 {

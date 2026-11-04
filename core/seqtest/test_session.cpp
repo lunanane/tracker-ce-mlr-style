@@ -235,6 +235,9 @@ static void test_save_merge_and_launched()
     SCHECK(l.launchedMask(5) == 0x8004);
     SCHECK(saveSource(0x8004, 2, true) == SRC_FILE && saveSource(0x8004, 15, false) == SRC_CLEAR);
     SCHECK(saveSource(0x8004, 3, true) == SRC_RAM && saveSource(0, 0, false) == SRC_RAM);
+    // read errors never count as "no file"
+    SCHECK(mergeMode(-1) == MERGE_ABORT && mergeMode(0) == MERGE_NO_FILE && mergeMode(1) == MERGE_FROM_FILE);
+    SCHECK(clearUndoOnMask(1, 0) && !clearUndoOnMask(0, 0) && !clearUndoOnMask(3, 1) && !clearUndoOnMask(0, 4));
     l.onPatternSwitched();
     SCHECK(l.launchedMask(5) == 0);
 }

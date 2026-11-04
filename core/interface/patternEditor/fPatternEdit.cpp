@@ -1227,6 +1227,11 @@ void cPatternEditor::changeActualPattern(int16_t value)
     if (value && (sequencer.getSeqState() != sequencer.SEQ_STATE_PLAY_PERFORMANCE || seqSessionOwnsPerformance()))
     {
         newFileManager.saveWorkspacePatternNow(mtProject.values.actualPattern);
+        if (seqSessionSaveFailed())
+        {
+            mtPopups.show(0, "Busy"); // sequencer tracks mod: the save did not happen, the pattern stays
+            return;
+        }
     }
 
     mtProject.values.actualPattern =
@@ -1254,6 +1259,11 @@ void cPatternEditor::setActualPattern(int16_t value)
     if (sequencer.getSeqState() != sequencer.SEQ_STATE_PLAY_PERFORMANCE || seqSessionOwnsPerformance())
     {
         newFileManager.saveWorkspacePatternNow(mtProject.values.actualPattern);
+        if (seqSessionSaveFailed())
+        {
+            mtPopups.show(0, "Busy"); // sequencer tracks mod: the save did not happen, the pattern stays
+            return;
+        }
     }
 
     mtProject.values.actualPattern = clamp<int>(value, PATTERN_INDEX_MIN, PATTERN_INDEX_MAX);

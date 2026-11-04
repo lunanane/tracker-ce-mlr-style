@@ -81,10 +81,11 @@ AUDIO_CORE_RAM uint8_t playerEngine ::noteOn(uint8_t instr_idx,
                                              uint8_t fx2_id,
                                              uint8_t fx2_val)
 {
-    if (mtProject.instrument[instr_idx].isActive != 1)
+    if (mtProject.instrument[instr_idx].isActive != 1 || isBlockedNoteOn[instr_idx])
+    {
+        pendingSeqStart = -1; // sequencer tracks mod: a CUT start point must not leak into the next note
         return 0;
-    if (isBlockedNoteOn[instr_idx])
-        return 0;
+    }
     //	__disable_irq();
     AudioNoInterrupts();
     uint8_t status;

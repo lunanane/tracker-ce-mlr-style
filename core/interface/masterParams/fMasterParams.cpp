@@ -3,6 +3,7 @@
 #include "mtPadBoard.h"
 #include "mtPadsBacklight.h"
 #include "mtSequencer.h"
+#include "seqLauncher.h"
 
 #include "patternEditor/patternEditor.h"
 #include "performanceMode/performanceMode.h"
@@ -1100,7 +1101,7 @@ static void functSelectStereoBoost()
 
 static void functSwitchModule(uint8_t button)
 {
-    if (!performanceMode.canPerformanceModeContinueAfterSwitchingTo(button))
+    if (!performanceMode.canPerformanceModeContinueAfterSwitchingTo(button) && !seqSessionOwnsPerformance())
     {
         performanceMode.turnOffAtEndOfPattern();
     }

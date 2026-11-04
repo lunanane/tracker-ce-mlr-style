@@ -93,6 +93,7 @@ class SeqHost : public seqtracks::Host
     {
         uint8_t pos, uStep, last;
         sequencer.seqTrackPos(0, pos, uStep, last);
+        pos = (uint8_t)sequencer.seqCutStockPos(0); // a CUT track 1 reports the position the stock sequencer would be at
         return (int16_t)((pos * 6 + (uStep > 0 ? (uStep - 1) / 8 : 0)) % seqgen::kBarPulses);
     }
     seqrec::Params recParams() override
@@ -118,7 +119,11 @@ namespace
 void cutNoteMap(void*, uint8_t track, uint8_t steps, uint8_t* hasNote) { sequencer.seqCutNoteMap(track, steps, hasNote); }
 int cutTrackPos(void*, uint8_t track) { return sequencer.seqCutPos(track); }
 int cutTrackSteps(void*, uint8_t track) { return sequencer.seqCutSteps(track); }
-void cutStopNote(void*, uint8_t track) { sequencer.seqCutStopNote(track); }
+void cutStopNote(void*, uint8_t track)
+{
+    if (!seqEngine.isTakenOver(track)) // a sequencer plays this track: its notes are not the CUT layer's to stop
+        sequencer.seqCutStopNote(track);
+}
 bool cutSampleTrack(void*, uint8_t track) { return isSampleTrack(track); }
 } // namespace
 
@@ -502,10 +507,23 @@ void seqPadRelease(uint8_t track, uint8_t pad)
         s_pendingRel.add(track, pad);
 }
 
+bool seqRecTrackLaunched(uint8_t track)
+{
+    return track < seqsession::kTracks && ((seqLauncher.launchedMask(seqSessionOwnPattern()) >> track) & 1u);
+}
+
+void seqTracksViewLeft()
+{
+    // like the stock editor's stop(): the project state (and the pattern changed by a recording) is written soon
+    newFileManager.autosaveProjectStruct_ASAP();
+}
+
 bool seqRecStart(bool oneLoop, uint8_t track)
 {
     if (seqEngine.recState() != seqrec::Planner::IDLE || seqEngine.type(track) == seqlogic::TYPE_OFF)
         return false;
+    if (seqRecTrackLaunched(track))
+        return false; // a launched clip's track is not the pattern's: the recording would end up in the wrong place
     s_rec.undoDone = false;
     s_rec.dirty = false;
     s_rec.stopSent = false;
@@ -520,6 +538,17 @@ void seqRecStop()
 {
     seqEngine.postRec(seqEngine.recTrack(), seqtracks::Engine::REC_STOP);
 }
+
+namespace
+{
+bool anySequencerSet()
+{
+    for (uint8_t i = 0; i < seqlogic::kTracks; i++)
+        if (seqEngine.type(i) != seqlogic::TYPE_OFF || seqEngine.pendingType(i) != 0xFF)
+            return true;
+    return false;
+}
+} // namespace
 
 void seqTracksUpdate()
 {
@@ -549,10 +578,19 @@ void seqTracksUpdate()
         wrote = true;
     }
     if (wrote)
+    {
         newFileManager.setActualPatternStructChanged();
+        s_rec.dirty = true;
+    }
     uint8_t ends = seqEngine.recEnds();
     if (ends != s_rec.endsSeen)
     {
+        // a recording ended: the pattern is marked changed and the autosave is asked for, like leaving the stock editor
+        if (s_rec.dirty && mtProject.values.actualPattern == s_rec.pattern)
+            newFileManager.setPatternStructChanged(s_rec.pattern);
+        if (s_rec.dirty)
+            newFileManager.autosaveProjectStruct_ASAP();
+        s_rec.dirty = false;
         s_rec.endsSeen = ends;
         s_rec.undoDone = false;
         s_rec.stopSent = false;
@@ -562,6 +600,8 @@ void seqTracksUpdate()
     if (s_hashTimer > 1000)
     {
         s_hashTimer = 0;
+        if (!s_hadSidecar && !anySequencerSet())
+            return; // nothing set up and no sidecar: a project that never used the mod costs nothing
         uint16_t h = seqEngine.stateHash();
         if (!s_hashInit)
         {

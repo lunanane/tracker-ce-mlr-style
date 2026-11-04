@@ -331,7 +331,7 @@ AUDIO_CORE_FLASH void Sequencer::play_microStep(int row)
             }
         }
 
-        if (seqEngine.cutMask())
+        if (seqEngine.cutMask() && !seqEngine.isTakenOver(row))
             seqCutRetrigger(row, stepToSend); // sequencer tracks mod: CUT layer jumped here, replay "as if at" the position
 
         //		playerRow.micromove.isActive = 0;
@@ -3194,9 +3194,13 @@ void Sequencer::enterPerformanceMode()
 {
     player.performanceMode = 1;
 
-    for (uint8_t a = 0; a < kAllTracks; a++)
+    // sequencer tracks mod: while Session clips run, the per-track lengths are the clips' lengths (keep them)
+    if (!(seqSessionOwnsPerformance() && seqSessionHasLaunched()))
     {
-        player.performance.trackLength[a] = getActualPattern()->track[0].length;
+        for (uint8_t a = 0; a < kAllTracks; a++)
+        {
+            player.performance.trackLength[a] = getActualPattern()->track[0].length;
+        }
     }
 
     if (player.onPatternOrSelectionEnd == cbkTurnOffPerformanceMode)
@@ -3782,7 +3786,11 @@ bool Sequencer::copyCurrentPatternToBuff(uint8_t* destBuff)
     uint8_t* srcPattern = (uint8_t*)currentPattern;
 
     if (seqSessionHasLaunched())
-        seqSessionMergeForSave(destBuff); // Session clips: those tracks are written from the pattern file
+    {
+        // Session clips: those tracks are written from the pattern file; a read error aborts the save
+        if (!seqSessionMergeForSave(destBuff))
+            return false;
+    }
     else
         memcpy(destBuff, srcPattern, sizeof(Sequencer::strPattern));
 

@@ -316,6 +316,7 @@ class cFileManager
 
     // UNDO/REDO
     void storePatternUndoRevision();
+    void clearPatternUndoHistory(); // sequencer tracks mod: undo must not bring back another pattern's clip
     void storeSongUndoRevision(uint8_t index);
     void undoSongPattern();
     void undoPattern();

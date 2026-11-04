@@ -25,6 +25,8 @@ void seqPadRelease(uint8_t track, uint8_t pad); // never lost: kept and retried 
 void seqCutInit(); // constructs the 16 playheads in external RAM (idempotent; also done when the workspace is loaded)
 
 // ---- record (main loop; Play mode screen calls these) ----
+bool seqRecTrackLaunched(uint8_t track); // the track holds a launched Session clip: it is not recorded
+void seqTracksViewLeft();                // Play / Session view closed: asks for the project autosave
 bool seqRecStart(bool oneLoop, uint8_t track); // false: track is Off or already recording. Starts the transport if stopped.
 void seqRecStop();
 void seqTracksUpdate(); // once per main loop pass (Tracker::update): applies recorded steps, watches the state

@@ -90,6 +90,7 @@ void cSeqPlay::stop()
         seqRecStop();
     releaseAllPads();
     padsBacklight.clearGlobalPads(1, 1, 1);
+    seqTracksViewLeft();
 }
 
 //----------------------------------------------------------------------------------------------
@@ -194,7 +195,9 @@ void cSeqPlay::recPressed()
     {
         bool oneLoop = buttons->isButtonPressed(interfaceButtonShift);
         if (!seqRecStart(oneLoop, track))
-            recMsg = seqEngine.type(track) == seqlogic::TYPE_OFF ? "Pick a sequencer type first (Instr + jog wheel)" : "Cannot record now";
+            recMsg = seqRecTrackLaunched(track)                      ? "Clip launched - not recorded"
+                     : seqEngine.type(track) == seqlogic::TYPE_OFF ? "Pick a sequencer type first (Instr + jog wheel)"
+                                                                   : "Cannot record now";
     }
     screenDirty = true;
 }

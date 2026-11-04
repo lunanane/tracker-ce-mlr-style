@@ -81,6 +81,13 @@ void cFileManager::restorePatternSelection(uint8_t index)
     dest->selectEndTrack = src->selectEndTrack;
     dest->selectEndStep = src->selectEndStep;
 }
+void cFileManager::clearPatternUndoHistory()
+{
+    undo.currentIndex = 0;
+    undo.storedCount = 0;
+    undo.redoPossibility = 0;
+}
+
 void cFileManager::storePatternUndoRevision()
 {
     if (undo.currentIndex > (UNDO_CAPACITY - 1))

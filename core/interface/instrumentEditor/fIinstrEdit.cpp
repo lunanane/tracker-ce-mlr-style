@@ -1,3 +1,4 @@
+#include "seqLauncher.h"
 #include "instrumentEditor/instrumentEditor.h"
 #include "mtWavetableEnvelopes.h"
 
@@ -972,7 +973,7 @@ static void functDelete(uint8_t state)
 
 static void functSwitchModule(uint8_t button)
 {
-    if (!performanceMode.canPerformanceModeContinueAfterSwitchingTo(button))
+    if (!performanceMode.canPerformanceModeContinueAfterSwitchingTo(button) && !seqSessionOwnsPerformance())
     {
         performanceMode.turnOffAtEndOfPattern();
     }

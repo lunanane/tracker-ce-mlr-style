@@ -244,7 +244,8 @@ bool cFileManager::saveWorkspacePatternNow(uint8_t index)
         {
             if (!isIdleForScratch())
                 return false; // the scratch buffer is in use: the changed flag stays, a later save does it
-            seqSessionMergeForSave(&fileManagerPatternBuffer);
+            if (!seqSessionMergeForSave(&fileManagerPatternBuffer))
+                return false; // the pattern file could not be read: nothing is written, the changed flag stays
             patternToWrite = &fileManagerPatternBuffer;
         }
         changesFlags.pattern[index] = 0;

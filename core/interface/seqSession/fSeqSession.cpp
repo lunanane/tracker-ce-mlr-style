@@ -81,6 +81,7 @@ void cSeqSession::stop()
     layers[layerIndex]->leave();
     seqSessionActive(false);
     padsBacklight.clearGlobalPads(1, 1, 1);
+    seqTracksViewLeft();
 }
 
 //----------------------------------------------------------------------------------------------

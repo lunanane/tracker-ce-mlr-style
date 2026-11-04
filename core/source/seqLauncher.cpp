@@ -53,6 +53,7 @@ bool ramTrackHasContent(uint8_t t)
 // Transport stopped: queued launches apply at once (nothing ticks the audio side).
 void flushNow()
 {
+    DISABLE_AUDIO_INTERRUPTS(); // the launcher and the player state are audio-side data
     seqLauncher.drain();
     for (uint8_t t = 0; t < seqsession::kTracks; t++)
     {
@@ -63,6 +64,30 @@ void flushNow()
         else if (a == seqsession::Launcher::A_STOP)
             sequencer.seqSessionApplyStop(t);
     }
+    ENABLE_AUDIO_INTERRUPTS();
+}
+
+// The loaded pattern is written to its file before a launched clip replaces one of its tracks (the merge on save reads the
+// file, so unsaved edits of the other tracks would be lost). A pattern that has content but no file yet is written too.
+// false: the save did not happen (file manager busy / file unreadable), the launch is refused.
+bool saveOwnBeforeLaunch()
+{
+    uint8_t own = seqSessionOwnPattern();
+    if (!newFileManager.isPatternStructChanged(own) && newFileManager.isPatternEmpty(own)) // isPatternEmpty: no file
+    {
+        for (uint8_t t = 0; t < seqsession::kTracks; t++)
+        {
+            if (ramTrackHasContent(t))
+            {
+                newFileManager.setPatternStructChanged(own);
+                break;
+            }
+        }
+    }
+    if (!newFileManager.isPatternStructChanged(own))
+        return true;
+    newFileManager.saveWorkspacePatternNow(own);
+    return !newFileManager.isPatternStructChanged(own);
 }
 
 // Somebody else switched performance mode off while launched clips are mixed into the pattern: put the original tracks
@@ -74,6 +99,8 @@ void restoreLaunched()
     uint8_t own = seqSessionOwnPattern();
     uint16_t mask = seqLauncher.launchedMask(own);
     int r = newFileManager.readWorkspacePatternTo(own, &fileManagerPatternBuffer);
+    if (seqsession::mergeMode(r) == seqsession::MERGE_ABORT)
+        return; // read error: never clear the tracks, try again on a later pass
     Sequencer::strPattern* cur = sequencer.getActualPattern();
     DISABLE_AUDIO_INTERRUPTS();
     for (uint8_t t = 0; t < seqsession::kTracks; t++)
@@ -135,14 +162,18 @@ bool seqSessionHasLaunched()
 
 // dest := the pattern to write: header and the tracks of the loaded pattern from RAM, the tracks that came from launched
 // clips from the pattern FILE (cleared when there is none), so a launched clip never ends up in the user's pattern file.
-void seqSessionMergeForSave(void* destPtr)
+bool seqSessionMergeForSave(void* destPtr)
 {
     Sequencer::strPattern* dest = (Sequencer::strPattern*)destPtr;
     Sequencer::strPattern* cur = sequencer.getActualPattern();
     uint8_t own = seqSessionOwnPattern();
     uint16_t mask = seqLauncher.launchedMask(own);
 
-    bool fromFile = newFileManager.readWorkspacePatternTo(own, dest) == 1; // dest = file (or cleared)
+    int rd = newFileManager.readWorkspacePatternTo(own, dest); // dest = file (or cleared)
+    seqsession::MergeMode mode = seqsession::mergeMode(rd);
+    if (mode == seqsession::MERGE_ABORT)
+        return false; // the file exists but could not be read: never overwrite it, the save is aborted
+    bool fromFile = mode == seqsession::MERGE_FROM_FILE;
     if (fromFile)
     {
         memcpy(dest, cur, offsetof(Sequencer::strPattern, track));
@@ -162,6 +193,12 @@ void seqSessionMergeForSave(void* destPtr)
             }
         }
     }
+    return true;
+}
+
+bool seqSessionSaveFailed()
+{
+    return seqSessionHasLaunched() && newFileManager.isPatternStructChanged(seqSessionOwnPattern());
 }
 
 bool seqSessionOwnsPerformance()
@@ -258,6 +295,8 @@ bool seqSessionLaunchClip(uint8_t track, uint8_t pattern)
     }
     if (!newFileManager.isIdleForScratch())
         return false;
+    if (seqLauncher.current(track) == 0 && !saveOwnBeforeLaunch())
+        return false; // "Busy": the pattern's unsaved edits are not on the card yet
 
     sequencer.seqSessionEnterPerformance();
     seqLauncher.beginLoad(track);
@@ -325,6 +364,8 @@ bool seqSessionLaunchScene(uint8_t pattern)
     sequencer.sequencialSwitch_Reset();
     sequencer.setOnGlobalStep(nullCallback);
     newFileManager.saveWorkspacePatternNow(mtProject.values.actualPattern);
+    if (seqSessionSaveFailed())
+        return false; // launched clips and the file manager busy: switching would lose the edits
     mtProject.values.actualPattern = pattern;
     patternEditor.changeActualPattern(0); // loads and swaps the pattern (switchRamPatternsNow -> seqSessionPatternSwitched)
     return true;
@@ -353,6 +394,7 @@ void seqSessionUpdate()
     if (s_wasPlay && !play)
     {
         // transport stopped: launches still queued take effect now, stopped tracks play again
+        DISABLE_AUDIO_INTERRUPTS();
         seqLauncher.drain();
         for (uint8_t t = 0; t < seqsession::kTracks; t++)
         {
@@ -364,8 +406,16 @@ void seqSessionUpdate()
             }
         }
         seqLauncher.onTransportStop();
+        ENABLE_AUDIO_INTERRUPTS();
     }
     s_wasPlay = play;
+
+    // the last launched clip is gone (scene, Pattern page, restore): undo steps taken meanwhile hold clip content
+    static uint16_t s_lastMask = 0;
+    uint16_t mask = seqLauncher.launchedMask(seqSessionOwnPattern());
+    if (seqsession::clearUndoOnMask(s_lastMask, mask))
+        newFileManager.clearPatternUndoHistory();
+    s_lastMask = mask;
 
     // performance mode went off (Performance screen / fader page) while launched clips are mixed into the pattern
     if (!sequencer.isPerformanceMode() && seqSessionHasLaunched())
