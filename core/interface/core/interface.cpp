@@ -13,7 +13,6 @@
 #include "instrumentEditor/instrumentEditor.h"
 #include "masterParams/masterParams.h"
 #include "patternEditor/patternEditor.h"
-#include "seqPlay/seqPlay.h"
 #include "seqPerform/seqPerform.h"
 #include "seqSession/seqSession.h"
 #include "seqHooks.h"
@@ -606,12 +605,6 @@ void interfaceEnvents(uint8_t event, void* param1, void* param2, void* param3)
         {
             mtInterface.deactivateModule((hModule)param1);
             mtInterface.activateModule(&imageViewer, param2 == nullptr ? 0 : *((uint8_t*)param2));
-            break;
-        }
-        case eventActivateSeqPlay:
-        {
-            mtInterface.deactivateModule((hModule)param1);
-            mtInterface.activateModule(&seqPlay, 0);
             break;
         }
         case eventActivateSeqPerform:

@@ -7,10 +7,11 @@ GLUE = ../source/seqTracksCore.cpp ../source/seqCut.cpp ../interface/seqSession/
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
 
 .PHONY: test clean
-test: build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE)
+test: build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE)
 	build/seq_glue_tests$(EXE)
 	build/seq_perform_tests$(EXE)
 	build/seq_mod_tests$(EXE)
+	build/seq_play_tests$(EXE)
 
 build/seq_glue_tests$(EXE): test_main.cpp test_session.cpp test_cut.inc ../source/seqSessionLogic.h ../source/seqCut.h ../source/seqCutLogic.h ../interface/seqSession/cutLayer.h ../source/seqTracksCore.h ../source/seqTracksLogic.h ../source/seqTracksRec.h $(GLUE) $(SEQ)
 	mkdir -p build
@@ -23,6 +24,10 @@ build/seq_perform_tests$(EXE): test_perform.cpp ../source/seqPerformLogic.h
 build/seq_mod_tests$(EXE): test_mod.cpp ../source/seqModLogic.h ../source/seqSidecarLogic.h ../source/seqClipsLogic.h ../source/seqTracksLogic.h
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) test_mod.cpp -o $@
+
+build/seq_play_tests$(EXE): test_play.cpp ../source/seqPlayLogic.h ../source/seqTracksLogic.h
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) test_play.cpp -o $@
 
 clean:
 	rm -rf build

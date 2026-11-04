@@ -17,13 +17,14 @@ See [`CHANGELOG.md`](CHANGELOG.md) for the full list of new features and improve
 This branch adds sequencers per track and a clip launcher on top of Tracker CE. It is a mod by a community member, not Polyend software.
 
 **What it is**
-* **Play mode**: every track gets a sequencer type, **Chord/Arp** or **Mono**, played from the pads, with **Record** (punch-in or one loop) into the track's tracker steps.
+* **Play mode**: every track gets a sequencer type, **Chord/Arp** or **Mono**, played from the pads, with **Record** (punch-in or one loop) into the track's tracker steps. It is a page of the pattern editor: the bottom labels show the sequencers of 8 tracks.
 * **Session view**: an Ableton-style **clip launcher** (CLIPS: a clip is one track of another pattern; scene launch, stop) and an **MLR CUT layer** (a playhead per track that jumps through the pattern, with playhead recording).
 * **Alt Performance page**: a fader page for the perform FX.
 
 **How to enter**
-* Pattern page: tap **Pattern** to cycle Editor > Play mode > Session view > Editor.
-* Performance: **double tap** Performance for the fader page.
+* Pattern page: tap the bottom-right key (**Perform**, the firmware's Pattern key) to switch Play mode on and off. Left / Right switch the strip between tracks 1-8 and 9-16; a screen button selects a track; hold a screen button and turn the wheel to pick its sequencer type; hold Shift to see what the pads do.
+* Song page: double tap Song for the clip launcher (Session view).
+* Performance: **Shift + Performance** for the fader page.
 
 **Install and recovery**
 1. Build (`make original`, `make plus`, `make mini`) or take a release: `PolyendTracker_SEQ_0.1.ptf`, `TrackerPlus_SEQ_0.1.ptf`, `TrackerMini_SEQ_0.1.ptf` (the device shows the version as `1.0.0 CE-SEQ0.1`).

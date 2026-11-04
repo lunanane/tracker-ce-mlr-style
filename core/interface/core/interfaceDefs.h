@@ -275,7 +275,6 @@ enum interfaceEvents
 
     eventActivateTestingProcedure,
 
-    eventActivateSeqPlay, // sequencer tracks mod: Pattern tap -> Play mode
     eventActivateSeqPerform, // sequencer tracks mod: Performance tap -> fader page
     eventActivateSeqSession, // sequencer tracks mod: Pattern tap in Play mode -> Session view
 
