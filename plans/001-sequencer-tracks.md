@@ -175,7 +175,7 @@ Built around immediate playability; no separate Seq page, no Off/Live/Rec modes.
   intervals above 14 semitones cannot be expressed and are dropped as well.
 - Threading: the planner runs in the audio context and pushes operations (8 bytes each, queue of 32) to the main loop, which
   writes the pattern and stores **one** undo revision per recording (first write). Nothing touches the SD from the audio context.
-  Recording ends when: Rec again, the loop is complete, the transport stops, the track is set Off, or the pattern changes.
+  Recording ends when: Rec again, the loop is complete, the transport stops, the track is set Off, the pattern changes, or Play mode is left (`cSeqPlay::stop`).
 - Sidecar `seqtracks.bin` (2810 bytes max): "SQTR", version 1, 16 tracks, per track [type, ChordArp block, Mono block], CRC16-CCITT.
   Written next to `project.mt` by Save / Save as (only when a sequencer was ever used in the project), mirrored in
   `Workspace/seqtracks.bin` by the Workspace autosave (state change detected by a hash about once a second), copied from the project

@@ -85,6 +85,9 @@ void cSeqPlay::start(uint32_t options)
 void cSeqPlay::stop()
 {
     moduleRefresh = 0;
+    // leaving Play mode ends a recording (punch-in would otherwise keep clearing the track while the user edits)
+    if (seqEngine.recState() != seqrec::Planner::IDLE)
+        seqRecStop();
     releaseAllPads();
     padsBacklight.clearGlobalPads(1, 1, 1);
 }

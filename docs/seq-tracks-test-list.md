@@ -106,7 +106,7 @@ Then hold a root pad in columns 1-6. The selection stays when you release (it is
 | End of a recording (Rec, loop end, stop) while the last note is still held/open | A note-off is written on the next step that holds no note, so the last note does not ring into the old pattern content; a step that already has a note is left alone. |
 | Change the pattern (Song mode) while recording | Recording ends; nothing is written into the new pattern. |
 | Set the recorded track to Off (Instr + jog) while recording | Recording ends when the change applies (next bar). |
-| Rec held in other pages | Outside Play mode Rec is the stock Rec (edit mode). Recording started in Play mode keeps running when you leave; come back to Play mode and press Rec to end it. |
+| Rec held in other pages | Outside Play mode Rec is the stock Rec (edit mode). Leaving Play mode (tap Pattern, any other module button) ends a running recording (punch-out note-off as usual); the pattern is not touched while you edit it. |
 
 ## 7b. Shift + Rec: exactly one loop
 | Press | Expected |
