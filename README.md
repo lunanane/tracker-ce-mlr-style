@@ -23,17 +23,17 @@ This branch adds sequencers per track and a clip launcher on top of Tracker CE. 
 
 **How to enter**
 * Pattern page: tap the bottom-right key (**Perform**, the firmware's Pattern key) to switch Play mode on and off. Left / Right switch the strip between tracks 1-8 and 9-16; a screen button selects a track; hold a screen button and turn the wheel to pick its sequencer type; hold Shift to see what the pads do.
-* Song page: double tap Song for the clip launcher (Session view).
-* Performance: **Shift + Performance** for the fader page.
+* Song page: tap Song (once, on the Song page) for the clip launcher (Session view); tap Song again to return. From another page press Song to arrive on the Song page first. The bottom-right **Perform** key (the firmware's Pattern key) only toggles Play mode.
+* Performance: **Shift + the top-row Perform key** (the firmware's Performance key) for the fader page.
 
 **Install and recovery**
-1. Build (`make original`, `make plus`, `make mini`) or take a release: `PolyendTracker_SEQ_0.1.ptf`, `TrackerPlus_SEQ_0.1.ptf`, `TrackerMini_SEQ_0.1.ptf` (the device shows the version as `1.0.0 CE-SEQ0.1`).
+1. Build (`make original`, `make plus`, `make mini`) or take a release: `PolyendTracker_SEQ_0.2.ptf`, `TrackerPlus_SEQ_0.2.ptf`, `TrackerMini_SEQ_0.2.ptf` (the device shows the version as `1.0.0 CE-SEQ0.2`).
 2. Copy the `.ptf` to `/Firmware/` on the microSD card and run **Config > Firmware > Firmware update** (see [Flashing on Hardware & Emergency Recovery](#4-flashing-on-hardware--emergency-recovery)).
 3. Recovery: keep the stock CE `.ptf` for your device on the card. If the mod misbehaves, flash the stock `.ptf` the same way; if it does not boot, use the reset pinhole procedure described in the Emergency Recovery note linked above.
 
-**Status**: v0.1, **untested on hardware**. Use at your own risk and **back up your projects** first. Test plan: [`docs/seq-tracks-test-list.md`](docs/seq-tracks-test-list.md) (start with its "Start here" section); design plans: [`plans/`](plans/).
+**Status**: v0.2, **untested on hardware**. Use at your own risk and **back up your projects** first. Test plan: [`docs/seq-tracks-test-list.md`](docs/seq-tracks-test-list.md) (start with its "Start here" section); design plans: [`plans/`](plans/).
 
-**Known limits (v0.1)**: the CUT state is not saved with the project; on the original Tracker, jumps in long SD-streamed samples may start late; MIDI perform CCs are ignored on the fader page; the delay time click is not fixed; recording on a track that holds a launched clip or is CUT-active is not supported.
+**Known limits (v0.2)**: the CUT state is not saved with the project; on the original Tracker, jumps in long SD-streamed samples may start late; MIDI perform CCs are ignored on the fader page; the delay time click is not fixed; recording on a track that holds a launched clip or is CUT-active is not supported; the stock 10 s autosave still writes while playing (R1 recordings, PING / REV jog on the fader page); kept fader FX continue into event-opened pages until Stop, and the Song page Play toggle back to song mode ends them (stock behaviour); on the Tracker Plus / Mini a clip launch while playing is refused when the pattern has unsaved edits.
 
 **License**: the mod files (`seqgen/`, and the new `seq*` files and their headers) are **PolyForm Noncommercial 1.0.0** (see [`seqgen/LICENSE.md`](seqgen/LICENSE.md)). The Polyend files stay under Polyend's [`LICENSE`](LICENSE) (MIT with the CE restrictions).
 
@@ -113,9 +113,9 @@ From the repository root:
 make all
 
 # Or build a single target:
-make original   # -> build/PolyendTracker_SEQ_0.1.ptf
-make plus       # -> build/TrackerPlus_SEQ_0.1.ptf
-make mini       # -> build/TrackerMini_SEQ_0.1.ptf
+make original   # -> build/PolyendTracker_SEQ_0.2.ptf
+make plus       # -> build/TrackerPlus_SEQ_0.2.ptf
+make mini       # -> build/TrackerMini_SEQ_0.2.ptf
 
 # Build reference .ptfx Sample Editor effects into editor-fx-sdk/build/Effects/:
 make ptfx

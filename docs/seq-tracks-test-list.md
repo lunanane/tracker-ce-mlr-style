@@ -9,14 +9,14 @@ any change.
 ## Start here: the highest-value on-device tests
 Do these first (the full list below is the detail):
 1. Shift+Rec a loop in Play mode, Stop, go to Performance, then Pattern, reopen the project: the whole recording is there.
-2. Record on track 3, go to the launcher (Song double tap), launch another clip on track 3, then launch the own scene: the recording is intact.
+2. Record on track 3, go to the launcher (Song tap on the Song page), launch another clip on track 3, then launch the own scene: the recording is intact.
 3. Launch clips, wait 15 s, Save, Save As, power cycle: the original pattern files are unchanged and edits on other tracks are kept; also in song mode.
 4. A project that never used the mod behaves like stock CE (section 12).
 5. CUT jumps on track 1 while Chord/Arp runs elsewhere: the arp stays on the bar.
 6. External MIDI clock start / stop / cable pull with Chord/Arp + Mono: no hung notes, a recording ends.
 7. Clips running, visit Master, come back: the clips keep playing.
 8. Reflash the stock .ptf to confirm the recovery path.
-9. R2: Song double tap opens the launcher; with the song playing launch a clip (LIVE, song frozen), BACK:SONG resumes; a Play 1x clip chains into the next row; Stop = panic (section 9, 9b, 9c).
+9. R2: a Song tap on the Song page opens the launcher; with the song playing launch a clip (LIVE, song frozen), BACK:SONG resumes; a Play 1x clip chains into the next row; Stop = panic (section 9, 9b, 9c).
 
 Contents: 1-6 Play mode | 7 Record | 8 save / load | 9 Session CLIPS | 10 Session CUT (10c lane screen, SYNC ALL, panic) | 11 alt Performance page | 12 stock-behaviour checks.
 
@@ -88,7 +88,7 @@ Use a MIDI track (9-16) with a synth/hardware on its channel, and a sample track
 | While the pattern plays a note pattern on that track: hold a root pad | Pattern notes on that track go silent while you hold; other tracks keep playing. Release: the track's pattern is back at the next step. |
 | Panel pads (cols 7-10), SETTINGS pad (col 12, row 1) | Chord / arp settings change as documented in plans/001 (types, T/S/D/Z rows). Pads show LEDs. |
 | Sample track | The chord is monophonic on a sample track (last note wins). MIDI tracks send every chord note. |
-| Stop the transport while holding a pad | Chord keeps sounding (free-running clock) until released. |
+| Stop the transport while holding a pad | Stop is the panic: the chord ends and the pad is released (the lift afterwards does nothing), as in the Stop row of section 2. |
 
 ## 5. Mono live (track type `M`)
 | Press | Expected |
@@ -184,7 +184,7 @@ Known limits of step B: the sidecar is rewritten about once a second after a cha
 not written to patterns other than the one you started in; sample-track chords keep the lowest note only; no pad-velocity record.
 
 # Session view: CLIPS (section 9) and CUT (section 10)
-**Plan 005 R2.** The clip launcher is reached with a **Song double tap**: press **Song** to arrive on the Song page, then tap **Song** again (press and release inside 0.4 s, no other button). Press **Song** in the launcher to go back to the Song page. Screen buttons 7 / 8 switch between the CLIPS and the CUT layer; all 12 x 4 pads belong to the active layer. A *clip* = one track of one pattern, a *scene* = a whole
+**Plan 005 R2.** The clip launcher is reached with a **Song tap** (on the Song page): press **Song** to arrive on the Song page, then tap **Song** again (press and release inside 0.4 s, no other button): from the Song page one Song tap opens the launcher, another Song tap returns to the Song page (from any other page, press Song to arrive on the Song page first, then tap it again). Screen button 8 switches between the CLIPS and the CUT layer; all 12 x 4 pads belong to the active layer. A *clip* = one track of one pattern, a *scene* = a whole
 pattern. **Rows are patterns** (row n = pattern n, moved by hand, independent of the song arrangement). Needs patterns 1-8 that hold different notes on a few tracks, saved in the project. Tracks that have no notes in a pattern are empty clips.
 
 ## 9. Session view, CLIPS layer (plan 005 R2)
@@ -192,7 +192,7 @@ Pads (1-based): columns 1-8 = the 8 tracks of the window, **column 9 empty (gap)
 Screen (ASCII text and shapes only): a grid of 12 pattern rows x 16 tracks (gap after track 8) and the scene column; **a red frame round the 8 x 4 pad window** (and one round its scene cells); empty cell dark, clip with notes grey, playing green with a dark progress bar, queued blinking white, follow action armed = steady green outline; a notch in the top right corner = Play 1x (red notch = the next row is empty, the track stops after this clip); a dim square in an empty cell of a sounding track = pressing that pad stops the track; a white outline = the focused clip; a green bar on the left edge = the row the transport plays. Right column: launch quantise, countdown ("next in N steps"), LIVE state, focused clip and its mode, short help.
 | Press | Expected |
 |---|---|
-| Song page, tap **Song** twice quickly | The launcher opens: grid, red frame round tracks 1-8 x rows 1-4, labels `MODE LOOP` `Q: bar` `STOP` (button 4 empty) and `CUT` on 8. Pad LEDs: playing clips bright (the loaded pattern's row), clips with notes dim, empty clips off (a dimmer light for empty pads of a sounding track), scene pads of the loaded pattern bright. |
+| Song page, tap **Song** once (a short press; from another page: press Song to arrive, then tap it again) | The launcher opens: grid, red frame round tracks 1-8 x rows 1-4, labels `MODE LOOP` `Q: bar` `STOP` (button 4 empty) and `CUT` on 8. Pad LEDs: playing clips bright (the loaded pattern's row), clips with notes dim, empty clips off (a dimmer light for empty pads of a sounding track), scene pads of the loaded pattern bright. |
 | Press **Song** once (not a tap: hold it > 0.4 s, or press another button with it) | No launcher; the stock Song page behaves as before (slot list focus while held). |
 | **Pattern**, **Performance**, any other module button in the launcher | Leaves the launcher for that page; the clips keep playing. **Song** returns to the Song page. |
 | **Right** / **Left** | The red frame and the pads jump to tracks 9-16 / 1-8; the pad columns show those tracks. At tracks 9-16 **Right** does nothing, at 1-8 **Left** does nothing. |
@@ -252,7 +252,7 @@ The clip screen is budgeted in software (grid at most about 5.5 KB of the 8 KB f
 
 
 ## 10. Session CUT (MLR playhead, plan 002 S2)
-Open it with a Song double tap (launcher) > screen button 8 (CUT). Title "Session: CUT   tracks 1-4"; screen buttons 1-4 choose the four tracks shown (1-4, 5-8, 9-12, 13-16); the info lines explain the pads. Use a project with: track 1 = ONE long
+Open it with a Song tap on the Song page (launcher) > screen button 8 (CUT). Title "Session: CUT   tracks 1-4"; screen buttons 1-4 choose the four tracks shown (1-4, 5-8, 9-12, 13-16); the CUT layer draws its own lane screen (no info lines). Use a project with: track 1 = ONE long
 loop sample on step 1 only (e.g. a 2 s drum loop, pattern 16 steps, tempo so the loop fits the 16 steps, note at the sample's
 original pitch, play mode One-shot or Loop), track 2 = a normal drum pattern, track 3 = a MIDI track with a few notes.
 Pad grid of the layer (all 12 columns, none reserved): 4 rows = 4 tracks of the group; pads 1-8 of a row = 8 positions; pad 9 = STOP/START,
@@ -274,7 +274,7 @@ Pad grid of the layer (all 12 columns, none reserved): 4 rows = 4 tracks of the 
 | Hold Rec, jam jumps on row 1, release Rec | While Rec is held the RESYNC pad of the touched row blinks (recording). On release the row repeats the jumped sequence, step for step, forever; RESYNC LED bright = a recorded loop replays. Rows you did not touch while Rec was held are not changed. |
 | With a recorded loop running: switch the group (rows show other tracks), switch layers / pages | The recorded loop keeps playing. Switch back: LEDs show it. |
 | Press a pad on a row with a recorded loop | The pad overrides the recording while it is held (jump, loop); on release the row returns to the recorded loop in phase. |
-| Stop and start the transport | Cut rows with a recorded loop restart the loop with the pattern; rows with only a jump/loop/reverse/rate keep that setting and restart at step 1. |
+| Stop and start the transport | Stop is the panic: SYNC ALL ends everything CUT (jumps, loops, reverse, rate, recorded loops); Play gives the stock pattern. |
 | Song mode / pattern chain with a cut row | The song advances at the real pattern end (not at the cut position); the cut row keeps its own position inside the new pattern (clamped to its length). Check: the next pattern loads and the song does not hang or skip. |
 | Rate 1/2 on a row with a micromove (delayed) note | The delayed note still fires; the row never goes silent for good. |
 | STOP a row, then START | The row is silent while stopped, restarts on the global position; a note you hold while live recording is not cut off. |
@@ -282,11 +282,11 @@ Pad grid of the layer (all 12 columns, none reserved): 4 rows = 4 tracks of the 
 | Track with a Slice / Beat-slice / Granular / Wavetable instrument | Jumps retrigger the note but without an offset (Position FX means something else there). |
 | Long sample streamed from the SD card (>= 256 KB, original Tracker) | Jumping past the first ~0.7 s may start late or with a short gap (the stream buffer refills on the main loop). Note how long the gap is and whether the main-loop redraws make it worse (listen on the loop track while a screen redraws). |
 | Pad jumps + an FX-heavy step (note step with 2 FX in use) | The retriggered note loses its second FX unless that is Slice / Reverse / Granular length (then it is replayed without offset). |
-| Save the project, reload | CUT state is NOT saved (v0.1): all rows are stock after loading. Recorded playhead loops are lost with the power-off. |
+| Save the project, reload | CUT state is NOT saved: all rows are stock after loading. Recorded playhead loops are lost with the power-off. |
 
-Known limits (S8, S9): recording on a CUT-active or launched track is not supported in v0.1 (a launched track refuses Rec with "Clip launched - not recorded"; on a CUT-active track the written steps are odd); a CUT release (pad up) that was lost because the queue was full is retried only while the Session view is visible.
+Known limits (S8, S9): recording on a CUT-active or launched track is not supported (a launched track refuses Rec with "Clip launched - not recorded"; on a CUT-active track the written steps are odd); a CUT release (pad up) that was lost because the queue was full is retried on every page (cutUpdate).
 
-Known limits of the CUT layer v0.1: the offset assumes the sample plays at its original speed; the offset has full 16-bit resolution and follows the note pitch / tune;
+Known limits of the CUT layer: the offset assumes the sample plays at its original speed; the offset has full 16-bit resolution and follows the note pitch / tune;
 reverse reverses the playhead order only (samples still play forward); a pattern switch (song mode / pattern chain) does not reset a cut row;
 selection looping and Performance-mode track lengths are ignored by cut rows; swing is ignored for the rate-2 half step.
 
@@ -397,6 +397,8 @@ Known: delay time jumps (no smoothing in the delay engine, same as the Master pa
 Known limits: FX that exist only for synth tracks / global FX use the stock slot rules; two slots with the same FX exclude each other
 (stock rule), the older fader bar may go dark.
 
+Known limits (v0.2 review): the stock 10 s autosave (fileManager) still writes while playing: R1 recordings set the pattern-changed flag and a PING / REV jog on the fader page sets the project-changed flag, so a save can run during play (watch for stream hiccups). On the Song page, the Play toggle back to song mode ends kept fader FX (stock behaviour). Kept fader FX continue into pages opened by an event (popups) until Stop.
+
 ## 11d. Leaving the fader page, Stop panic (plan 005 owner decisions)
 Setup: tracks 1 and 2 selected, a filter on slot 1, a volume FX on slot 2; latch rows 1 and 2 and press pads so both are ENGAGED / LATCHED.
 
@@ -429,6 +431,6 @@ A project with no sequencer set and no Session use must behave exactly like stoc
 | Hold **Pattern**, turn the jog wheel or press a pad, release Pattern | Nothing new happens. |
 | Hold **Shift** (or any button), tap **Pattern** | Play mode does not toggle. |
 | Come from another page (e.g. Song) by pressing Pattern | Pattern page opens, no Play mode (the first press only switches pages). |
-| Open a project, tap Pattern twice (Play mode, Session) and back to the editor without touching any pad; Save | No `seqtracks.bin` is created, the pattern files are unchanged, playback is as before (Session alone changes nothing until a clip is launched). |
+| Open a project, tap the bottom-right **Perform** key (firmware Pattern; Play mode) and back to the editor without touching any pad; Save | No `seqtracks.bin` is created, the pattern files are unchanged, playback is as before. (Pattern twice no longer enters Session: the launcher is reached from the Song page; Pattern only toggles Play mode.) |
 | Tap Performance once, play with the stock Performance page | Exactly the stock page (the alt fader page only opens with Shift + Performance). |
-| Project with CUT used (rows cut, recorded loop), save and re-open | CUT is not saved in v0.1: all rows stock after loading; `seqtracks.bin` is only written when a sequencer type is set. |
+| Project with CUT used (rows cut, recorded loop), save and re-open | CUT is not saved: all rows stock after loading; `seqtracks.bin` is only written when a sequencer type is set. |
