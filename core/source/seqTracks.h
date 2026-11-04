@@ -5,17 +5,43 @@
 
 extern seqtracks::Engine seqEngine;
 extern seqlogic::TapDetector seqPatternTap; // Pattern button tap detection (interface inputs + pattern editor)
-extern uint8_t seqPadsHeld; // pads currently held (any page); a Performance tap needs none
 extern seqlogic::TapDetector seqPerformTap; // Performance button tap detection (interface inputs + Performance pages)
+extern seqlogic::TapDetector seqSongTap;    // Song button tap detection (interface inputs + Song page)
+extern uint8_t seqPadsHeld; // pads currently held (any page); informational, held pads do not block a tap (plan 005 M4)
 
-uint32_t seqNowMs(); // free-running milliseconds (Pattern tap timing)
+uint32_t seqNowMs(); // free-running milliseconds (tap timing)
 
-// Any button / pad / jog input other than the Pattern button itself (breaks a Pattern tap).
-inline void seqNoteOtherInput()
+// A button other than the mode buttons themselves was used: breaks the running taps (only buttons break a tap; pads and the jog
+// wheel do not). The flags say which mode button changed: it does not break its own tap.
+inline void seqNoteButtonInput(bool isPattern, bool isPerformance, bool isSong)
 {
-    seqPatternTap.other();
-    seqPerformTap.other();
+    if (!isPattern)
+        seqPatternTap.other();
+    if (!isPerformance)
+        seqPerformTap.other();
+    if (!isSong)
+        seqSongTap.other();
 }
+
+// Release of a mode button: true = it was a tap. A quick press that was refused (another button interfered) sets the
+// "refused" signal; the title bar flashes once (seqTapRefusedTake, polled by the interface).
+extern volatile bool seqTapRefusedFlag;
+inline bool seqTapUp(seqlogic::TapDetector& d)
+{
+    bool tap = d.up(seqNowMs());
+    if (d.refusedLast())
+        seqTapRefusedFlag = true;
+    return tap;
+}
+inline bool seqTapRefusedTake()
+{
+    bool r = seqTapRefusedFlag;
+    seqTapRefusedFlag = false;
+    return r;
+}
+
+// Transport Stop = panic (plan 005 M6): Sequencer::stop() asks (any context), the main loop runs seqPanic() (seqHooks.h) once.
+void seqPanicRequest();
 
 // ---- pads (main loop) ----
 bool seqPadPress(uint8_t track, uint8_t pad);   // false: dropped (queue full); a press may be lost
