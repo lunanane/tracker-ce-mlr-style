@@ -1,10 +1,13 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
-// Alt Performance page: four 8-step pad faders (plans/004-perform-faders.md). Entered / left with a
-// Performance tap on the Performance page; the stock Performance page is untouched when never tapped.
+// Alt Performance page: four 8-step pad faders (plans/004-perform-faders.md, plan 005 R3). Entered with Shift + the top-row
+// Performance button (from the stock page and from other modules); a Performance press leaves to the stock page.
+// Dialled-in FX are not saved with the project; they keep sounding when the page is left for the mod's own views (Pattern /
+// Play mode, Song / clip launcher, MLR) and end on DISENGAGE, UNLATCH or the Stop panic (seqPanicFx).
 #ifndef INTERFACE_SEQPERFORM_H_
 #define INTERFACE_SEQPERFORM_H_
 
 #include "core/modulesBase.h"
+#include "seqPerform/faderView.h"
 #include "seqPerformLogic.h"
 
 class cSeqPerform : public ModuleBase
@@ -25,40 +28,49 @@ class cSeqPerform : public ModuleBase
     void trackButton(uint8_t button);
     void jog(int16_t value);
     void leaveToStock();
+    void leaveTo(uint8_t button);
     void releaseAll();
+    void releaseMomentary();
     void refreshScreen();
     void refreshPads();
 
     // fader logic
     void faderPress(uint8_t row, uint8_t step);
     void faderRelease(uint8_t row);
-    void faderReset(uint8_t row);
+    void faderDisengage(uint8_t row);
     void releaseRow(uint8_t row);
     void setPage(uint8_t newPage);
     void reapplyActive();
     void syncKnockedOut(uint8_t keepSlot);
     uint8_t rowStep(uint8_t row) const;
 
+    // long-lived state (survives leaving the page, see start())
+    void prepareFromElsewhere();          // seqFaderShiftFromElsewhere
+    void panic();                         // seqPanicFx (transport Stop)
+    void stockEntered();                  // the stock Performance page starts fresh: our kept FX end
+    bool keptFx() const { return fxKept; }
+    void endEngaged(bool alsoStockRows);  // release every slot / send we hold, latches off
+
+    seqperf::State st;
     uint8_t page = seqperf::PAGE_FX1;
-    uint8_t fxStep[3][4];         // FX pages: current step per fader (0 = off)
     int16_t fxVal[12];            // value applied to each slot by the faders / stock page (0 = none)
     int16_t stockVal[12];         // value a stock-page pad row had when the page opened
     uint16_t stockOn = 0;         // slots that had a stock pad row selected (bit = slot)
-    uint8_t sendStep[2];          // PING / REV fader 1 (send of the selected tracks)
-    bool latch[seqperf::PAGE_COUNT][4];
     uint64_t padHeld = 0;         // fader pads currently held (bit = pad)
+    bool fxKept = false;          // we left the page with FX dialled in and kept them running
+    bool fromElsewhere = false;   // entered by Shift + Performance from another module
     bool shiftView = false;
+    uint8_t leaveKind = seqperf::LEAVE_END;
 
     uint8_t ledShown[48];
 
     // display
     hControl label[8];
     hControl bgLabel;
-    hControl titleLabel;
-    hControl infoLabel[5];
+    hControl viewCtrl;
 
     char buttonText[8][6];
-    char infoText[5][52];
+    strFaderView viewData;
 
     uint32_t shownKey = 0xFFFFFFFF;
     bool screenDirty = true;

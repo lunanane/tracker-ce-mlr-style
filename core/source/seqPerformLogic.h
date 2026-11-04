@@ -1,12 +1,15 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
-// Pure mapping logic of the alt Performance page (plans/004-perform-faders.md): pad -> cell, fader step ->
-// value per parameter, LED bars. No Polyend includes, host-testable (core/seqtest/test_perform.cpp).
+// Pure logic of the alt Performance page (plans/004-perform-faders.md, plan 005 R3): pad -> cell, fader step ->
+// value per parameter, LED bars, the engaged / disengaged state of the four fader rows, what survives leaving the page.
+// No Polyend includes, host-testable (core/seqtest/test_perform.cpp).
 #pragma once
 #include <stdint.h>
 
 namespace seqperf {
 
-enum Cell : uint8_t { CELL_NONE = 0, CELL_FADER, CELL_GROUP, CELL_PING, CELL_REV, CELL_LATCH, CELL_RESET };
+// Column 12 is DISENGAGE (plan 005 R3, owner decision): that row's effect goes back to "not dialled in". CELL_RESET is the
+// v0.1 name of the same pad column (alias, so the old checks still read the same).
+enum Cell : uint8_t { CELL_NONE = 0, CELL_FADER, CELL_GROUP, CELL_PING, CELL_REV, CELL_LATCH, CELL_DISENGAGE, CELL_RESET = CELL_DISENGAGE };
 
 // Pages (what the four faders control). FX pages use the stock perform slots 4*page .. 4*page+3.
 enum Page : uint8_t { PAGE_FX1 = 0, PAGE_FX2 = 1, PAGE_FX3 = 2, PAGE_PING = 3, PAGE_REV = 4, PAGE_COUNT = 5 };
@@ -14,12 +17,12 @@ enum Page : uint8_t { PAGE_FX1 = 0, PAGE_FX2 = 1, PAGE_FX3 = 2, PAGE_PING = 3, P
 struct PadInfo
 {
     Cell cell;
-    uint8_t index; // FADER: row 0..3, GROUP: 0..2 (= page), LATCH / RESET: fader row
+    uint8_t index; // FADER: row 0..3, GROUP: 0..2 (= page), LATCH / DISENGAGE: fader row
     uint8_t step;  // FADER: 1..8 (column + 1)
 };
 
 // Pad number 0..47 = row * 12 + column. Column 9 (index 8): groups in rows 1-3, row 4 dark on purpose.
-// Column 10: PING (row 1), REV (row 2). Column 11: LATCH. Column 12: RESET.
+// Column 10: PING (row 1), REV (row 2). Column 11: LATCH. Column 12: DISENGAGE.
 inline PadInfo mapPad(uint8_t pad)
 {
     PadInfo p = { CELL_NONE, 0, 0 };
@@ -54,7 +57,7 @@ inline PadInfo mapPad(uint8_t pad)
     }
     else
     {
-        p.cell = CELL_RESET;
+        p.cell = CELL_DISENGAGE;
         p.index = row;
     }
     return p;
@@ -162,8 +165,8 @@ inline uint8_t pageForCell(Cell c, uint8_t index, uint8_t current)
     return current;
 }
 
-// Is the pad of a non-fader cell lit?
-inline bool padIsLit(const PadInfo& p, uint8_t page, bool latch)
+// Is the pad of a non-fader cell lit? engaged: the row of a DISENGAGE pad has something to disengage (lit = it will act).
+inline bool padIsLit(const PadInfo& p, uint8_t page, bool latch, bool engaged = true)
 {
     switch (p.cell)
     {
@@ -171,9 +174,185 @@ inline bool padIsLit(const PadInfo& p, uint8_t page, bool latch)
         case CELL_PING: return page == PAGE_PING;
         case CELL_REV: return page == PAGE_REV;
         case CELL_LATCH: return latch;
-        case CELL_RESET: return true;
+        case CELL_DISENGAGE: return engaged;
         default: return false;
     }
+}
+
+// ---- engaged state of the four fader rows (plan 005 R3) ----
+// A row is ENGAGED when its effect is dialled in: FX page: step != 0; send fader (PING / REV row 1): step != 0; PING / REV rows
+// 2-4 are project values and count as dialled once a fader pad was pressed. DISENGAGE (pad column 12) takes the row back to
+// "not dialled in" with nothing remembered. The state lives in a long-lived object so it survives leaving the page.
+enum ParamState : uint8_t { PS_PROJECT = 0, PS_DIALLED = 1, PS_DEFAULT = 2 };
+enum RowStatus : uint8_t { RS_OFF = 0, RS_LIVE, RS_LATCHED, RS_PROJECT, RS_DIALLED, RS_DEFAULT };
+
+struct State
+{
+    uint8_t fxStep[3][4];       // FX pages: current step per fader (0 = off)
+    uint8_t sendStep[2];        // PING / REV fader 1 (send of the selected tracks)
+    bool latch[PAGE_COUNT][4];
+    uint8_t paramState[2][3];   // PING / REV faders 2-4: ParamState
+
+    void clear()
+    {
+        for (int p = 0; p < 3; p++)
+            for (int r = 0; r < 4; r++)
+                fxStep[p][r] = 0;
+        for (int i = 0; i < 2; i++)
+        {
+            sendStep[i] = 0;
+            for (int r = 0; r < 3; r++)
+                paramState[i][r] = PS_PROJECT;
+        }
+        for (int p = 0; p < PAGE_COUNT; p++)
+            for (int r = 0; r < 4; r++)
+                latch[p][r] = false;
+    }
+    static bool isParamRow(uint8_t page, uint8_t row) { return page > PAGE_FX3 && row > 0; }
+    bool engaged(uint8_t page, uint8_t row) const
+    {
+        if (page >= PAGE_COUNT || row >= 4)
+            return false;
+        if (page <= PAGE_FX3)
+            return fxStep[page][row] != 0;
+        if (row == 0)
+            return sendStep[page - PAGE_PING] != 0;
+        return paramState[page - PAGE_PING][row - 1] == PS_DIALLED;
+    }
+    // Effects that are sounding because of the faders (project values do not count: they are not "perform FX").
+    bool anyEngaged() const
+    {
+        for (int p = 0; p < 3; p++)
+            for (int r = 0; r < 4; r++)
+                if (fxStep[p][r])
+                    return true;
+        return sendStep[0] || sendStep[1];
+    }
+    // Bit per page: something is dialled in on it (for the page chips of the screen).
+    uint8_t pageMask() const
+    {
+        uint8_t m = 0;
+        for (uint8_t p = 0; p < PAGE_COUNT; p++)
+            for (uint8_t r = 0; r < 4; r++)
+                if (engaged(p, r))
+                    m = (uint8_t)(m | (1u << p));
+        return m;
+    }
+    // DISENGAGE one row: off, latch off, nothing remembered (a project-value row returns to its default; the caller applies it).
+    // true: the row had something to take back.
+    bool disengage(uint8_t page, uint8_t row)
+    {
+        if (page >= PAGE_COUNT || row >= 4)
+            return false;
+        bool had = engaged(page, row) || latch[page][row];
+        latch[page][row] = false;
+        if (page <= PAGE_FX3)
+            fxStep[page][row] = 0;
+        else if (row == 0)
+            sendStep[page - PAGE_PING] = 0;
+        else
+        {
+            if (paramState[page - PAGE_PING][row - 1] != PS_DEFAULT)
+                had = true;
+            paramState[page - PAGE_PING][row - 1] = PS_DEFAULT;
+        }
+        return had;
+    }
+    // A fader pad was pressed on a project-value row.
+    void dialParam(uint8_t page, uint8_t row)
+    {
+        if (isParamRow(page, row))
+            paramState[page - PAGE_PING][row - 1] = PS_DIALLED;
+    }
+    // Leaving for the mod's own views: does this row keep sounding? Latched rows do, and so do rows the stock page had latched
+    // (stockRow). A row that only plays because a pad is held does not.
+    bool keepsOnLeave(uint8_t page, uint8_t row, bool stockRow) const
+    {
+        return engaged(page, row) && (latch[page][row] || stockRow);
+    }
+    RowStatus status(uint8_t page, uint8_t row) const
+    {
+        if (isParamRow(page, row))
+        {
+            uint8_t s = paramState[page - PAGE_PING][row - 1];
+            return s == PS_DIALLED ? RS_DIALLED : (s == PS_DEFAULT ? RS_DEFAULT : RS_PROJECT);
+        }
+        if (!engaged(page, row))
+            return RS_OFF;
+        return latch[page][row] ? RS_LATCHED : RS_LIVE;
+    }
+};
+
+// ---- what leaving the fader page does (plan 005 owner decision + M5 table) ----
+// Destinations by the button that was pressed.
+enum Dest : uint8_t
+{
+    DEST_STOCK_PERFORMANCE = 0, // Performance: back to the stock page (it takes over its own state)
+    DEST_STOCK_KEEPS,           // Master / Params: stock keeps performance mode running through them
+    DEST_SEQ_VIEWS,             // Pattern (Play mode) / Song (clip launcher, MLR): the mod's own views
+    DEST_OTHER                  // everything else
+};
+enum Leave : uint8_t
+{
+    LEAVE_END = 0,     // stock rule: the fader FX end (at the pattern end while playing)
+    LEAVE_HAND_OVER,   // the target keeps the performance mode; the fader FX end, the stock page's own state stays
+    LEAVE_KEEP_RUNNING // dialled-in FX keep sounding; only held pads end; disengage / unlatch / Stop end them later
+};
+inline Leave leaveFor(Dest d, bool anyEngaged)
+{
+    switch (d)
+    {
+        case DEST_STOCK_PERFORMANCE:
+        case DEST_STOCK_KEEPS: return LEAVE_HAND_OVER;
+        case DEST_SEQ_VIEWS: return anyEngaged ? LEAVE_KEEP_RUNNING : LEAVE_END;
+        default: return LEAVE_END;
+    }
+}
+
+// Can the page start from what was left running? Needs the FX owner bit still set (nothing turned performance mode off since)
+// and the same slot values still sounding.
+inline bool canResume(bool kept, bool fxOwnerHeld, bool anyEngaged) { return kept && fxOwnerHeld && anyEngaged; }
+
+// "1-4 7": the tracks of a bit mask (bit t = track t+1), runs of three or more as a range. Writes "-" for none. Returns the length.
+inline int formatTracks(char* out, int cap, uint16_t mask)
+{
+    int n = 0;
+    auto put = [&](char c) { if (n < cap - 1) out[n++] = c; };
+    auto num = [&](int v) { if (v >= 10) put((char)('0' + v / 10)); put((char)('0' + v % 10)); };
+    if (cap < 2)
+        return 0;
+    int t = 0;
+    bool first = true;
+    while (t < 16)
+    {
+        if (!(mask & (1u << t))) { t++; continue; }
+        int e = t;
+        while (e + 1 < 16 && (mask & (1u << (e + 1))))
+            e++;
+        if (!first)
+            put(' ');
+        first = false;
+        if (e - t >= 2)
+        {
+            num(t + 1);
+            put('-');
+            num(e + 1);
+        }
+        else
+        {
+            num(t + 1);
+            if (e > t)
+            {
+                put(' ');
+                num(e + 1);
+            }
+        }
+        t = e + 1;
+    }
+    if (first)
+        put('-');
+    out[n] = 0;
+    return n;
 }
 
 } // namespace seqperf

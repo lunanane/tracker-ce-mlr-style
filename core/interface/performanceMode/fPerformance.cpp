@@ -84,6 +84,7 @@ void cPerformanceMode::start(uint32_t options)
     // ustawienie trackow
     if (!dontClearPerformanceMode)
     {
+        seqFaderStockEntered(); // sequencer tracks mod: perform FX the fader page kept running end before the rows reset
         performance.resetSelectedRows();
         tracksPage = 0;
 
