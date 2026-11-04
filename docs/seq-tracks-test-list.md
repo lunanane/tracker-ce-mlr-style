@@ -269,6 +269,10 @@ Use the project of section 10 (track 1 loop sample, track 2 drums, track 3 MIDI)
 | Leave the Session view with jams running, play the pattern editor | The jammed tracks still play their jam (stock editor does not touch them) until SYNC ALL or Stop. |
 | **Transport Stop** (panic, plan 005 M6) with jams, reverse, a recorded loop, held pads, Rec held | Everything CUT ends: nothing is left off the grid; **Stop then Play always gives the stock pattern**. Releasing the pads / Rec afterwards does nothing. Works from any view (check from the pattern editor and from CLIPS too). |
 | Stop pressed when CUT was never used | Nothing visible happens (the command is a no-op). |
+| **SYNC ALL landing on a note** (jam a long loop sample on track 1 to another position, press SYNC ALL) | The sample is struck again from the matching offset at the boundary: it does not keep playing off the grid. Same for plain RESYNC. |
+| Panic (Stop) while stopped, with jams | Lanes and the R1 strip show the tracks as normal at once (no OFF GRID, label without brackets). |
+| Display-list worst case: 128-step patterns on all four lanes, every flag set (stopped, reverse, rate, Rec) | No truncated or missing shapes (the whole frame must fit 8172 bytes: read `lastMemoryUsed` in a DEBUG build; host estimate for the lanes alone is about 3.6 KB). |
+| Main-loop gap with the 25 fps playhead (Profiler: longest main-loop pass while CUT is visible and the transport runs, long SD-streamed sample playing) | No audible stream underrun. If there is one, set `kRedrawPerStep = true` in `seqCutLogic.h` (one redraw per step instead of 25 fps) and repeat. |
 
 # Alt Performance page (8-step faders) — plans/004-perform-faders.md
 

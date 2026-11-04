@@ -1353,6 +1353,7 @@ int main()
     test_lane_geometry();
     test_lane_palette();
     test_lane_draw_budget_and_bounds();
+    test_r4_handback_retrigger_and_stock_phase();
     printf("%d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

@@ -164,6 +164,7 @@ constexpr int kLaneStride = 84;
 constexpr int kCellX = 704;        // right block: the pad columns 9..12 as 2 x 2 cells
 constexpr int kMaxSteps = 128;     // MAXSTEP + 1
 constexpr int kNoteRects = 32;     // most note marks drawn per lane (steps are merged into buckets above that)
+constexpr bool kRedrawPerStep = false; // fallback if the 25 fps playhead disturbs the SD streams: true = redraw once per step (one-line switch)
 constexpr int kRedrawGapMs = 40;   // playhead strips: at most 25 frames per second
 
 // First step of pad column `col` (0..8) in a pattern of `steps` steps (Playhead::columnPosition with 8 columns).
@@ -236,6 +237,7 @@ inline HeadInfo makeHead(const View& v, int pos, int uStep, int stock, int steps
     return h;
 }
 
+// Pattern bar of 16 steps (not the song's time signature) and beat of 4 steps, from the stock position of track 1.
 inline void barBeat(int stockPos, uint8_t& bar, uint8_t& beat)
 {
     if (stockPos < 0) stockPos = 0;

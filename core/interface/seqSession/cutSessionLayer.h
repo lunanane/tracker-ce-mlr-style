@@ -20,6 +20,7 @@ class CutSessionLayer : public SessionLayer
     void enter(uint8_t firstTrack) override
     {
         setGroup(firstTrack);
+        laneViewCreate(); // the controls live while the layer is visible (no slot is held while CLIPS is shown)
         laneViewShow(true);
     }
     void setGroup(uint8_t firstTrack) override
@@ -33,6 +34,7 @@ class CutSessionLayer : public SessionLayer
     {
         cutReleaseAll();
         laneViewShow(false);
+        laneViewDestroy();
     }
     void pad(uint8_t col, uint8_t row, bool down) override { cutPad(col, row, down, down && cutShiftHeld()); } // Shift + RESYNC = SYNC ALL
     void leds(uint8_t out[48]) override { cutLeds(out); }
@@ -46,7 +48,7 @@ class CutSessionLayer : public SessionLayer
     }
 
     // ---- own screen ----
-    void createControls() override { laneViewCreate(); }
+    void createControls() override {}  // created in enter()
     void destroyControls() override { laneViewDestroy(); }
     bool refresh(bool force) override { return laneViewRefresh(force, first_); }
     bool drawsOwnScreen() const override { return true; }

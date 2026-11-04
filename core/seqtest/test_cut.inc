@@ -55,7 +55,7 @@ seqcut::StepPlan stepOnce(seqcut::Cut& c, FakePattern& f, int& global)
 {
     f.pos = (f.pos + 1) % f.steps;
     global = (global + 1) % f.steps;
-    c.setStock(0, f.pos);
+    c.setStock(0, global); // the stock sequencer runs on the global clock (same length): its position is the global step
     seqcut::StepPlan p = c.boundary(0, f.steps, global);
     if (p.override)
         f.pos = p.pos;
@@ -735,12 +735,12 @@ static void test_syncall_edge_cases()
         c.apply(0, packSyncAll());
         f.pos = (f.pos + 1) % f.steps;
         g = (g + 1) % f.steps;
-        c.setStock(0, f.pos);
+        c.setStock(0, g);
         StepPlan fz = c.boundary(0, f.steps, g, true);
         CHECK(!fz.override && fz.hold && c.activeMask() == 1);
         f.pos = (f.pos + 1) % f.steps;
         g = (g + 1) % f.steps;
-        c.setStock(0, f.pos);
+        c.setStock(0, g);
         StepPlan run = c.boundary(0, f.steps, g, false);
         CHECK(run.override && run.pos == g && c.activeMask() == 0);
     }
@@ -1286,4 +1286,85 @@ static void test_lane_draw_budget_and_bounds()
             fclose(fp);
         }
     }
+}
+
+// ---- R4 review fixes ----
+static void test_r4_handback_retrigger_and_stock_phase()
+{
+    using namespace seqcut;
+    // C1: the snap-back lands after the note step: the note is struck again "as if at" the position, although the track
+    // is handed back to the stock sequencer at the same boundary (SYNC ALL and plain RESYNC)
+    for (int mode = 0; mode < 2; mode++)
+    {
+        Cut c;
+        FakePattern f;
+        f.map[0] = 1;
+        install(c, f);
+        c.apply(0, packArg(SUB_PAD, true, 4)); // jam to step 8
+        c.apply(0, packArg(SUB_PAD, false, 4));
+        int g = 0;
+        stepOnce(c, f, g);
+        stepOnce(c, f, g);
+        c.apply(0, mode == 0 ? packSyncAll() : packArg(SUB_RESYNC, true, 0));
+        f.pos = (f.pos + 1) % f.steps;
+        g = (g + 1) % f.steps;
+        c.setStock(0, f.pos);
+        const int stockPos = f.pos;
+        StepPlan p = c.boundary(0, f.steps, g);
+        CHECK(p.override && p.pos == stockPos && p.retrigger && c.activeMask() == 0);
+        CHECK(c.hookMask() == 1); // the audio hooks stay on for this one retrigger
+        StepPlan r;
+        CHECK(c.consumeRetrigger(0, r) && r.retrigger && r.noteStep == 0 && r.elapsed == stockPos);
+        CHECK(!c.consumeRetrigger(0, r) && c.hookMask() == 0);
+    }
+    // M1: a snapped track looks like a stock track at once (no OFF GRID after a panic while stopped)
+    {
+        Cut c;
+        FakePattern f;
+        f.map[0] = 1;
+        install(c, f);
+        c.apply(0, packArg(SUB_PAD, true, 4));
+        c.apply(0, packArg(SUB_REVERSE, true, 0));
+        CHECK(c.offGridMask() == 1 && (c.view(0).flags & VF_ACTIVE));
+        c.apply(0, packSyncAll());
+        CHECK(c.activeMask() == 1 && c.offGridMask() == 0 && !(c.view(0).flags & (VF_ACTIVE | VF_REVERSE)));
+        c.apply(0, packArg(SUB_REVERSE, true, 0)); // a new gesture: off the grid again
+        CHECK(c.offGridMask() == 1 && (c.view(0).flags & VF_ACTIVE));
+        c.apply(0, packSyncAll());
+        c.transportStart();
+        CHECK(c.activeMask() == 0 && c.offGridMask() == 0 && c.hookMask() == 0);
+    }
+    // M3: the snap lands on the track's own stock position (own length), not on the global counter
+    {
+        Cut c;
+        FakePattern f;
+        f.steps = 12;
+        f.map[0] = 1;
+        install(c, f);
+        c.apply(0, packArg(SUB_PAD, true, 6));
+        c.apply(0, packSyncAll());
+        c.setStock(0, 5);
+        StepPlan p = c.boundary(0, 12, 13); // global counter 13 (wraps at 16 on another track), this track is at 5 of 12
+        CHECK(p.override && p.pos == 5);
+        Cut d;
+        install(d, f);
+        d.apply(0, packArg(SUB_PAD, true, 6));
+        d.apply(0, packArg(SUB_RESYNC, true, 0));
+        d.setStock(0, 7);
+        p = d.boundary(0, 12, 30);
+        CHECK(p.override && p.pos == 7);
+    }
+    // m5: SUB_RESET col 0 = reset, col 1 = SYNC ALL, anything else is ignored
+    {
+        Cut c;
+        FakePattern f;
+        install(c, f);
+        c.apply(0, packArg(SUB_PAD, true, 2));
+        for (uint8_t col = 2; col < 16; col++)
+            c.apply(0, packArg(SUB_RESET, true, col));
+        CHECK(c.activeMask() == 1 && c.offGridMask() == 1);
+        c.apply(0, packArg(SUB_RESET, false, 0));
+        CHECK(c.activeMask() == 0);
+    }
+    CHECK(!kRedrawPerStep); // default: smooth 25 fps playhead
 }

@@ -135,9 +135,11 @@ void cSeqLanes::update()
 {
     if (model == nullptr)
         return;
+    API_SAVE_CONTEXT();
     FtCtx c;
     drawLanes(c, *model, palette());
     c.finish();
+    API_RESTORE_CONTEXT();
 }
 
 cSeqPlayheads::cSeqPlayheads(strControlProperties* properties) : cDisplayControl(controlIdSeqPlayheads, 1), model(nullptr)
@@ -156,14 +158,18 @@ void cSeqPlayheads::update()
 {
     if (model == nullptr)
         return;
+    API_SAVE_CONTEXT();
     FtCtx c;
     drawHeads(c, *model, palette());
     c.finish();
+    API_RESTORE_CONTEXT();
 }
 
 //----------------------------------------------------------------------------------------------
 void laneViewCreate()
 {
+    if (s_hLanes >= 0 || s_hHeads >= 0)
+        return; // already there (created by enter())
     // controls created first are drawn last (on top): the playheads go over the lanes
     memset(&s_lanes, 0, sizeof(s_lanes));
     memset(&s_heads, 0, sizeof(s_heads));
@@ -258,7 +264,7 @@ bool laneViewRefresh(bool force, uint8_t firstTrack)
         const uint8_t t = (uint8_t)(first + r);
         uint8_t pos = 0, uStep = 1, last = 0;
         sequencer.seqTrackPos(t, pos, uStep, last);
-        h.h[r] = makeHead(viewOf(cut, t), pos, uStep, sequencer.seqCutStockPos(t), s_lanes.lane[r].steps);
+        h.h[r] = makeHead(viewOf(cut, t), pos, kRedrawPerStep ? 1 : uStep, sequencer.seqCutStockPos(t), s_lanes.lane[r].steps); // kRedrawPerStep: the line only moves at a step
     }
     barBeat(sequencer.seqCutStockPos(0), h.bar, h.beat);
     h.recHeld = s_lanes.recHeld;
@@ -287,5 +293,5 @@ void laneViewRequestGroup(uint8_t firstTrack)
 bool laneViewAnyOffGrid()
 {
     seqcut::Cut* c = seqEngine.cut();
-    return c != nullptr && c->activeMask() != 0;
+    return c != nullptr && c->offGridMask() != 0; // a snapped (SYNC ALL done) track is on the grid
 }
