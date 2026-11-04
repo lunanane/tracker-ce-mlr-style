@@ -19,6 +19,11 @@ struct SeqPlayViewData
     uint8_t cell = 0; // LIST: strip cell (0..7) the list sits above
     uint8_t sel = 0;  // LIST: highlighted type
     uint8_t cur = 0;  // LIST: the track's current type
+    uint8_t panel = 0; // LEGEND (Chord/Arp): visible panel
+    uint8_t half = 0;  // LEGEND (Mono): steps 1-8 / 9-16
+    int8_t win = 0;    // LEGEND (Mono): degree window offset
+    uint8_t edge = 0;  // 0 none; 1 / 2: the selected track is on the higher / lower strip page than the one shown (edge marker)
+    uint8_t edgeTrack = 0; // that track's number 1..16
 };
 
 // One custom control for both temporary overlays (type list and pad legend); drawn on rows 12-15 of the pattern view.
@@ -52,6 +57,8 @@ class SeqPlayOverlay
     void update();      // every main loop pass; cheap when Play mode is off
     void bindPage();    // page 3 of the action buttons: labels of the strip (the router handles the buttons)
     bool active() const { return active_; }
+    uint16_t dimMask() const { return dimMask_; } // tracks that play a launched clip / MLR jam: their pattern column is drawn dimmed (M7)
+    void snapToSelected(); // show the selected track's block of four in the pattern view
 
     // ---- Play on / off (cPatternEditor::seqPlayEnter / seqPlayLeave call these) ----
     void enter();
@@ -73,6 +80,8 @@ class SeqPlayOverlay
     void recPressed();
     void jog(int16_t value);
     void releaseAllPads();
+    void applyPlan(seqplay::Event e);
+    void updateDim();
     void closeList(bool apply);
     void refreshStrip(bool force);
     void refreshPads();
@@ -91,8 +100,10 @@ class SeqPlayOverlay
     SeqPlayViewData view_;
     SeqPlayViewData viewShown_;
     bool viewShownValid_ = false;
-    uint32_t stripKey_ = 0;
+    uint32_t cellKey_[8];
     bool stripKeyValid_ = false;
+    uint16_t dimMask_ = 0;
+    seqplay::LateRelease late_;
     const char* msg_ = nullptr;
     uint32_t msgUntil_ = 0;
     uint32_t ledTime_ = 0;

@@ -133,8 +133,15 @@ struct StripCell
     bool rec = false;      // this track is being recorded (armed, punch or loop)
     bool launched = false; // plays a launched Session clip
     bool cut = false;      // plays an MLR (CUT) jam
-    const char* msg = nullptr; // transient message (<= 11 characters)
+    const char* hint = nullptr; // hint of the last recording on this track (<= 11 characters), see recHintText
+    const char* msg = nullptr;  // transient message (<= 11 characters)
 };
+
+// v0.1 recording hints on line 2 of the recorded track's cell (overflow beats MIDI-only beats reduced)
+inline const char* recHintText(bool overflow, bool needMidi, bool reduced)
+{
+    return overflow ? "rec overflow" : needMidi ? "MIDI only" : reduced ? "reduced" : nullptr;
+}
 
 inline const char* typeShort(uint8_t type)
 {
@@ -158,6 +165,7 @@ inline void stripLine2(char* out, size_t n, const StripCell& c)
     uint8_t type = c.type < seqlogic::TYPE_COUNT ? c.type : 0;
     if (c.msg && c.msg[0]) snprintf(out, n, "%s", c.msg);
     else if (c.rec) snprintf(out, n, "REC");
+    else if (c.hint && c.hint[0]) snprintf(out, n, "%s", c.hint);
     else if (c.pending != 0xFF && c.pending < seqlogic::TYPE_COUNT) snprintf(out, n, "next: %s", typeShort(c.pending));
     else if (c.launched) snprintf(out, n, "clip");
     else if (c.cut) snprintf(out, n, "cut");
@@ -189,13 +197,36 @@ enum Zone : uint8_t
 struct LegendCell
 {
     Zone zone;
-    char txt[4]; // up to 3 characters, '\0' terminated
+    bool on;     // the pad that is active now (the visible panel's mode pad)
+    char txt[4]; // up to 3 characters, ' ' terminated
 };
 
-inline LegendCell legendCell(uint8_t type, uint8_t col, uint8_t row)
+// What the legend needs to know about the selected sequencer (read from the engine, display only).
+struct LegendState
+{
+    uint8_t type = 0;
+    uint8_t panel = 0; // Chord/Arp: 0 TYPES 1 SETTINGS 2 GROOVE 3 PARAM
+    uint8_t half = 0;  // Mono: 0 = steps 1-8, 1 = steps 9-16
+};
+
+// Chord/Arp root pads (c31 camelot grid, copy of kCam in seqgen/chordarp.cpp): pad row = grid x - 1, pad column = grid y - 1.
+// Odd grid rows (second and fourth pad row) are the minor roots.
+inline const char* rootName(uint8_t row, uint8_t col, char* buf4)
+{
+    static const uint8_t kCam[4][6] = { { 64, 69, 62, 67, 60, 65 }, { 61, 66, 71, 64, 69, 62 },
+                                        { 71, 66, 61, 68, 63, 70 }, { 68, 63, 70, 65, 60, 67 } };
+    static const char* const kPc[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+    if (row >= 4 || col >= 6) { buf4[0] = 0; return buf4; }
+    const char* n = kPc[kCam[row][col] % 12];
+    snprintf(buf4, 4, "%s%s", n, (row & 1) ? "m" : "");
+    return buf4;
+}
+
+inline LegendCell legendCell(const LegendState& st, uint8_t col, uint8_t row)
 {
     LegendCell c;
     c.zone = Z_NONE;
+    c.on = false;
     c.txt[0] = 0;
     c.txt[1] = 0;
     c.txt[2] = 0;
@@ -205,22 +236,28 @@ inline LegendCell legendCell(uint8_t type, uint8_t col, uint8_t row)
         c.zone = z;
         for (int i = 0; i < 3 && t[i]; i++) c.txt[i] = t[i];
     };
-    if (type == seqlogic::TYPE_CHORDARP)
+    if (st.type == seqlogic::TYPE_CHORDARP)
     {
-        if (col <= 5) set(Z_NOTE, "");
+        if (col <= 5)
+        {
+            char b[4];
+            set(Z_NOTE, rootName(row, col, b));
+        }
         else if (col <= 9) set(Z_PANEL, "");
         else
         {
             static const char* const k[4][2] = { { "TYP", "SET" }, { "GRV", "PRM" }, { "I-", "I+" }, { "O-", "O+" } };
             set(row < 2 ? Z_MODE : Z_ADJ, k[row][col - 10]);
+            if (row < 2) c.on = st.panel == (uint8_t)(row * 2 + (col - 10)); // TYP SET GRV PRM = panels 0 1 2 3
         }
     }
-    else if (type == seqlogic::TYPE_MONO)
+    else if (st.type == seqlogic::TYPE_MONO)
     {
         if (col < 8)
         {
-            static const char* const num[8] = { "1", "2", "3", "4", "5", "6", "7", "8" };
-            set(Z_STEP, row == 0 ? num[col] : "");
+            char b[4] = { 0, 0, 0, 0 };
+            if (row == 0) snprintf(b, sizeof b, "%d", col + 1 + (st.half ? 8 : 0));
+            set(Z_STEP, b);
         }
         else
         {
@@ -244,12 +281,61 @@ inline LegendCell legendCell(uint8_t type, uint8_t col, uint8_t row)
     }
     return c;
 }
+inline LegendCell legendCell(uint8_t type, uint8_t col, uint8_t row)
+{
+    LegendState st;
+    st.type = type;
+    return legendCell(st, col, row);
+}
 
 inline const char* legendCaption(uint8_t type)
 {
-    if (type == seqlogic::TYPE_CHORDARP) return "CHORD/ARP  roots | panel | TYP SET GRV PRM | I+- inversion O+- octave";
-    if (type == seqlogic::TYPE_MONO) return "MONO  steps | HLF half  TIE | W window P page S speed V velocity | LP loop  CLR";
+    if (type == seqlogic::TYPE_CHORDARP) return "CHORD/ARP   panel:";
+    if (type == seqlogic::TYPE_MONO) return "MONO   window:";
     return "";
 }
+inline const char* panelName(uint8_t panel)
+{
+    return panel == 1 ? "SETTINGS" : panel == 2 ? "GROOVE" : panel == 3 ? "PARAM" : "TYPES";
+}
+
+// The side of the strip a selected track that is not on the shown strip page sits on: 0 = on the page, 1 = higher (Right), 2 = lower
+inline uint8_t edgeSide(uint8_t selectedTrack, uint8_t stripPage)
+{
+    uint8_t p = stripPageOfTrack(selectedTrack);
+    return p == stripPage ? 0 : (p > stripPage ? 1 : 2);
+}
+
+// ---- what a view change does to the overlay's state (plan 005 M5 survival table, Play-mode rows) ----
+enum Event : uint8_t { EV_LEAVE = 0, EV_MODULE_SWITCH = 1, EV_STOP = 2, EV_POPUP = 3 };
+struct Plan
+{
+    bool releasePads;   // held pads are released (note-off at the next step)
+    bool endRecording;  // a running recording ends (one undo step)
+    bool closeList;     // an open type list closes without applying
+    bool clearHold;     // held screen-button gestures are forgotten
+    bool swallowLate;   // the physical release of a pad released here is swallowed
+    bool sequencersRun; // HOLD / takeover / launched clips keep running (nothing here stops them)
+};
+inline Plan planFor(Event e)
+{
+    Plan p = { true, true, true, true, true, true };
+    if (e == EV_POPUP) p = { false, false, true, false, false, true }; // a popup only closes the list; pads and recording go on
+    return p;
+}
+
+// Pads released by a plan: their physical release arrives later and must not reach the stock editor or release a newer press.
+struct LateRelease
+{
+    uint64_t bits = 0;
+    void released(uint8_t pad) { if (pad < 48) bits |= (uint64_t)1 << pad; }
+    void pressed(uint8_t pad) { if (pad < 48) bits &= ~((uint64_t)1 << pad); }
+    bool swallow(uint8_t pad) // true = the release is ours (consumed)
+    {
+        if (pad >= 48 || !((bits >> pad) & 1u)) return false;
+        bits &= ~((uint64_t)1 << pad);
+        return true;
+    }
+};
 
 } // namespace seqplay

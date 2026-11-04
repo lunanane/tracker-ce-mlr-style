@@ -176,6 +176,127 @@ static void test_screen_hold()
     CHECK(h.event(9, H::PRESS, true, false) == H::TAKE_PRESS && h.mask == 2);
 }
 
+static void test_shift_mute_blocks_legend()
+{
+    // M-1: Shift held, a screen button pressed = a stock mute (PASS from ScreenHold); the overlay still has to tell the gate
+    ScreenHold h;
+    LegendGate g;
+    g.shiftChanged(true, 1000);
+    bool shift = true;
+    // the overlay's rule: any screen-button press while Shift is held blocks the legend
+    if (h.event(2, ScreenHold::PRESS, true, shift) == ScreenHold::PASS) g.screenButton();
+    CHECK(h.mask == 0);
+    CHECK(!g.visible(1400));
+    g.shiftChanged(false, 1500);
+    g.shiftChanged(true, 2000);
+    CHECK(g.visible(2300)); // a fresh Shift hold without a button shows it again
+}
+
+static void test_rec_hints_and_priority()
+{
+    char b[16];
+    CHECK(recHintText(false, false, false) == nullptr);
+    CHECK(strcmp(recHintText(true, true, true), "rec overflow") == 0);
+    CHECK(strcmp(recHintText(false, true, true), "MIDI only") == 0);
+    CHECK(strcmp(recHintText(false, false, true), "reduced") == 0);
+    StripCell c;
+    c.type = seqlogic::TYPE_MONO;
+    c.hint = "MIDI only";
+    c.pending = 1;
+    stripLine2(b, sizeof b, c);
+    CHECK(strcmp(b, "MIDI only") == 0); // after REC, before the pending type
+    c.rec = true;
+    stripLine2(b, sizeof b, c);
+    CHECK(strcmp(b, "REC") == 0);
+    CHECK(strlen(recHintText(true, false, false)) <= 12);
+}
+
+static void test_legend_state()
+{
+    LegendState st;
+    st.type = seqlogic::TYPE_CHORDARP;
+    char nb[4];
+    CHECK(strcmp(rootName(0, 0, nb), "E") == 0);   // kCam[0][0] = 64
+    CHECK(strcmp(rootName(1, 0, nb), "C#m") == 0); // kCam[1][0] = 61, minor row
+    CHECK(strcmp(rootName(2, 5, nb), "A#") == 0);   // 70, major row
+    CHECK(rootName(4, 0, nb)[0] == 0);
+    CHECK(strcmp(legendCell(st, 0, 1).txt, "C#m") == 0 && legendCell(st, 0, 1).zone == Z_NOTE);
+    // the visible panel's mode pad is on
+    for (uint8_t panel = 0; panel < 4; panel++)
+    {
+        st.panel = panel;
+        int on = 0;
+        for (uint8_t r = 0; r < 4; r++)
+            for (uint8_t c = 0; c < 12; c++) on += legendCell(st, c, r).on ? 1 : 0;
+        CHECK(on == 1);
+        CHECK(legendCell(st, (uint8_t)(10 + (panel & 1)), (uint8_t)(panel >> 1)).on);
+    }
+    // Mono: second half shows steps 9-16
+    LegendState m;
+    m.type = seqlogic::TYPE_MONO;
+    CHECK(strcmp(legendCell(m, 0, 0).txt, "1") == 0);
+    m.half = 1;
+    CHECK(strcmp(legendCell(m, 0, 0).txt, "9") == 0 && strcmp(legendCell(m, 7, 0).txt, "16") == 0);
+    CHECK(strcmp(panelName(0), "TYPES") == 0 && strcmp(panelName(3), "PARAM") == 0);
+}
+
+static void test_edge_side()
+{
+    CHECK(edgeSide(2, 0) == 0 && edgeSide(9, 1) == 0);
+    CHECK(edgeSide(9, 0) == 1 && edgeSide(2, 1) == 2);
+}
+
+// A small model of the overlay state that planFor() acts on: the survival table, one check per row.
+struct Model
+{
+    int padsHeld = 2;
+    bool rec = true;
+    bool list = true;
+    bool hold = true;
+    LateRelease late;
+    void apply(Event e)
+    {
+        Plan p = planFor(e);
+        if (p.closeList) list = false;
+        if (p.releasePads)
+        {
+            for (int i = 0; i < 2; i++)
+                if (p.swallowLate) late.released((uint8_t)(5 + i));
+            padsHeld = 0;
+        }
+        if (p.endRecording) rec = false;
+        if (p.clearHold) hold = false;
+    }
+};
+
+static void test_survival_table()
+{
+    const Event all[] = { EV_LEAVE, EV_MODULE_SWITCH, EV_STOP };
+    for (Event e : all)
+    {
+        Model m;
+        m.apply(e);
+        CHECK(m.padsHeld == 0 && !m.rec && !m.list && !m.hold);
+        CHECK(planFor(e).sequencersRun); // takeovers, latched arps and launched clips are not ours to stop
+        CHECK(m.late.swallow(5) && m.late.swallow(6));
+    }
+    // a popup: only the list closes; pads and the recording go on
+    Model p;
+    p.apply(EV_POPUP);
+    CHECK(!p.list && p.padsHeld == 2 && p.rec && p.hold && p.late.bits == 0);
+}
+
+static void test_late_release()
+{
+    LateRelease l;
+    l.released(7);
+    CHECK(l.swallow(7) && !l.swallow(7)); // once
+    l.released(8);
+    l.pressed(8); // a new press before the old release: the release belongs to the new press
+    CHECK(!l.swallow(8));
+    CHECK(!l.swallow(99));
+}
+
 static void test_strip_text()
 {
     char a[16], b[16];
@@ -278,6 +399,12 @@ int main()
     test_type_list_pending();
     test_legend_gate();
     test_screen_hold();
+    test_shift_mute_blocks_legend();
+    test_rec_hints_and_priority();
+    test_legend_state();
+    test_edge_side();
+    test_survival_table();
+    test_late_release();
     test_strip_text();
     test_legend();
     printf("seqplay: %d checks, %d failures\n", g_checks, g_fail);

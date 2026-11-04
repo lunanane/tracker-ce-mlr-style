@@ -634,6 +634,10 @@ void cPatternEditor::refreshPattern()
         trackerPattern.inactive[trackIdx] = isSampleTrack(trackIdx)
                                               ? mtProject.values.trackMute[trackIdx]
                                               : mtProject.values.midiTrackMute[trackIdx % 8];
+        if (seqPlayOverlay.active() && ((seqPlayOverlay.dimMask() >> trackIdx) & 1u))
+        {
+            trackerPattern.inactive[trackIdx] = 1; // Play mode: this track plays a launched clip / MLR jam, not the drawn pattern (M7)
+        }
 
         for (uint8_t rowIdx = 0; rowIdx < 15; rowIdx++)
         {
@@ -5241,23 +5245,29 @@ void cPatternEditor::setActionButtonPage3Funct()
 
 // Play mode (sequencer tracks mod, plan 005 R1): the 4th action-button page. Entering forces the non-edit mode, leaving returns to
 // the first page. The strip, pads and wheel are handled by seqPlayOverlay.
+static uint8_t s_pageBeforePlay = 0; // the action-button page Play mode was entered from
+
 void cPatternEditor::seqPlayEnter()
 {
     if (selectedPlace >= 0 || fillState > 0 || mtPopups.isNoteKeyboardPopupActive() || mtMenuPopup.isPopupVisible())
     {
+        seqTapRefusedFlag = true; // the title bar flashes: the tap was seen, Play mode cannot open now
         return;
     }
 
+    s_pageBeforePlay = actualActionButtonsPage;
     seqPlayOverlay.enter();
     actualActionButtonsPage = SeqPlayOverlay::kPage;
     refreshEditState();
+    seqPlayOverlay.snapToSelected(); // the view shows the selected track's block of four
 }
 
 void cPatternEditor::seqPlayLeave()
 {
     seqPlayOverlay.leave();
-    actualActionButtonsPage = 0;
+    actualActionButtonsPage = s_pageBeforePlay < actionButtonsPagesCount ? s_pageBeforePlay : 0;
     refreshEditState();
+    refreshPattern(); // the dimmed columns of launched / jammed tracks go
     lightUpPadBoard();
 }
 

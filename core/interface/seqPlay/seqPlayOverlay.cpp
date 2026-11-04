@@ -75,6 +75,8 @@ void SeqPlayOverlay::enter()
         ledShown_[i] = 0xFF;
     }
     stripKeyValid_ = false;
+    dimMask_ = 0;
+    late_ = seqplay::LateRelease();
     msg_ = nullptr;
     lastTrack_ = selected();
     ledTime_ = 0;
@@ -87,14 +89,12 @@ void SeqPlayOverlay::leave()
 {
     if (!active_)
         return;
-    closeList(false);
     // a recording ends with Play mode (punch-in would otherwise keep clearing the track while the user edits)
-    if (seqEngine.recState() != seqrec::Planner::IDLE)
-        seqRecStop();
-    releaseAllPads();
-    hold_.clear();
+    applyPlan(seqplay::EV_LEAVE);
     active_ = false;
+    dimMask_ = 0;
     view_.mode = SeqPlayViewData::HIDDEN;
+    view_.edge = 0;
     refreshView();
     padsBacklight.clearGlobalPads(1, 1, 1);
     seqTracksViewLeft();
@@ -103,13 +103,28 @@ void SeqPlayOverlay::leave()
 void SeqPlayOverlay::panic()
 {
     // transport Stop: the whole mod lets go (M6). Pads are released even when Play mode is not on screen any more.
-    closeList(false);
-    if (seqEngine.recState() != seqrec::Planner::IDLE)
-        seqRecStop();
-    releaseAllPads();
-    hold_.clear();
+    applyPlan(seqplay::EV_STOP);
     msg_ = nullptr;
     stripKeyValid_ = false;
+}
+
+// The survival table (seqPlayLogic.h planFor): what a leave / Stop / popup does to the overlay's state.
+void SeqPlayOverlay::applyPlan(seqplay::Event e)
+{
+    seqplay::Plan p = seqplay::planFor(e);
+    if (p.closeList)
+        closeList(false);
+    if (p.endRecording && seqEngine.recState() != seqrec::Planner::IDLE)
+        seqRecStop();
+    if (p.releasePads)
+        releaseAllPads();
+    if (p.clearHold)
+        hold_.clear();
+}
+
+void SeqPlayOverlay::snapToSelected()
+{
+    selectTrack(selected());
 }
 
 //##############################################################################################
@@ -142,6 +157,7 @@ void SeqPlayOverlay::releaseAllPads()
         {
             seqPadRelease(padOwner_[i], (uint8_t)i);
             padOwner_[i] = kNoOwner;
+            late_.released((uint8_t)i); // the finger is still down: its physical release is ours to swallow
         }
     }
 }
@@ -246,8 +262,11 @@ bool SeqPlayOverlay::button(uint8_t b, uint8_t state)
     {
     seqplay::ScreenHold::Kind kind = state == buttonPress ? seqplay::ScreenHold::PRESS :
                                          state == buttonRelease ? seqplay::ScreenHold::RELEASE : seqplay::ScreenHold::HOLD;
+        const bool shiftDown = PE().buttons->isButtonPressed(interfaceButtonShift);
+        if (kind == seqplay::ScreenHold::PRESS && shiftDown && routable())
+            legend_.screenButton(); // a stock mute press: no legend until Shift is released
         // Shift + screen button = the stock mute buttons; a press the overlay took stays the overlay's until its release
-        switch (hold_.event(b, kind, routable(), PE().buttons->isButtonPressed(interfaceButtonShift)))
+        switch (hold_.event(b, kind, routable(), shiftDown))
         {
             case seqplay::ScreenHold::TAKE_PRESS: screenButton(b, buttonPress); return true;
             case seqplay::ScreenHold::TAKE_RELEASE: screenButton(b, buttonRelease); return true;
@@ -256,13 +275,35 @@ bool SeqPlayOverlay::button(uint8_t b, uint8_t state)
         }
     }
 
+    if (b == interfaceButtonShift && state == buttonPress && active_)
+    {
+        // the stock mute buttons follow the cursor track's group: the strip shows the same group
+        stripPage_ = seqplay::stripPageOfTrack(selected());
+        stripKeyValid_ = false;
+        return false;
+    }
+
     if (!routable())
         return false;
 
     switch (b)
     {
+        case interfaceButtonPlay:
+            // Rec + Play is the stock live-rec arm; Rec belongs to the sequencer here, so it is plain play / stop
+            if (!PE().buttons->isButtonPressed(interfaceButtonRec))
+                return false;
+            if (state == buttonPress)
+            {
+                if (sequencer.getSeqState() == Sequencer::SEQ_STATE_STOP)
+                    sequencer.playPattern();
+                else
+                    sequencer.stop();
+            }
+            return true;
         case interfaceButtonLeft:
         case interfaceButtonRight:
+            if (PE().buttons->isButtonPressed(interfaceButtonPattern))
+                return false; // Pattern + arrows = the stock pattern queue / change
             if (state == buttonPress)
             {
                 closeList(false);
@@ -303,6 +344,8 @@ bool SeqPlayOverlay::pad(uint8_t pad, uint8_t state, uint8_t)
             padOwner_[pad] = kNoOwner;
             return true;
         }
+        if (late_.swallow(pad))
+            return true; // released earlier by leave / track switch / Stop
         if (s_stockPads & bit)
         {
             s_stockPads &= ~bit;
@@ -311,6 +354,8 @@ bool SeqPlayOverlay::pad(uint8_t pad, uint8_t state, uint8_t)
         return routable();
     }
 
+    if (state == 1)
+        late_.pressed(pad);
     if (state == 1 && !routable())
     {
         s_stockPads |= bit;
@@ -359,18 +404,18 @@ void SeqPlayOverlay::refreshStrip(bool force)
     uint8_t sel = selected();
     seqrec::Planner::State rs = seqEngine.recState();
     uint8_t recTrack = seqEngine.recTrack();
+    uint8_t hints = seqEngine.recHints();
     uint16_t cut = seqEngine.cutMask();
+    if (!stripKeyValid_)
+        force = true;
 
-    seqplay::StripCell cells[8];
-    uint32_t key = 2166136261u;
-    auto mix = [&key](uint32_t v) { key = (key ^ v) * 16777619u; };
-    mix(stripPage_);
-    mix(sel);
-    mix(msg_ ? 1u : 0u);
+    cPatternEditor& pe = PE();
+    const Theme& th = display.getTheme();
+    bool any = false;
     for (uint8_t i = 0; i < 8; i++)
     {
         uint8_t t = seqplay::stripSlotTrack(stripPage_, i);
-        seqplay::StripCell& c = cells[i];
+        seqplay::StripCell c;
         c.track = t;
         c.type = seqEngine.type(t);
         c.pending = seqEngine.pendingType(t);
@@ -379,23 +424,26 @@ void SeqPlayOverlay::refreshStrip(bool force)
         c.rec = rs != seqrec::Planner::IDLE && recTrack == t;
         c.launched = seqRecTrackLaunched(t);
         c.cut = (cut >> t) & 1u;
+        if (t == recTrack)
+            c.hint = seqplay::recHintText(hints & seqrec::HINT_OVERFLOW, hints & seqrec::HINT_NEED_MIDI, hints & seqrec::HINT_REDUCED);
         c.msg = (c.selected && msg_) ? msg_ : nullptr;
-        mix(c.type | (c.pending << 4) | ((uint32_t)c.takenOver << 12) | ((uint32_t)c.rec << 13) | ((uint32_t)c.launched << 14) |
-            ((uint32_t)c.cut << 15));
-    }
-    if (!force && stripKeyValid_ && key == stripKey_)
-        return;
-    stripKey_ = key;
-    stripKeyValid_ = true;
 
-    cPatternEditor& pe = PE();
-    const Theme& th = display.getTheme();
-    for (uint8_t i = 0; i < 8; i++)
-    {
-        seqplay::stripLine1(line1_[i], sizeof(line1_[i]), cells[i]);
-        seqplay::stripLine2(line2_[i], sizeof(line2_[i]), cells[i]);
+        // only the cells whose content changed are rewritten
+        uint32_t key = 2166136261u;
+        auto mix = [&key](uint32_t v) { key = (key ^ v) * 16777619u; };
+        mix(t);
+        mix(c.type | (c.pending << 4) | ((uint32_t)c.takenOver << 12) | ((uint32_t)c.rec << 13) | ((uint32_t)c.launched << 14) |
+            ((uint32_t)c.cut << 15) | ((uint32_t)c.selected << 16) | ((uint32_t)(c.msg != nullptr) << 17) |
+            ((uint32_t)(c.hint ? c.hint[0] : 0) << 18));
+        if (!force && key == cellKey_[i])
+            continue;
+        cellKey_[i] = key;
+        any = true;
+
+        seqplay::stripLine1(line1_[i], sizeof(line1_[i]), c);
+        seqplay::stripLine2(line2_[i], sizeof(line2_[i]), c);
         const uint32_t* colors;
-        switch (seqplay::stripTone(cells[i]))
+        switch (seqplay::stripTone(c))
         {
             case seqplay::TONE_REC: colors = th.redButtonLabelsColors; break;
             case seqplay::TONE_SELECTED: colors = th.highlightedButtonLabelsColors; break;
@@ -407,7 +455,25 @@ void SeqPlayOverlay::refreshStrip(bool force)
         display.setControlColors(pe.label[i], colors);
         display.refreshControl(pe.label[i]);
     }
-    display.synchronizeRefresh();
+    stripKeyValid_ = true;
+    if (any)
+        display.synchronizeRefresh();
+}
+
+// M7: a track that plays a launched clip or an MLR jam is not what the pattern view draws: its column is dimmed (the same dim as a
+// muted column; the strip says clip / cut). trackerPattern.inactive is rebuilt by refreshPattern, which asks dimMask().
+void SeqPlayOverlay::updateDim()
+{
+    uint16_t cut = seqEngine.cutMask();
+    uint16_t mask = 0;
+    for (uint8_t t = 0; t < seqplay::kTracks; t++)
+        if (seqRecTrackLaunched(t) || ((cut >> t) & 1u))
+            mask |= (uint16_t)(1u << t);
+    if (mask != dimMask_)
+    {
+        dimMask_ = mask;
+        PE().refreshPattern();
+    }
 }
 
 void SeqPlayOverlay::refreshPads()
@@ -431,6 +497,8 @@ void SeqPlayOverlay::refreshView()
     if (control_ < 0)
         return;
     uint8_t sel = selected();
+    view_.edge = (active_ && !list_.open) ? seqplay::edgeSide(sel, stripPage_) : 0;
+    view_.edgeTrack = (uint8_t)(sel + 1);
     if (active_ && list_.open)
     {
         view_.mode = SeqPlayViewData::LIST;
@@ -442,6 +510,13 @@ void SeqPlayOverlay::refreshView()
     {
         view_.mode = SeqPlayViewData::LEGEND;
         view_.type = seqEngine.type(sel);
+        if (view_.type == seqlogic::TYPE_CHORDARP)
+            view_.panel = (uint8_t)seqEngine.chordArp(sel).getParam(seqgen::ChordArp::P_PANEL);
+        else
+        {
+            view_.half = (uint8_t)seqEngine.mono(sel).getParam(seqgen::Mono::P_HALF);
+            view_.win = (int8_t)seqEngine.mono(sel).getParam(seqgen::Mono::P_WIN);
+        }
     }
     else
     {
@@ -450,11 +525,11 @@ void SeqPlayOverlay::refreshView()
 
     if (viewShownValid_ && memcmp(&view_, &viewShown_, sizeof(view_)) == 0)
         return;
-    bool wasHidden = !viewShownValid_ || viewShown_.mode == SeqPlayViewData::HIDDEN;
+    bool wasHidden = !viewShownValid_ || (viewShown_.mode == SeqPlayViewData::HIDDEN && viewShown_.edge == 0);
     viewShown_ = view_;
     viewShownValid_ = true;
 
-    if (view_.mode == SeqPlayViewData::HIDDEN)
+    if (view_.mode == SeqPlayViewData::HIDDEN && view_.edge == 0)
         display.setControlHide(control_);
     else if (wasHidden)
         display.setControlShow(control_);
@@ -472,6 +547,8 @@ void SeqPlayOverlay::update()
     bool shift = PE().buttons->isButtonPressed(interfaceButtonShift);
     if (shift && !legend_.shift)
         closeList(false);
+    if (!routable() && list_.open)
+        applyPlan(seqplay::EV_POPUP); // a popup took the inputs: the list closes, pads and recording go on
     legend_.shiftChanged(shift, now);
 
     // the cursor moved by other means (a reload): the pads follow the visible selection
@@ -495,6 +572,7 @@ void SeqPlayOverlay::update()
     {
         stripTime = now;
         refreshStrip(false);
+        updateDim();
     }
 
     refreshView();

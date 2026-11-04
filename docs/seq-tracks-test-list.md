@@ -25,7 +25,9 @@ Naming: the bottom-right key printed "Perform" is the firmware's **Pattern** key
 |---|---|
 | On the Pattern page tap **Pattern** (press and release, nothing else) | The pattern view stays. The 8 bottom labels become the strip: line 1 `1 ---` ... (track number and type: `---` Off, `CHRD`, `MONO`; `*` after it while that track is taken over), line 2 the state (`pattern` for an Off track). The selected track is in brackets, e.g. `[1 ---]`, and framed in the pattern view. No "Play mode" screen, no extra text in the middle. |
 | The pattern editor was in edit mode (red) | Play mode switches it off (green); Rec is the sequencer's Rec now. |
-| Tap **Pattern** again | Back to the normal pattern editor: the stock labels (Pattern / Length / Step ...), the stock pad lights, edit mode stays off. |
+| Tap **Pattern** again | Back to the normal pattern editor on the action-button page you entered from (Pattern / Length / Step ... or the other pages), the stock pad lights; edit mode stays off. |
+| Tap **Pattern** while a fill popup / menu / note keyboard is open | Play mode does not open and the title bar flashes red (the tap was refused). |
+| Enter Play mode with the cursor on track 7 | The pattern view shows tracks 5-8 with the frame on track 7 at once. |
 | Hold **Pattern** for about half a second, release (nothing else) | Stays as it was: only a quick tap (up to 400 ms) toggles Play mode. |
 | Open a note / FX / instrument popup on a step, then tap **Pattern** | The popup closes (as before); Play mode does NOT open. Tap **Pattern** once more: it opens. |
 | Pattern + arrow keys / Pattern held with other buttons | Same as stock, never toggles Play mode. The title bar flashes red once for a refused quick press. |
@@ -44,7 +46,12 @@ Naming: the bottom-right key printed "Perform" is the firmware's **Pattern** key
 | Hold **Shift** (a quick tap, under a quarter of a second) | Stock mute buttons on the 8 labels (names Mute / Unmute); no legend flashes. Shift + screen button mutes that track as in stock; the labels return to the strip when Shift is released. |
 | Hold **Shift** about a quarter of a second without pressing a screen button, track has a sequencer | A legend of 12 x 4 cells appears over the lower pattern rows (not over the playhead row), above the mute labels. See section 2b. |
 | Hold a pad, then press another screen button | The first track releases its pad (chord stops); the pad LEDs switch to the new track's layout. |
+| **Pattern held** + Left / Right in Play mode | Stock pattern queue / change (not swallowed). Plain Left / Right switch the strip. |
+| Hold **Rec**, press **Play** in Play mode | Plain play / stop (no stock live-rec arm, edit mode stays off). |
+| Select a track on strip 9-16, press **Left** | The strip shows 1-8 and a yellow `T12 >` marker sits at its right edge (`< T3` at the left edge for the other direction). Pressing Shift snaps the strip to the selected track's group so the mute labels match. |
+| A track plays a launched clip or an MLR jam | Its column in the pattern view is dimmed (same look as a muted column) while Play mode is on; back to normal when it ends / on leaving Play mode. |
 | Note / Instr / FX1 / FX2 / Copy / Insert / Delete in Play mode | Nothing happens (no popups over the strip). Up / Down and Play work as in stock. |
+| Hold a pad, tap Pattern (leave), keep the finger down, then lift | No stray note-off / stock pad event on lift; the chord stopped at the tap. |
 | Pads on a track whose type is Off | Nothing (no stock notes either). |
 | Strip line 2 on a track that plays a launched Session clip / an MLR (CUT) jam | `clip` / `cut`. Rec on a launched-clip track shows `on a clip` on that cell for two seconds. |
 
@@ -54,6 +61,9 @@ Naming: the bottom-right key printed "Perform" is the firmware's **Pattern** key
 | Chord/Arp track selected, hold Shift for 250 ms | Caption "CHORD/ARP ..." and 12 x 4 cells: columns 1-6 green (roots), columns 7-10 cyan (4x4 panel), columns 11-12: TYP SET / GRV PRM (orange), I- I+ / O- O+ (yellow). |
 | Mono track selected, hold Shift | Columns 1-8 green with 1-8 in the top row (steps); HLF TIE W+ W- (column 9), P- S- LP (column 10), P+ S+ V- (column 11), CLR and V+ (column 12). |
 | Off track selected | No legend. |
+| Chord/Arp legend | The 24 root cells show root names (E, C#m, ...); the mode pad of the visible panel (TYP / SET / GRV / PRM) is white; the caption names the panel. |
+| Mono legend | Steps show 1-8 or 9-16 following HALF; the caption shows the degree window offset. |
+| **Display budget** (DEBUG build or a log of `lastMemoryUsed` in `display.cpp`) | With the legend open the summed display-list size of all shown controls stays below 8172 B (above it the display drops controls). Note the number with and without the legend and with the type list open. |
 | Release Shift | Legend gone, strip labels back. Press a screen button while Shift is held: legend hides until Shift is released. |
 
 ## 3. Pick a sequencer type (hold the track's screen button + jog wheel)
@@ -129,7 +139,7 @@ Then hold a root pad in columns 1-6. The selection stays when you release (it is
 | Press | Expected |
 |---|---|
 | Rec on a track whose type is Off | The selected strip cell shows `pick a type` for two seconds. Nothing records, the transport does not start. |
-| Transport stopped, Chord/Arp track: press **Rec** | The transport starts at step 1 and recording starts at once. The recorded track's cell turns red and shows `REC`. |
+| Transport stopped, Chord/Arp track: press **Rec** | The transport starts at step 1 and recording starts at once. The recorded track's cell turns red and shows `REC`. After it ends the cell shows `rec overflow` / `MIDI only` / `reduced` while the last recording had that hint. |
 | (Triad chosen, see 7a) Hold a root pad for a few steps, release | The chord keeps sounding while held (Live). Press **Rec** again: the red `REC` goes. Leave Play mode (tap Pattern): the pattern page shows a note with the chord FX (`MIDI chord`) on the first step of the chord, steps you passed with no chord are empty, **even where the pattern had notes before** (replace). |
 | Quantise | A note that starts in the first half of a step (before the middle) lands on that step, in the second half on the next step (like stock live record). With rec microtiming ON in the Config the note stays on its step and gets a micromove value instead. |
 | Velocity | With rec velocity ON in the Config the step volume follows the sequencer velocity (the c31 groove), otherwise the volume stays default. |
