@@ -9,29 +9,38 @@ using namespace seqlogic;
 enum
 {
     CMD_PAD = 1,
-    CMD_TYPE = 2
+    CMD_TYPE = 2,
+    CMD_REC = 3
 };
 
 Engine::Engine()
-  : host_(0), head_(0), tail_(0), takenMask_(0), activeCount_(0), playing_(false), barPulse_(0), idleCount_(0), usAcc_(0)
+  : host_(0), head_(0), tail_(0), takenMask_(0), activeCount_(0), playing_(false), barPulse_(0), idleCount_(0), usAcc_(0),
+    rHead_(0), rTail_(0), recState_(seqrec::Planner::IDLE), recTrack_(0), recHints_(0), recEnds_(0), loading_(false)
 {
     memset(ring_, 0, sizeof(ring_));
+    memset(recRing_, 0, sizeof(recRing_));
     for (int i = 0; i < kTracks; i++)
-    {
-        Track& t = t_[i];
-        t.type = TYPE_OFF;
-        t.pending = 0xFF;
-        t.monoSteps = false;
-        t.nSounding = 0;
-        memset(t.padBits, 0, sizeof(t.padBits));
-        memset(t.sounding, 0, sizeof(t.sounding));
-        t.ca.setChannel((uint8_t)i);
-        t.mo.setChannel((uint8_t)i);
-        t.ca.setSink(&Engine::sink, this);
-        t.mo.setSink(&Engine::sink, this);
-        t.mo.setContext(&ctx_);
-    }
+        initTrack((uint8_t)i);
+    rec_.setSink(&Engine::recSinkThunk, this);
     recomputeContext();
+}
+
+void Engine::initTrack(uint8_t i)
+{
+    Track& t = t_[i];
+    t.ca = seqgen::ChordArp();
+    t.mo = seqgen::Mono();
+    t.type = TYPE_OFF;
+    t.pending = 0xFF;
+    t.monoSteps = false;
+    t.nSounding = 0;
+    memset(t.padBits, 0, sizeof(t.padBits));
+    memset(t.sounding, 0, sizeof(t.sounding));
+    t.ca.setChannel(i);
+    t.mo.setChannel(i);
+    t.ca.setSink(&Engine::sink, this);
+    t.mo.setSink(&Engine::sink, this);
+    t.mo.setContext(&ctx_);
 }
 
 // ------------------------------------------------------------------ main loop side
@@ -60,6 +69,24 @@ bool Engine::postType(uint8_t track, uint8_t type)
         return false;
     Cmd c = { CMD_TYPE, track, type };
     return push(c);
+}
+
+bool Engine::postRec(uint8_t track, uint8_t mode)
+{
+    if (track >= kTracks || mode > REC_LOOP)
+        return false;
+    Cmd c = { CMD_REC, track, mode };
+    return push(c);
+}
+
+bool Engine::popRecOp(seqrec::Op& out)
+{
+    uint8_t t = rTail_;
+    if (t == __atomic_load_n(&rHead_, __ATOMIC_ACQUIRE))
+        return false;
+    out = recRing_[t];
+    rTail_ = (uint8_t)((t + 1) % kRecRing);
+    return true;
 }
 
 void Engine::leds(uint8_t track, uint8_t out[kPads]) const
@@ -94,7 +121,58 @@ void Engine::drain()
             if (c.a == t_[c.track].type)
                 t_[c.track].pending = 0xFF; // choosing the current type again cancels a pending change
         }
+        else if (c.kind == CMD_REC)
+        {
+            applyRec(c.track, c.a);
+        }
     }
+}
+
+// ------------------------------------------------------------------ record
+void Engine::recSinkThunk(void* user, const seqrec::Op& op)
+{
+    static_cast<Engine*>(user)->recSink(op);
+}
+
+void Engine::recSink(const seqrec::Op& op)
+{
+    uint8_t h = rHead_;
+    uint8_t n = (uint8_t)((h + 1) % kRecRing);
+    if (n == rTail_)
+        return; // full: drop (the main loop drains every frame)
+    recRing_[h] = op;
+    __atomic_store_n(&rHead_, n, __ATOMIC_RELEASE);
+}
+
+void Engine::recPublish()
+{
+    recState_ = rec_.state();
+    recTrack_ = rec_.track();
+    recHints_ = rec_.hints();
+    recEnds_ = rec_.ends();
+}
+
+void Engine::applyRec(uint8_t track, uint8_t mode)
+{
+    if (mode == REC_STOP || track >= kTracks || !host_)
+    {
+        rec_.stop();
+    }
+    else if (t_[track].type != TYPE_OFF)
+    {
+        rec_.stop();
+        seqrec::TrackPos p;
+        host_->trackPos(track, p);
+        rec_.begin(track, mode == REC_LOOP, p.pos);
+    }
+    recPublish();
+}
+
+void Engine::recPulseEnd()
+{
+    if (rec_.active())
+        rec_.flush();
+    recPublish();
 }
 
 int Engine::heldPads(const Track& t) const
@@ -189,7 +267,14 @@ void Engine::applyType(uint8_t track, uint8_t type)
         activeCount_++;
     t.type = type;
     if (type == TYPE_OFF)
+    {
         activeCount_--;
+        if (rec_.active() && rec_.track() == track)
+        {
+            rec_.stop();
+            recPublish();
+        }
+    }
 
     recomputeContext();
     if (type == TYPE_MONO)
@@ -271,8 +356,16 @@ void Engine::stepClock(uint16_t trackUStep)
     if (activeCount_ == 0)
         return;
     setPlaying(true);
+    if (rec_.active() && host_)
+    {
+        seqrec::TrackPos p;
+        host_->trackPos(rec_.track(), p);
+        if (p.uStep == 1)
+            rec_.enter(p.pos);
+    }
     if (((trackUStep - 1) % 8) == 0)
         pulseAll();
+    recPulseEnd();
 }
 
 void Engine::idleTick()
@@ -280,6 +373,11 @@ void Engine::idleTick()
     if (activeCount_ == 0)
         playing_ = false;
     drain();
+    if (rec_.active())
+    {
+        rec_.stop(); // the transport stopped: recording ends
+        recPublish();
+    }
     if (activeCount_ == 0)
         return;
     setPlaying(false);
@@ -312,6 +410,7 @@ void Engine::advanceUs(uint32_t us)
             }
         }
     }
+    recPulseEnd();
 }
 
 // ------------------------------------------------------------------ takeover + events
@@ -340,6 +439,12 @@ void Engine::releaseAll(uint8_t track)
     Track& t = t_[track];
     if (t.nSounding == 0)
         return;
+    if (rec_.active() && rec_.track() == track && host_)
+    {
+        seqrec::TrackPos p;
+        host_->trackPos(track, p);
+        rec_.noteOff(p, host_->recParams());
+    }
     for (int n = 0; n < 128; n++)
         if (t.sounding[n >> 3] & (1u << (n & 7)))
         {
@@ -378,13 +483,154 @@ void Engine::onEvent(const seqgen::Event& e)
             t.nSounding++;
         }
         host_->noteOn(track, e.note, velocityToVolume(e.vel));
+        if (rec_.active() && rec_.track() == track)
+        {
+            seqrec::TrackPos p;
+            host_->trackPos(track, p);
+            rec_.setTrackInfo(host_->sampleTrack(track), host_->instrument(track));
+            rec_.noteOn(e.note, velocityToVolume(e.vel), p, host_->recParams());
+        }
     }
     else if (byte & bit)
     {
         byte = (uint8_t)(byte & ~bit);
         t.nSounding--;
         host_->noteOff(track, e.note);
+        if (rec_.active() && rec_.track() == track)
+        {
+            seqrec::TrackPos p;
+            host_->trackPos(track, p);
+            rec_.setTrackInfo(host_->sampleTrack(track), host_->instrument(track));
+            rec_.noteOff(p, host_->recParams());
+        }
     }
+}
+
+// ------------------------------------------------------------------ project sidecar
+static uint16_t crc16(const uint8_t* b, size_t n)
+{
+    uint16_t c = 0xFFFF;
+    for (size_t i = 0; i < n; i++)
+    {
+        c = (uint16_t)(c ^ ((uint16_t)b[i] << 8));
+        for (int k = 0; k < 8; k++)
+            c = (uint16_t)((c & 0x8000) ? ((c << 1) ^ 0x1021) : (c << 1));
+    }
+    return c;
+}
+
+size_t Engine::saveState(uint8_t* buf, size_t cap) const
+{
+    if (cap < (size_t)kSidecarMax)
+        return 0;
+    buf[0] = 'S';
+    buf[1] = 'Q';
+    buf[2] = 'T';
+    buf[3] = 'R';
+    buf[4] = kSidecarVersion;
+    buf[5] = kTracks;
+    size_t p = 8;
+    for (int i = 0; i < kTracks; i++)
+    {
+        const Track& t = t_[i];
+        buf[p++] = t.type;
+        size_t n = t.ca.serialize(buf + p + 1, cap - p - 1);
+        buf[p] = (uint8_t)n;
+        p += 1 + n;
+        n = t.mo.serialize(buf + p + 1, cap - p - 1);
+        buf[p] = (uint8_t)n;
+        p += 1 + n;
+    }
+    size_t plen = p - 8;
+    buf[6] = (uint8_t)(plen & 0xFF);
+    buf[7] = (uint8_t)(plen >> 8);
+    uint16_t c = crc16(buf, p);
+    buf[p++] = (uint8_t)(c & 0xFF);
+    buf[p++] = (uint8_t)(c >> 8);
+    return p;
+}
+
+uint16_t Engine::stateHash() const
+{
+    uint8_t buf[kSidecarMax];
+    size_t n = saveState(buf, sizeof(buf));
+    return n ? crc16(buf, n) : 0;
+}
+
+void Engine::resetState()
+{
+    loading_ = true;
+    for (uint8_t i = 0; i < kTracks; i++)
+    {
+        if (t_[i].type != TYPE_OFF)
+            applyType(i, TYPE_OFF);
+        initTrack(i);
+    }
+    rec_.stop();
+    recPublish();
+    tail_ = head_;
+    activeCount_ = 0;
+    takenMask_ = 0;
+    recomputeContext();
+    loading_ = false;
+}
+
+bool Engine::loadState(const uint8_t* buf, size_t len)
+{
+    if (!buf || len < 10 || buf[0] != 'S' || buf[1] != 'Q' || buf[2] != 'T' || buf[3] != 'R' || buf[4] != kSidecarVersion ||
+        buf[5] != kTracks)
+        return false;
+    size_t plen = (size_t)buf[6] | ((size_t)buf[7] << 8);
+    size_t end = 8 + plen;
+    if (end + 2 > len || end + 2 > (size_t)kSidecarMax)
+        return false;
+    uint16_t c = crc16(buf, end);
+    if (buf[end] != (uint8_t)(c & 0xFF) || buf[end + 1] != (uint8_t)(c >> 8))
+        return false;
+
+    // pass 1: every block must be valid before anything changes
+    {
+        seqgen::ChordArp ca;
+        seqgen::Mono mo;
+        size_t p = 8;
+        for (int i = 0; i < kTracks; i++)
+        {
+            if (p + 2 > end || buf[p] >= TYPE_COUNT)
+                return false;
+            p++;
+            size_t n = buf[p++];
+            if (p + n + 1 > end || (n != 0 && !ca.deserialize(buf + p, n)))
+                return false;
+            p += n;
+            n = buf[p++];
+            if (p + n > end || (n != 0 && !mo.deserialize(buf + p, n)))
+                return false;
+            p += n;
+        }
+        if (p != end)
+            return false;
+    }
+
+    // pass 2: apply
+    resetState();
+    loading_ = true;
+    size_t p = 8;
+    for (uint8_t i = 0; i < kTracks; i++)
+    {
+        uint8_t type = buf[p++];
+        size_t n = buf[p++];
+        if (n)
+            t_[i].ca.deserialize(buf + p, n);
+        p += n;
+        n = buf[p++];
+        if (n)
+            t_[i].mo.deserialize(buf + p, n);
+        p += n;
+        if (type != TYPE_OFF)
+            applyType(i, type);
+    }
+    loading_ = false;
+    return true;
 }
 
 } // namespace seqtracks

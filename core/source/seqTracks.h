@@ -11,3 +11,14 @@ inline void seqNoteOtherInput()
 {
     seqPatternTap.other();
 }
+
+// ---- record (main loop; Play mode screen calls these) ----
+bool seqRecStart(bool oneLoop, uint8_t track); // false: track is Off or already recording. Starts the transport if stopped.
+void seqRecStop();
+void seqTracksUpdate(); // once per main loop pass (Tracker::update): applies recorded steps, watches the state
+
+// ---- project sidecar "seqtracks.bin" (main loop, file manager steps) ----
+void seqTracksLoadWorkspace();                                      // Workspace/seqtracks.bin -> engine (missing/invalid: all Off)
+void seqTracksSaveWorkspace();                                      // engine -> Workspace/seqtracks.bin when it changed
+void seqTracksSaveProject(const char* path, const char* name);      // engine -> <path>/<name>/seqtracks.bin (+ workspace)
+void seqTracksImportProject(const char* path, const char* name);    // <path>/<name>/seqtracks.bin -> Workspace (when present)

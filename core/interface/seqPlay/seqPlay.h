@@ -27,6 +27,7 @@ class cSeqPlay : public ModuleBase
     void releaseAllPads();
     void refreshScreen();
     void refreshPads();
+    void recPressed();
 
     static constexpr uint8_t kNoOwner = 0xFF;
 
@@ -42,12 +43,13 @@ class cSeqPlay : public ModuleBase
     hControl label[8];
     hControl bgLabel;
     hControl titleLabel;
-    hControl infoLabel[3];
+    hControl infoLabel[4];
     hControl listLabel[3];
 
     char buttonText[8][12];
     char titleText[40];
-    char infoText[3][48];
+    char infoText[4][48];
+    const char* recMsg = nullptr; // transient message after a Rec press that could not start
 
     // what the screen currently shows (refresh only on change)
     uint32_t shownKey = 0xFFFFFFFF;

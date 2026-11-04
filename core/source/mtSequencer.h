@@ -771,6 +771,10 @@ class Sequencer
     void seqNoteOn(uint8_t track, uint8_t note, uint8_t instrument, int8_t volume);
     void seqNoteOff(uint8_t track, uint8_t note, uint8_t instrument);
     bool seqTrackMuted(uint8_t track) { return isTrackEngineMuted(track); }
+    void seqTrackPos(uint8_t track, uint8_t& pos, uint8_t& uStep, uint8_t& last);
+    bool seqRecMicrotiming() { return recMicrotiming() != 0; }
+    bool seqRecVelocity() { return recVelocity() != 0; }
+    void seqWriteStep(uint8_t track, uint8_t step, uint8_t kind, uint8_t note, uint8_t instrument, uint8_t chord, int8_t volume, int8_t micromove);
     void continueSong(uint8_t songPos);
     void loopCurrentPattern(uint8_t songPos);
     int16_t findSlotWithPattern();

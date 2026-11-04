@@ -9,7 +9,7 @@ EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
 test: build/seq_glue_tests$(EXE)
 	build/seq_glue_tests$(EXE)
 
-build/seq_glue_tests$(EXE): test_main.cpp ../source/seqTracksCore.cpp ../source/seqTracksCore.h ../source/seqTracksLogic.h $(SEQ)
+build/seq_glue_tests$(EXE): test_main.cpp ../source/seqTracksCore.cpp ../source/seqTracksCore.h ../source/seqTracksLogic.h ../source/seqTracksRec.h $(SEQ)
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) test_main.cpp ../source/seqTracksCore.cpp $(SEQ) -o $@
 

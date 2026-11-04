@@ -4,6 +4,7 @@
 #include "fileManager.h"
 #include "fileManagerDefs.h"
 #include "fileTransfer.h"
+#include "seqTracks.h"
 
 #if FILEMANAGER_HANDLE_SYNTH == 1
 #include "Synth.h"
@@ -539,6 +540,8 @@ void ProjectSave::saveProjectFinish()
 #endif
 
     //-----------------------------------
+
+    seqTracksSaveProject(newFileManager.getCurrentProjectPath(), newFileManager.getCurrentProjectName());
 
     mtProject.values.projectNotSavedFlag = 0;
 

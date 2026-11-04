@@ -4,6 +4,7 @@
 #include "mtWavetableEnvelopes.h"
 #include "core/interface.h"
 #include "elapsedMillis.h"
+#include "seqTracks.h"
 #include "fileManager.h"
 #include "mtAudioEngine.h"
 #include "mtAudioExport.h"
@@ -166,6 +167,7 @@ void TrackerImpl::update()
     mtInterface.update();
     engine.updateSdStream();
     sequencer.update();
+    seqTracksUpdate();
 }
 
 void TrackerImpl::updateAudioBuffers(void* left, void* right, int length)

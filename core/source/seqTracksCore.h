@@ -7,6 +7,7 @@
 #include "chordarp.h"
 #include "mono.h"
 #include "seqTracksLogic.h"
+#include "seqTracksRec.h"
 
 namespace seqtracks {
 
@@ -21,6 +22,11 @@ class Host
     virtual void noteOn(uint8_t track, uint8_t note, int8_t volume) = 0; // volume 0..100
     virtual void noteOff(uint8_t track, uint8_t note) = 0;
     virtual bool muted(uint8_t track) = 0;
+    // record support (audio context)
+    virtual void trackPos(uint8_t track, seqrec::TrackPos& out) = 0;
+    virtual bool sampleTrack(uint8_t track) = 0;
+    virtual uint8_t instrument(uint8_t track) = 0; // instrument a taken-over track plays
+    virtual seqrec::Params recParams() = 0;
 
   protected:
     ~Host() {}
@@ -41,8 +47,24 @@ class Engine
     void leds(uint8_t track, uint8_t out[seqlogic::kPads]) const;
     bool playing() const { return playing_; }
 
+    // ---- record (main loop side) ----
+    bool postRec(uint8_t track, uint8_t mode); // mode: REC_STOP / REC_PUNCH / REC_LOOP
+    seqrec::Planner::State recState() const { return recState_; }
+    uint8_t recTrack() const { return recTrack_; }
+    uint8_t recHints() const { return recHints_; }
+    uint8_t recEnds() const { return recEnds_; }
+    bool popRecOp(seqrec::Op& out); // ops from the audio side, in order
+
+    // ---- project sidecar (main loop, with the audio engine idle or stopped) ----
+    // File = "SQTR", version, track count, payload length (u16), per track [type, lenCA, CA, lenMono, Mono], CRC16.
+    enum { kSidecarVersion = 1, kSidecarMax = 8 + seqlogic::kTracks * (3 + seqgen::ChordArp::kSerialSize + seqgen::Mono::kSerialSize) + 2 };
+    size_t saveState(uint8_t* buf, size_t cap) const; // 0 = buffer too small
+    bool loadState(const uint8_t* buf, size_t len);   // false = invalid (nothing changed)
+    void resetState();                                // all tracks Off, fresh state
+    uint16_t stateHash() const;                       // CRC of the serialized state (change detection)
+
     // ---- audio context ----
-    bool active() const { return activeCount_ != 0 || head_ != tail_; }
+    bool active() const { return !loading_ && (activeCount_ != 0 || head_ != tail_ || rec_.active()); }
     bool isTakenOver(int row) const { return (takenMask_ >> row) & 1u; }
     void stepClock(uint16_t trackUStep); // transport running: once per uStep of track 0, before play_microStep
     void idleTick();                     // transport stopped: once per nano tick
@@ -52,6 +74,8 @@ class Engine
     void applyPad(uint8_t track, uint8_t pad, bool down);
     void applyType(uint8_t track, uint8_t type);
     void drain();
+    enum { REC_STOP = 0, REC_PUNCH = 1, REC_LOOP = 2 };
+    void applyRec(uint8_t track, uint8_t mode);
 
     seqgen::SeqContext& context() { return ctx_; }
     seqgen::ChordArp& chordArp(uint8_t t) { return t_[t].ca; }
@@ -83,6 +107,11 @@ class Engine
     void releaseAll(uint8_t track);
     void applyPending();
     void recomputeContext();
+    void initTrack(uint8_t i);
+    void recSink(const seqrec::Op& op);
+    static void recSinkThunk(void* user, const seqrec::Op& op);
+    void recPulseEnd();
+    void recPublish();
     int heldPads(const Track& t) const;
     void scanMono(Track& t);
     static void sink(void* user, const seqgen::Event& e);
@@ -99,6 +128,15 @@ class Engine
     uint8_t barPulse_;
     uint8_t idleCount_;
     uint32_t usAcc_;
+
+    // record: planner + queue audio -> main
+    enum { kRecRing = 32 };
+    seqrec::Planner rec_;
+    seqrec::Op recRing_[kRecRing];
+    volatile uint8_t rHead_, rTail_;
+    volatile seqrec::Planner::State recState_;
+    volatile uint8_t recTrack_, recHints_, recEnds_;
+    volatile bool loading_;
 };
 
 } // namespace seqtracks

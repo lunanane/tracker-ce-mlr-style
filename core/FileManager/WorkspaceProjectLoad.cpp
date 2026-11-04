@@ -3,6 +3,7 @@
 #include "fileManager.h"
 #include "fileManagerDefs.h"
 #include "fileTransfer.h"
+#include "seqTracks.h"
 
 #if FILEMANAGER_HANDLE_SYNTH == 1
 #include "Synth.h"
@@ -162,6 +163,7 @@ void WorkspaceProjectLoad::loadProjectFromWorkspaceFinish()
     }
 
     sequencer.switchRamPatternsNow();
+    seqTracksLoadWorkspace(); // sequencer tracks mod: per-track sequencer state of this project (missing = all Off)
     newFileManager.startAudioEngine();
 
     newFileManager.getPatternsMetadata()->loadPatternsMetadata();

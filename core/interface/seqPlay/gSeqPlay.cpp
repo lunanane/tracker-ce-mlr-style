@@ -30,7 +30,7 @@ void cSeqPlay::initDisplayControls()
     prop2.h = 54;
     bgLabel = display.createControl<cBgLabel>(&prop2);
 
-    // title and three info lines in the middle of the screen
+    // title and four info lines in the middle of the screen
     strControlProperties prop3;
     prop3.colors = display.getTheme().defaultTextColors;
     prop3.text = (char*)"";
@@ -42,7 +42,7 @@ void cSeqPlay::initDisplayControls()
     prop3.value = 0;
     titleLabel = display.createControl<cLabel>(&prop3);
 
-    for (uint8_t i = 0; i < 3; i++)
+    for (uint8_t i = 0; i < 4; i++)
     {
         prop3.style = (controlStyleShow | controlStyleCenterX | controlStyleCenterY | controlStyleFont2);
         prop3.y = 120 + 40 * i;

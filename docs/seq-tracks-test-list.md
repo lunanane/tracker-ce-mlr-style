@@ -63,8 +63,57 @@ Use a MIDI track (9-16) with a synth/hardware on its channel, and a sample track
 |---|---|
 | Muted track | A muted track makes no sound from the sequencer either. |
 | Two Chord/Arp tracks | The lower-numbered one supplies the scale to Mono tracks (C major if none). |
-| Reboot | Track types are not saved yet (step B): all tracks are Off again. |
+| Reboot | Track types and sequencer settings come back (see section 8). |
 | Pattern playback timing with some tracks set to Mono/Chord | Pattern timing of the other tracks is steady (no hiccups). |
 
-Known limits of this step: no Rec / punch-in, no saving of sequencer state, no parameter editing on the jog wheel
-(only the pads), chord notes are not pattern data.
+Known limits of step A: no parameter editing on the jog wheel (only the pads). Recording and saving are step B (sections 7 and 8).
+
+---
+
+# Step B: Record (section 7) and save / load (section 8)
+
+Prepare: a project with an empty pattern (or any pattern, you will see it being replaced), one **MIDI track** (9-16) with a synth or
+hardware on its channel and one **sample track** (1-8). In Play mode give the MIDI track Chord/Arp and the sample track Mono.
+All recording happens on the **current track** of Play mode (the bracketed one). Stock Rec outside Play mode is unchanged.
+
+## 7. Record in Play mode
+| Press | Expected |
+|---|---|
+| Rec on a track whose type is Off | Info line "Pick a sequencer type first (Instr + jog wheel)". Nothing records, the transport does not start. |
+| Transport stopped, Chord/Arp track: press **Rec** | The transport starts at step 1 and recording starts at once. Info line "REC track N: punch-in (Rec = end)". |
+| Hold a root pad for a few steps, release | The chord keeps sounding while held (Live). Press **Rec** again: the info line clears. Leave Play mode (tap Pattern): the pattern page shows a note with the chord FX (`MIDI chord`) on the first step of the chord, steps you passed with no chord are empty, **even where the pattern had notes before** (replace). |
+| Quantise | A note that starts in the first half of a step (before the middle) lands on that step, in the second half on the next step (like stock live record). With rec microtiming ON in the Config the note stays on its step and gets a micromove value instead. |
+| Velocity | With rec velocity ON in the Config the step volume follows the sequencer velocity (the c31 groove), otherwise the volume stays default. |
+| Undo | In the pattern editor press the stock **Undo**: the whole recording disappears in **one** step and the previous pattern is back. Redo brings it back. |
+| Punch while Mono plays | Mono track: press Rec while the sequence runs: its notes replace the steps one by one; steps without a Mono note are cleared. Rec again: stops, the rest of the pattern is untouched. |
+| Chord on a **sample** track (Chord/Arp type on tracks 1-8) | Only the lowest chord note is written. Info line "Chords need a MIDI track (lowest note recorded)". |
+| Chord that is not in the Tracker chord table (a 5-note chord, wide voicing) on a MIDI track | The highest notes are dropped until the table matches, the step gets the shorter chord FX. Info line "Chord reduced to fit the Tracker chord table". |
+| Stop the transport while recording | Recording ends by itself. Steps written so far stay, one undo step. |
+| Change the pattern (Song mode) while recording | Recording ends; nothing is written into the new pattern. |
+| Set the recorded track to Off (Instr + jog) while recording | Recording ends when the change applies (next bar). |
+| Rec held in other pages | Outside Play mode Rec is the stock Rec (edit mode). Recording started in Play mode keeps running when you leave; come back to Play mode and press Rec to end it. |
+
+## 7b. Shift + Rec: exactly one loop
+| Press | Expected |
+|---|---|
+| Transport running, Chord/Arp or Mono track: **Shift + Rec** | Info line "REC track N: waiting for the loop start". Nothing is written until the pattern wraps to step 1. |
+| Wait for the wrap | At step 1 the info line changes to "one loop, ends by itself"; the sequencer's notes replace every step of the loop. |
+| At the next wrap | Recording stops by itself, info line clears. The whole loop is one undo step. A note near the end of the last step that would quantise to step 1 is NOT written to step 1. |
+| Transport stopped: **Shift + Rec** | The transport starts at step 1 and the loop starts at once. |
+| **Rec** (without Shift) while armed or recording | Ends it at once (what was written stays). |
+
+## 8. Save / load with the project
+| Check | Expected |
+|---|---|
+| Set Chord/Arp on track 10 and Mono on track 3, change some settings (SETTINGS pads) and set Mono steps. Save the project (File > Save). Power off, power on, open the project. | Play mode shows `C` on track 10 and `M` on track 3; the settings and the Mono steps are back. Pads/LEDs show them. |
+| Wait ten seconds after a change (autosave), power off without saving, power on | The Workspace is restored by the stock autosave: the sequencer state of the last autosave comes back with it (a change shorter than ~1 s before power-off may be missing). |
+| Open a different project that never used a sequencer | All tracks Off (`-`). The previous project's sequencers are gone. |
+| New project | All tracks Off. |
+| Copy `seqtracks.bin` out of the project folder, delete it, open the project | Opens normally, all tracks Off (stock behaviour). Restore the file: the sequencers are back. |
+| Damage the file (open it in a hex editor, change one byte, or cut it to 100 bytes) | The project opens normally, all tracks Off, no error message. |
+| Open the project on stock CE (or the upstream firmware) | Opens normally; the extra file `seqtracks.bin` is ignored. The recorded notes (and chord FX) are ordinary pattern data and play. |
+| A project that never used a sequencer: save it | No `seqtracks.bin` is created in its folder. |
+| Save as (new name) | The new folder gets its own `seqtracks.bin`. |
+
+Known limits of step B: the sidecar is rewritten about once a second after a change (only while the Workspace autosave runs); Rec is
+not written to patterns other than the one you started in; sample-track chords keep the lowest note only; no pad-velocity record.

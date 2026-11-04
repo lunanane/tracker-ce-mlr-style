@@ -17,7 +17,13 @@ static void functSwitchModule(uint8_t button);
 static void functActionButton(uint8_t button, uint8_t state);
 static void functPads(uint8_t pad, uint8_t state, int16_t velo);
 static void functEncoder(int16_t value);
+static void functRecAction()
+{
+    SP->recPressed();
+}
+
 static void functPlayAction();
+static void functRecAction();
 
 static const char* const kTypeNames[seqlogic::TYPE_COUNT] = { "Off", "Chord/Arp", "Mono" };
 static const char kTypeLetters[seqlogic::TYPE_COUNT] = { '-', 'C', 'M' };
@@ -42,6 +48,7 @@ void cSeqPlay::start(uint32_t options)
     ip->setButtonObj(interfaceButtonGame, buttonPress, functSwitchModule);
 
     ip->setButtonObj(interfaceButtonPlay, buttonPress, functPlayAction);
+    ip->setButtonObj(interfaceButtonRec, buttonPress, functRecAction);
 
     ip->setButtonObj(interfaceButton0, functActionButton);
     ip->setButtonObj(interfaceButton1, functActionButton);
@@ -61,6 +68,7 @@ void cSeqPlay::start(uint32_t options)
         ledShown[i] = 0xFF;
     }
     listOpen = false;
+    recMsg = nullptr;
     shiftView = false;
     shownKey = 0xFFFFFFFF;
     screenDirty = true;
@@ -125,6 +133,7 @@ void cSeqPlay::selectTrack(uint8_t t)
     if (t >= seqlogic::kTracks)
         return;
     listOpen = false;
+    recMsg = nullptr;
     if (t != track)
     {
         releaseAllPads();
@@ -166,6 +175,23 @@ void cSeqPlay::instrChanged(bool down)
         listOpen = false;
         screenDirty = true;
     }
+}
+
+// Rec: instant punch-in on the current track; Shift + Rec: exactly one loop. Rec again ends a punch-in.
+void cSeqPlay::recPressed()
+{
+    recMsg = nullptr;
+    if (seqEngine.recState() != seqrec::Planner::IDLE)
+    {
+        seqRecStop();
+    }
+    else
+    {
+        bool oneLoop = buttons->isButtonPressed(interfaceButtonShift);
+        if (!seqRecStart(oneLoop, track))
+            recMsg = seqEngine.type(track) == seqlogic::TYPE_OFF ? "Pick a sequencer type first (Instr + jog wheel)" : "Cannot record now";
+    }
+    screenDirty = true;
 }
 
 void cSeqPlay::jog(int16_t value)
@@ -215,6 +241,10 @@ void cSeqPlay::refreshScreen()
     mix(shiftView ? 1u : 0u);
     mix(listOpen ? 100u + listSel : 0u);
     mix(seqEngine.playing() ? 1u : 0u);
+    mix(seqEngine.recState());
+    mix(seqEngine.recTrack());
+    mix(seqEngine.recHints());
+    mix(recMsg ? 1u : 0u);
     if (key == shownKey && !screenDirty)
         return;
     shownKey = key;
@@ -261,7 +291,28 @@ void cSeqPlay::refreshScreen()
              type == seqlogic::TYPE_OFF  ? "Pattern plays this track" :
              seqEngine.takenOver(track)  ? "Sequencer plays this track (pattern muted)" :
                                            "Pattern plays until you play");
-    for (int i = 0; i < 3; i++)
+    // Rec status and the hints of the last recording
+    seqrec::Planner::State rs = seqEngine.recState();
+    if (recMsg)
+        snprintf(infoText[3], sizeof(infoText[3]), "%s", recMsg);
+    else if (rs == seqrec::Planner::ARMED)
+        snprintf(infoText[3], sizeof(infoText[3]), "REC track %d: waiting for the loop start", seqEngine.recTrack() + 1);
+    else if (rs == seqrec::Planner::PUNCH)
+        snprintf(infoText[3], sizeof(infoText[3]), "REC track %d: punch-in (Rec = end)", seqEngine.recTrack() + 1);
+    else if (rs == seqrec::Planner::LOOP)
+        snprintf(infoText[3], sizeof(infoText[3]), "REC track %d: one loop, ends by itself", seqEngine.recTrack() + 1);
+    else if (seqEngine.recHints() & seqrec::HINT_NEED_MIDI)
+        snprintf(infoText[3], sizeof(infoText[3]), "Chords need a MIDI track (lowest note recorded)");
+    else if (seqEngine.recHints() & seqrec::HINT_REDUCED)
+        snprintf(infoText[3], sizeof(infoText[3]), "Chord reduced to fit the Tracker chord table");
+    else
+        infoText[3][0] = 0;
+    if (rs != seqrec::Planner::IDLE && (seqEngine.recHints() & seqrec::HINT_NEED_MIDI))
+        snprintf(infoText[2], sizeof(infoText[2]), "Chords need a MIDI track");
+    else if (rs != seqrec::Planner::IDLE && (seqEngine.recHints() & seqrec::HINT_REDUCED))
+        snprintf(infoText[2], sizeof(infoText[2]), "Chord reduced");
+
+    for (int i = 0; i < 4; i++)
     {
         display.setControlText(infoLabel[i], infoText[i]);
         display.refreshControl(infoLabel[i]);
