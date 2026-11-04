@@ -2,6 +2,8 @@
 #include "seqTracksCore.h"
 #include <string.h>
 
+#define SEQ_COMPILER_BARRIER() __asm__ __volatile__("" ::: "memory")
+
 namespace seqtracks {
 
 using namespace seqlogic;
@@ -605,6 +607,8 @@ static uint16_t crc16(const uint8_t* b, size_t n)
     return crc16Update(0xFFFF, b, n);
 }
 
+// The audio context may change a generator at any time: each track's two blocks are serialized inside one short critical
+// section (a few microseconds), so every block is internally consistent (a torn block would fail deserialize).
 size_t Engine::saveState(uint8_t* buf, size_t cap) const
 {
     if (cap < (size_t)kSidecarMax)
@@ -619,6 +623,7 @@ size_t Engine::saveState(uint8_t* buf, size_t cap) const
     for (int i = 0; i < kTracks; i++)
     {
         const Track& t = t_[i];
+        uint32_t cs = host_ ? host_->critEnter() : 0;
         buf[p++] = t.type;
         size_t n = t.ca.serialize(buf + p + 1, cap - p - 1);
         buf[p] = (uint8_t)n;
@@ -626,6 +631,8 @@ size_t Engine::saveState(uint8_t* buf, size_t cap) const
         n = t.mo.serialize(buf + p + 1, cap - p - 1);
         buf[p] = (uint8_t)n;
         p += 1 + n;
+        if (host_)
+            host_->critExit(cs);
     }
     size_t plen = p - 8;
     buf[6] = (uint8_t)(plen & 0xFF);
@@ -636,6 +643,14 @@ size_t Engine::saveState(uint8_t* buf, size_t cap) const
     return p;
 }
 
+// Change detection hashes the SETTINGS only. Fields that change while performing (and are not worth an autosave) are masked:
+//  Chord/Arp: the lock root / minor flag follow the last played root in key mode, the visible panel is a view.
+//  Mono: the edit page and the visible half are views.
+// Offsets are those of serialization version 2 (see chordarp.cpp / mono.cpp); saveState always stores everything.
+static_assert((int)seqgen::ChordArp::kSerialVersion == 2 && (int)seqgen::Mono::kSerialVersion == 2, "stateHash masks assume the v2 block layout");
+static_assert((int)seqgen::ChordArp::kSerialSize <= (int)seqgen::Mono::kSerialSize, "stateHash uses one buffer of the Mono block size for both");
+static_assert((int)seqgen::Mono::kSerialSize < 256 && (int)seqgen::ChordArp::kSerialSize < 256, "block lengths are stored in one byte");
+
 uint16_t Engine::stateHash() const
 {
     // incremental: no full-size buffer (the MK66 stack is 4 KB)
@@ -644,12 +659,26 @@ uint16_t Engine::stateHash() const
     for (int i = 0; i < kTracks; i++)
     {
         const Track& t = t_[i];
-        blk[0] = t.type;
-        c = crc16Update(c, blk, 1);
-        size_t n = t.ca.serialize(blk, sizeof(blk));
-        c = crc16Update(c, blk, n);
-        n = t.mo.serialize(blk, sizeof(blk));
-        c = crc16Update(c, blk, n);
+        size_t nc, nm;
+        uint8_t type;
+        uint32_t cs = host_ ? host_->critEnter() : 0;
+        type = t.type;
+        nc = t.ca.serialize(blk, sizeof(blk));
+        if (host_)
+            host_->critExit(cs);
+        if (nc >= 25 && blk[1] == 1)
+            blk[2] = blk[3] = blk[4] = 0; // key mode: lock root follows the played root
+        if (nc >= 25)
+            blk[24] = 0; // panel
+        c = crc16Update(c, &type, 1);
+        c = crc16Update(c, blk, nc);
+        cs = host_ ? host_->critEnter() : 0;
+        nm = t.mo.serialize(blk, sizeof(blk));
+        if (host_)
+            host_->critExit(cs);
+        if (nm >= 11)
+            blk[5] = blk[10] = 0; // edit page, visible half
+        c = crc16Update(c, blk, nm);
     }
     return c;
 }
@@ -657,6 +686,7 @@ uint16_t Engine::stateHash() const
 void Engine::resetState()
 {
     loading_ = true;
+    SEQ_COMPILER_BARRIER(); // t_ / activeCount_ are plain variables: do not let the compiler move their writes out of the guard
     for (uint8_t i = 0; i < kTracks; i++)
     {
         if (t_[i].type != TYPE_OFF)
@@ -669,6 +699,7 @@ void Engine::resetState()
     activeCount_ = 0;
     takenMask_ = 0;
     recomputeContext();
+    SEQ_COMPILER_BARRIER();
     loading_ = false;
 }
 
@@ -685,57 +716,50 @@ bool Engine::loadState(const uint8_t* buf, size_t len)
     if (buf[end] != (uint8_t)(c & 0xFF) || buf[end + 1] != (uint8_t)(c >> 8))
         return false;
 
-    // pass 1: every block must be valid before anything changes
+    // pass 1: the frame must be well-formed (lengths add up); the content of a block is judged per track in pass 2
     {
         size_t p = 8;
         for (int i = 0; i < kTracks; i++)
         {
-            if (p + 2 > end || buf[p] >= TYPE_COUNT)
+            if (p + 2 > end)
                 return false;
-            p++;
+            p++; // type
             size_t n = buf[p++];
             if (p + n + 1 > end)
                 return false;
-            if (n != 0)
-            {
-                seqgen::ChordArp ca; // one temporary at a time (stack)
-                if (!ca.deserialize(buf + p, n))
-                    return false;
-            }
             p += n;
             n = buf[p++];
             if (p + n > end)
                 return false;
-            if (n != 0)
-            {
-                seqgen::Mono mo;
-                if (!mo.deserialize(buf + p, n))
-                    return false;
-            }
             p += n;
         }
         if (p != end)
             return false;
     }
 
-    // pass 2: apply
+    // pass 2: apply; a track whose type or blocks are invalid is left Off with fresh state, the others load
     resetState();
     loading_ = true;
+    SEQ_COMPILER_BARRIER();
     size_t p = 8;
     for (uint8_t i = 0; i < kTracks; i++)
     {
         uint8_t type = buf[p++];
         size_t n = buf[p++];
+        bool ok = type < TYPE_COUNT;
         if (n)
-            t_[i].ca.deserialize(buf + p, n);
+            ok = t_[i].ca.deserialize(buf + p, n) && ok;
         p += n;
         n = buf[p++];
         if (n)
-            t_[i].mo.deserialize(buf + p, n);
+            ok = t_[i].mo.deserialize(buf + p, n) && ok;
         p += n;
-        if (type != TYPE_OFF)
+        if (!ok)
+            initTrack(i); // invalid block: this track Off, defaults
+        else if (type != TYPE_OFF)
             applyType(i, type);
     }
+    SEQ_COMPILER_BARRIER();
     loading_ = false;
     return true;
 }

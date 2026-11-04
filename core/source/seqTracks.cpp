@@ -67,6 +67,14 @@ class SeqHost : public seqtracks::Host
     }
     bool sampleTrack(uint8_t track) override { return isSampleTrack(track); }
     uint8_t instrument(uint8_t track) override { return s_instrument[track]; }
+    // Interrupts off for the few microseconds of copying one track's state out (the audio context runs in an interrupt)
+    uint32_t critEnter() override
+    {
+        uint32_t primask;
+        __asm volatile("mrs %0, primask\n\tcpsid i" : "=r"(primask)::"memory");
+        return primask;
+    }
+    void critExit(uint32_t primask) override { __asm volatile("msr primask, %0" ::"r"(primask) : "memory"); }
     // Pulse of the bar the next clock pulse falls on: 6 pulses per step, 16 steps per bar (track 0 is the clock source).
     int16_t pulseInBar() override
     {

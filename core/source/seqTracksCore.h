@@ -30,6 +30,10 @@ class Host
     // Pulse (0..95) of the bar the NEXT clock pulse falls on, derived from the pattern position; -1 = unknown (the engine counts
     // its own pulses from the transport start).
     virtual int16_t pulseInBar() { return -1; }
+    // Short critical section (main loop only): keeps the audio context from changing a generator while its state is copied out
+    // (saveState / stateHash). critEnter returns a token for critExit. Default: none (desktop tests).
+    virtual uint32_t critEnter() { return 0; }
+    virtual void critExit(uint32_t) {}
 
   protected:
     ~Host() {}
@@ -62,9 +66,9 @@ class Engine
     // File = "SQTR", version, track count, payload length (u16), per track [type, lenCA, CA, lenMono, Mono], CRC16.
     enum { kSidecarVersion = 1, kSidecarMax = 8 + seqlogic::kTracks * (3 + seqgen::ChordArp::kSerialSize + seqgen::Mono::kSerialSize) + 2 };
     size_t saveState(uint8_t* buf, size_t cap) const; // 0 = buffer too small
-    bool loadState(const uint8_t* buf, size_t len);   // false = invalid (nothing changed)
+    bool loadState(const uint8_t* buf, size_t len);   // false = invalid frame (nothing changed); a bad track block only turns that track Off
     void resetState();                                // all tracks Off, fresh state
-    uint16_t stateHash() const;                       // CRC of the serialized state (change detection)
+    uint16_t stateHash() const;                       // CRC of the serialized settings (change detection; runtime-only fields masked)
 
     // ---- audio context ----
     bool active() const { return !loading_ && (activeCount_ != 0 || head_ != tail_ || rec_.active()); }

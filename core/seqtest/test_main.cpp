@@ -44,6 +44,10 @@ struct MockHost : Host
     uint8_t instr = 3;
     seqrec::Params prm = { true, true };
     int16_t pib = -1; // pulseInBar() answer
+    int critDepth = 0, critEnters = 0;
+    uint32_t critEnter() { critDepth++; critEnters++; return 7; }
+    void critExit(uint32_t t) { critDepth--; tokenOk = tokenOk && t == 7; }
+    bool tokenOk = true;
     int16_t pulseInBar() { return pib; }
     void trackPos(uint8_t, seqrec::TrackPos& o) { o = tp; }
     bool sampleTrack(uint8_t) { return sample; }
@@ -1019,6 +1023,14 @@ static uint16_t testCrc(const uint8_t* b, size_t n)
     return crc;
 }
 
+static void fixCrc(uint8_t* b, size_t n)
+{
+    size_t end = n - 2;
+    uint16_t crc = testCrc(b, end);
+    b[end] = (uint8_t)(crc & 0xFF);
+    b[end + 1] = (uint8_t)(crc >> 8);
+}
+
 static void test_sidecar_roundtrip_and_corruption()
 {
     MockHost h1, h2;
@@ -1079,17 +1091,39 @@ static void test_sidecar_roundtrip_and_corruption()
     CHECK(!c->loadState(0, 100));
     memset(bad, 0, sizeof(bad)); // empty file read into a zeroed buffer
     CHECK(!c->loadState(bad, sizeof(bad)));
-    // a valid frame with an invalid block (type 7) and a fixed-up CRC is refused as well
+    CHECK(c->type(7) == TYPE_MONO && c->stateHash() == hashC); // refused files change nothing
+    // a valid frame with an invalid block (type 7) and a fixed-up CRC: only that track falls back to Off, the rest loads
+    // (owner review 2026-11-04: a single bad block must not throw away the whole file)
     memcpy(bad, buf, n);
-    bad[8] = 7;
+    bad[8] = 7; // track 0
+    fixCrc(bad, n);
+    CHECK(c->loadState(bad, n));
+    CHECK(c->type(0) == TYPE_OFF && c->type(3) == TYPE_CHORDARP && c->type(9) == TYPE_MONO && c->type(7) == TYPE_OFF);
+    // a Chord/Arp block with an out-of-range value in track 3: track 3 Off, track 0 (Mono) and 9 survive
     {
-        size_t end = n - 2;
-        uint16_t crc = testCrc(bad, end);
-        bad[end] = (uint8_t)(crc & 0xFF);
-        bad[end + 1] = (uint8_t)(crc >> 8);
+        size_t q = 8;
+        size_t caOff[kTracks];
+        for (int i = 0; i < kTracks; i++)
+        {
+            q++; // type
+            caOff[i] = q + 1;
+            q += 1 + buf[q];
+            q += 1 + buf[q];
+        }
+        memcpy(bad, buf, n);
+        bad[caOff[3] + 7] = 99; // selT_ out of range
+        fixCrc(bad, n);
+        CHECK(c->loadState(bad, n));
+        CHECK(c->type(3) == TYPE_OFF && c->type(0) == TYPE_MONO && c->type(9) == TYPE_MONO);
+        CHECK(c->mono(0).stepAt(1) == a->mono(0).stepAt(1));
+        // a broken length chain is a bad frame: nothing changes
+        memcpy(bad, buf, n);
+        bad[8 + 1] = 200; // CA length of track 0
+        fixCrc(bad, n);
+        uint16_t hc = c->stateHash();
+        CHECK(!c->loadState(bad, n));
+        CHECK(c->stateHash() == hc);
     }
-    CHECK(!c->loadState(bad, n));
-    CHECK(c->type(7) == TYPE_MONO && c->stateHash() == hashC); // untouched
     // a good file replaces everything
     CHECK(c->loadState(buf, n));
     CHECK(c->type(7) == TYPE_OFF && c->type(0) == TYPE_MONO);
@@ -1111,6 +1145,60 @@ static void test_state_change_detection()
     e->applyPad(2, 3, true);
     e->applyPad(2, 3, false);
     CHECK(e->stateHash() != h1);
+    delete e;
+}
+
+// Performing must not mark the project changed: lock root (key mode), visible panel / half / edit page are not settings.
+static void test_hash_ignores_performance()
+{
+    MockHost h;
+    Engine* e = mk(h);
+    e->applyType(2, TYPE_CHORDARP);
+    e->applyType(4, TYPE_MONO);
+    uint16_t h0 = e->stateHash();
+    e->applyPad(2, 0, true); // key mode: the root pad moves the lock root
+    e->applyPad(2, 0, false);
+    e->applyPad(2, 3, true);
+    e->applyPad(2, 3, false);
+    e->applyPad(2, 11, true); // panel switch (control pad)
+    e->applyPad(2, 11, false);
+    e->applyPad(4, 8, true); // Mono HALF
+    e->applyPad(4, 8, false);
+    CHECK(e->stateHash() == h0);
+    // real settings change it
+    e->applyPad(4, 0, true); // Mono step
+    e->applyPad(4, 0, false);
+    uint16_t h1 = e->stateHash();
+    CHECK(h1 != h0);
+    e->applyPad(2, 10, true); // back to the TYPES panel
+    e->applyPad(2, 10, false);
+    e->applyPad(2, 8, true); // Chord/Arp chord type
+    e->applyPad(2, 8, false);
+    CHECK(e->stateHash() != h1);
+    // saving still stores the full state (lock root included): save before and after a root press differ
+    uint8_t b1[Engine::kSidecarMax], b2[Engine::kSidecarMax];
+    e->applyType(3, TYPE_CHORDARP); // a second Chord/Arp (own scale source is track 2)
+    size_t n1 = e->saveState(b1, sizeof(b1));
+    e->applyPad(3, 5 + 12, true);
+    e->applyPad(3, 5 + 12, false);
+    size_t n2 = e->saveState(b2, sizeof(b2));
+    CHECK(n1 == n2 && memcmp(b1, b2, n1) != 0);
+    delete e;
+}
+
+// State is copied out inside short critical sections (balanced, one per track block pair)
+static void test_save_uses_critical_sections()
+{
+    MockHost h;
+    Engine* e = mk(h);
+    e->applyType(1, TYPE_MONO);
+    uint8_t buf[Engine::kSidecarMax];
+    h.critEnters = 0;
+    CHECK(e->saveState(buf, sizeof(buf)) > 0);
+    CHECK(h.critEnters == kTracks && h.critDepth == 0 && h.tokenOk);
+    h.critEnters = 0;
+    e->stateHash();
+    CHECK(h.critEnters == 2 * kTracks && h.critDepth == 0);
     delete e;
 }
 
@@ -1146,6 +1234,8 @@ int main()
     test_sample_track_chord_lowest_only();
     test_sidecar_roundtrip_and_corruption();
     test_state_change_detection();
+    test_hash_ignores_performance();
+    test_save_uses_critical_sections();
     printf("%d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

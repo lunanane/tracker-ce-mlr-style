@@ -187,7 +187,10 @@ Built around immediate playability; no separate Seq page, no Off/Live/Rec modes.
   Written (to `<file>.tmp`, then remove + rename: the FAT API has no atomic replace; the change hash only advances after a successful write, so a failed write is retried) next to `project.mt` by Save / Save as (only when a sequencer was ever used in the project), mirrored in
   `Workspace/seqtracks.bin` by the Workspace autosave (state change detected by a hash about once a second), copied from the project
   folder into the Workspace when a project is opened, read when the Workspace is loaded. Missing / short / corrupt / wrong version =
-  all tracks Off, nothing else changes. Save / Save as with a project that never used a sequencer writes nothing and removes a stale
+  all tracks Off, nothing else changes. A well-formed file with one invalid track block (bad type or out-of-range value) turns only that
+  track Off; the others load. Saving and the change hash copy each track's state inside a short interrupt-off section (`Host::critEnter`),
+  so the audio context cannot tear a block. The change hash covers settings only (lock root in key mode, visible panel / half / edit page
+  are masked), so performing does not mark the project changed; Save still stores everything. Save / Save as with a project that never used a sequencer writes nothing and removes a stale
   `seqtracks.bin` (and the Workspace mirror) unless it is the project the file was loaded from (an unreadable or newer file is kept there). `.mtp`, `project.mt` and the pattern struct are untouched.
 - Not done: Copy / Paste of a track's sequencer, recording into other patterns than the one active at Rec start, pad velocity record.
 
