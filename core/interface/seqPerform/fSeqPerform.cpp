@@ -929,8 +929,9 @@ void cSeqPerform::refreshPads()
     }
     if (page == PAGE_PING)
     {
-        out[kPadPingPong] = (mtProject.values.delayParams & 0x80) ? 30 : 4;
-        out[kPadSync] = (mtProject.values.delayParams & 0x40) ? 30 : 4;
+        // dark when off, dim when on: clearly below the selector pads (30 / 14 / 6) so those still stand apart
+        out[kPadPingPong] = (mtProject.values.delayParams & 0x80) ? 10 : 0;
+        out[kPadSync] = (mtProject.values.delayParams & 0x40) ? 10 : 0;
     }
     const uint8_t dialled = st.pageMask();
     for (uint8_t i = 0; i < 48; i++)

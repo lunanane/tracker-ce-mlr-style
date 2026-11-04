@@ -45,7 +45,7 @@ class AudioEffectShortDelay : public AudioStream
 
   private:
     static constexpr int kFeedbackShift = 8;
-    static constexpr float kMaxFeedback = 0.99f;
+    static constexpr float kMaxFeedback = seqfx::kDelayFeedbackCap / 100.0f; // plan 007: the cap (0.88), shared with the fader page
     static constexpr uint32_t delaylineLengthMask = MAX_DELAYLINE_LENGTH - 1;
     int16_t* pingpongDelaylineRight;
     int16_t* pingpongDelaylineLeft;

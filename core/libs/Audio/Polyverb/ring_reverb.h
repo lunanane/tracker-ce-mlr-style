@@ -140,6 +140,7 @@ class BasicRingReverb
         rng_ = 0x2545F491u;
         prePos_ = 0;
         predelay_ = predelayTarget_;
+        quiet_ = 0;
     }
 
     // In place on interleaved-free int16 blocks: input send -> return (dry share + wet).
@@ -178,6 +179,7 @@ class BasicRingReverb
     int shimFade_ = 0, shimStep_ = 6;
     int shimPos1_ = 0, shimPos2_ = 0;
     uint32_t rng_ = 1;
+    uint32_t quiet_ = 0; // consecutive samples with (almost) no input and no wet output; >= kRingSize: the whole ring is silent
 };
 
 #if defined(PLATFORM_IMX)
@@ -245,9 +247,33 @@ RINGVERB_INLINE void BasicRingReverb<Ring>::process(int16_t* left, int16_t* righ
     const int32_t inGain = inGain_;
     const int32_t dry = dry_, wet = wet_;
 
+    // silence bypass (as the stock reverb has): no input for a whole ring length and no tail left -> nothing to compute, the
+    // return is just the dry share. Costs one pass over the block while the input is quiet.
+    if (quiet_ >= kRingSize)
+    {
+        int32_t peak = 0;
+        for (int s = 0; s < n; s++)
+        {
+            int32_t a = left[s] < 0 ? -left[s] : left[s], b = right[s] < 0 ? -right[s] : right[s];
+            peak |= a | b;
+        }
+        if (peak <= 1)
+        {
+            for (int s = 0; s < n; s++)
+            {
+                left[s] = (int16_t)((left[s] * dry) >> 8);
+                right[s] = (int16_t)((right[s] * dry) >> 8);
+            }
+            return;
+        }
+        quiet_ = 0;
+    }
+    int32_t inPeak = 0, outPeak = 0;
+
     for (int s = 0; s < n; s++)
     {
         int32_t inL = left[s], inR = right[s];
+        inPeak |= (inL < 0 ? -inL : inL) | (inR < 0 ? -inR : inR);
         // pre-delay (stereo), slewed by one sample per sample so a moving control cannot click
         preL_[prePos_] = (int16_t)inL;
         preR_[prePos_] = (int16_t)inR;
@@ -324,9 +350,15 @@ RINGVERB_INLINE void BasicRingReverb<Ring>::process(int16_t* left, int16_t* righ
         pos_ = (pos_ - 1) & kRingMask;
         fb1_ = (acc * fade) >> 8;
 
-        left[s] = (int16_t)ssat16(((inL * dry) >> 8) + ((outl * wet) >> 8));
-        right[s] = (int16_t)ssat16(((inR * dry) >> 8) + ((outr * wet) >> 8));
+        const int32_t wl = (outl * wet) >> 8, wr = (outr * wet) >> 8;
+        outPeak |= (wl < 0 ? -wl : wl) | (wr < 0 ? -wr : wr);
+        left[s] = (int16_t)ssat16(((inL * dry) >> 8) + wl);
+        right[s] = (int16_t)ssat16(((inR * dry) >> 8) + wr);
     }
+    if (inPeak <= 1 && outPeak <= 1)
+        quiet_ = quiet_ + (uint32_t)n > kRingSize ? kRingSize : quiet_ + (uint32_t)n;
+    else
+        quiet_ = 0;
 }
 
 }  // namespace ringverb

@@ -65,6 +65,10 @@ class AudioEffectPolyverb : public AudioStream
     // Plan 007 F2: highpass (low cut) of the reverb input, seqfx::hpHz index 0 = off. Smoothed, no clicks.
     void setHighpass(uint8_t idx);
 
+    // CPU used by update() in percent of the 128 sample block period (average of ~32 blocks, and a slowly decaying peak)
+    float cpuPercent() const { return cpuAvg; }
+    float cpuPeakPercent() const { return cpuPeak; }
+
     void blockUpdate() { isBlockedUpdate = true; }
 
     void unblockUpdate() { isBlockedUpdate = false; }
@@ -78,7 +82,9 @@ class AudioEffectPolyverb : public AudioStream
     ringverb::RingReverb ring;
     seqfx::FilterControl hpControl;
     seqfx::SvfState hpLeft, hpRight;
-    float size_ = 0.7f, damp_ = 0.5f, diffusion_ = 0.68f, predelay_ = 0.5f;
+    // written from the main loop, read in the audio interrupt (aligned floats; volatile so ringDirty is never seen before them)
+    volatile float size_ = 0.7f, damp_ = 0.5f, diffusion_ = 0.68f, predelay_ = 0.5f;
+    float cpuAvg = 0.0f, cpuPeak = 0.0f;
     volatile bool ringDirty = true;
     volatile uint8_t requestedType = seqfx::RT_STOCK;
     seqfx::TypeSwitch typeSwitch;

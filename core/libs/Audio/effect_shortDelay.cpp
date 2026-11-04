@@ -95,7 +95,7 @@ AUDIO_CORE_FLASH void AudioEffectShortDelay::setFilterFrequency(float frequency)
         frequency = seqfx::kCenterMinHz;
     bandpassControl.targetOct = log2f(frequency);
     bandpassControl.targetQ = seqfx::bwToQ(filterWidthOctaves);
-    bandpassControl.targetMix = frequency >= seqfx::kOpenHz ? 0.0f : 1.0f;
+    bandpassControl.targetMix = seqfx::bandMix(frequency);
 }
 
 AUDIO_CORE_FLASH void AudioEffectShortDelay::setFilterWidth(float octaves)
@@ -188,9 +188,11 @@ AUDIO_CORE_RAM bool AudioEffectShortDelay::process(int16_t input[],
 
     // bandpass in the feedback loop: the control is smoothed once per block; out of the path (mix 0) it costs nothing
     bandpassControl.blockUpdate();
-    const float filterMix = bandpassControl.mix();
-    const bool filterOn = filterMix > 0.0f;
+    const float mixPrev = bandpassControl.prevMix();
+    const float mixCur = bandpassControl.mix();
+    const bool filterOn = mixPrev > 0.0f || mixCur > 0.0f;
     const seqfx::SvfCoef bp = bandpassControl.coef();
+    const bool pingpong = isPingpong != 0;
     if (!filterOn)
     {
         bandpassLeft.clear();
@@ -210,13 +212,23 @@ AUDIO_CORE_RAM bool AudioEffectShortDelay::process(int16_t input[],
         int32_t filteredSampleMono = delayedSampleMono;
         if (filterOn)
         {
-            float xr = (float)delayedSampleRight, xl = (float)delayedSampleLeft, xm = (float)delayedSampleMono;
-            float yr = xr + filterMix * (seqfx::bandpass(bandpassRight, bp, xr) - xr);
-            float yl = xl + filterMix * (seqfx::bandpass(bandpassLeft, bp, xl) - xl);
-            float ym = xm + filterMix * (seqfx::bandpass(bandpassMono, bp, xm) - xm);
-            filteredSampleRight = signed_saturate_rshift((int32_t)yr, 16, 0);
-            filteredSampleLeft = signed_saturate_rshift((int32_t)yl, 16, 0);
-            filteredSampleMono = signed_saturate_rshift((int32_t)ym, 16, 0);
+            // the mix ramps linearly over the block: engaging / releasing the band never steps the signal.
+            // Only the lines that are heard run the filter (ping-pong: 2, mono: 1); the other one passes through.
+            const float m = seqfx::mixAt(mixPrev, mixCur, sample, sampleCount);
+            if (pingpong)
+            {
+                float xr = (float)delayedSampleRight, xl = (float)delayedSampleLeft;
+                filteredSampleRight =
+                  signed_saturate_rshift((int32_t)(xr + m * (seqfx::bandpass(bandpassRight, bp, xr) - xr)), 16, 0);
+                filteredSampleLeft =
+                  signed_saturate_rshift((int32_t)(xl + m * (seqfx::bandpass(bandpassLeft, bp, xl) - xl)), 16, 0);
+            }
+            else
+            {
+                float xm = (float)delayedSampleMono;
+                filteredSampleMono =
+                  signed_saturate_rshift((int32_t)(xm + m * (seqfx::bandpass(bandpassMono, bp, xm) - xm)), 16, 0);
+            }
         }
 
         int16_t outL = isPingpong ? filteredSampleLeft : filteredSampleMono;
@@ -231,18 +243,13 @@ AUDIO_CORE_RAM bool AudioEffectShortDelay::process(int16_t input[],
         newDelayedSampleMono = inputShifted + filteredSampleMono * feedback;
 
         static constexpr int32_t kFeedbackRoundBias = (1 << kFeedbackShift) - 1;
+        // soft limit instead of the hard 16 bit clip: a loud sustained signal at a high feedback compresses instead of crackling
         int16_t saturatedLeft = (int16_t)signed_saturate_rshift(
-          newDelayedSampleLeft + (newDelayedSampleLeft < 0 ? kFeedbackRoundBias : 0),
-          16,
-          kFeedbackShift);
+          seqfx::softLimit((newDelayedSampleLeft + (newDelayedSampleLeft < 0 ? kFeedbackRoundBias : 0)) >> kFeedbackShift), 16, 0);
         int16_t saturatedRight = (int16_t)signed_saturate_rshift(
-          newDelayedSampleRight + (newDelayedSampleRight < 0 ? kFeedbackRoundBias : 0),
-          16,
-          kFeedbackShift);
+          seqfx::softLimit((newDelayedSampleRight + (newDelayedSampleRight < 0 ? kFeedbackRoundBias : 0)) >> kFeedbackShift), 16, 0);
         int16_t saturatedMono = (int16_t)signed_saturate_rshift(
-          newDelayedSampleMono + (newDelayedSampleMono < 0 ? kFeedbackRoundBias : 0),
-          16,
-          kFeedbackShift);
+          seqfx::softLimit((newDelayedSampleMono + (newDelayedSampleMono < 0 ? kFeedbackRoundBias : 0)) >> kFeedbackShift), 16, 0);
 
         bool isSampleSilent =
           isPingpong ? (outL == 0 && outR == 0 && saturatedLeft == 0 && saturatedRight == 0)

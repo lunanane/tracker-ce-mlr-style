@@ -4,6 +4,7 @@
 // No Polyend includes, host-testable (core/seqtest/test_perform.cpp).
 #pragma once
 #include <stdint.h>
+#include "seqFxCaps.h"
 
 namespace seqperf {
 
@@ -128,7 +129,8 @@ inline double paramValue(Param p, int step)
     {
         case P_TIME: return (double)(3500 * step * step / 64);       // ms, quadratic: short times reachable
         case P_RATE: return (double)((18 * (step - 1) + 3) / 7);     // sync rate index 0..18
-        case P_FEEDBACK: return (double)((99 * (step - 1) + 3) / 7); // 0..99
+        case P_FEEDBACK: return (double)((seqfx::kDelayFeedbackCap * (step - 1) + 3) / 7); // 0 .. the cap (88): no crackle at the top
+        case P_SIZE: return seqfx::kReverbSizeCap * (double)(step - 1) / 7.0;               // 0 .. the cap (0.9)
         case P_FILTER: return filterHz[step - 1];                    // Hz, log spaced
         default: return (double)(step - 1) / 7.0;                    // reverb size / damp / predelay 0..1
     }

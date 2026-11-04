@@ -23,8 +23,8 @@ struct SvfState
     void clear() { ic1 = ic2 = 0; }
 };
 
-// tan(x) for 0 < x < 1.45: a [7/6] Pade approximation (error < 2e-6 up to 0.9) and 1 / tan(pi/2 - x) above. Replaces tanf(), which
-// would pull the large libm kernel into the image of the original Tracker (flash is nearly full).
+// tan(x) for 0 < x < 1.45: a [7/6] Pade approximation (relative error < 1e-6, tested) and 1 / tan(pi/2 - x) above. Cheaper per block
+// than tanf() (tanf stays in the image anyway, other code uses it).
 inline float tanApprox(float x)
 {
     bool inv = x > 0.9f;
@@ -80,6 +80,22 @@ inline float highpass(SvfState& s, const SvfCoef& c, float x)
     return x - c.k * v1 - v2;
 }
 
+// Linear ramp of the mix over a block of n samples: the value for sample s (0 .. n-1) is prev -> cur, reaching cur at the last sample.
+inline float mixAt(float prev, float cur, int s, int n) { return prev + (cur - prev) * (float)(s + 1) / (float)n; }
+
+// Soft limit of the delay feedback write (value after the >> 8, +-32767 range): linear up to 5/8 of full scale, a quarter of the
+// slope above. The 16 bit line never hard-clips for any sum a feedback loop can build (the largest sum of 65534 gives 31743, the
+// final saturation only guards that), so a loud sustained tone at a high feedback compresses instead of crackling.
+inline int32_t softLimit(int32_t v)
+{
+    const int32_t t = 20480;
+    if (v > t)
+        return t + ((v - t) >> 2);
+    if (v < -t)
+        return -t - ((-v - t) >> 2);
+    return v;
+}
+
 // Denormals / numeric dust in the state of a silent filter: flushed once per block.
 inline void svfFlush(SvfState& s)
 {
@@ -91,8 +107,10 @@ inline void svfFlush(SvfState& s)
 
 // Block-rate smoothing of a filter control. The targets are plain floats written from the main loop (a torn read is impossible
 // for an aligned 32 bit float on the Cortex-M4); the audio side calls blockUpdate() once per audio block and then runs the
-// samples with coef() and mix(). centre is smoothed in octaves (log2 Hz), so a sweep over the whole range is even to the ear.
-// mix is the bypass crossfade: 0 = the filter is out of the signal path (state cleared, nothing computed), 1 = fully in.
+// samples with coef() and the mix ramp. centre is smoothed in octaves (log2 Hz), so a sweep over the whole range is even to the ear.
+// mix is the bypass crossfade: 0 = the filter is out of the signal path (state cleared, nothing computed), 1 = fully in. It is
+// stepped once per block here; the audio side ramps it linearly per sample from prevMix() to mix() (mixAt()), so no step reaches
+// the signal.
 class FilterControl
 {
   public:
@@ -104,6 +122,7 @@ class FilterControl
     bool blockUpdate()
     {
         bool moving = false;
+        prevMix_ = mix_;
         float dOct = targetOct - oct_;
         float dQ = targetQ - q_;
         float dMix = targetMix - mix_;
@@ -112,6 +131,7 @@ class FilterControl
             oct_ = targetOct;
             q_ = targetQ;
             mix_ = targetMix;
+            prevMix_ = mix_;
             init_ = true;
             moving = true;
         }
@@ -140,15 +160,16 @@ class FilterControl
     }
     const SvfCoef& coef() const { return coef_; }
     float mix() const { return mix_; }
+    float prevMix() const { return prevMix_; }
     float centreHz() const { return exp2f(oct_); }
     // after a hard reset (the audio side cleared its filter states)
     void restart() { init_ = false; }
 
-    static constexpr float kAlpha = 0.3f;     // per 128 sample block: ~4 blocks (12 ms) time constant
-    static constexpr float kAlphaMix = 0.25f; // bypass crossfade: ~8 blocks (25 ms) to settle
+    static constexpr float kAlpha = 0.3f;     // per 128 sample block: ~2.8 blocks (8 ms) time constant for the centre / width
+    static constexpr float kAlphaMix = 0.25f; // mix target follows in ~3.5 blocks (10 ms); settles (< 0.001) in about 24 blocks (70 ms)
 
   private:
-    float oct_ = 10.0f, q_ = 0.707f, mix_ = 0.0f;
+    float oct_ = 10.0f, q_ = 0.707f, mix_ = 0.0f, prevMix_ = 0.0f;
     bool init_ = false;
     SvfCoef coef_;
 };

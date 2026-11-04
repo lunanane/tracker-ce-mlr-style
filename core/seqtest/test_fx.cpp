@@ -133,6 +133,169 @@ static void test_tan_approx()
     CHECK_NEAR(tanApprox(0.8999f), tanApprox(0.9001f), 2e-3);
 }
 
+// Engaging / releasing the bandpass (and the reverb low cut) must not click: the mix is ramped per sample inside the block.
+static void test_mix_ramp_no_click()
+{
+    // host model of the audio side: blocks of 128, a low-frequency sine through  x + m * (bandpass(x) - x)
+    for (int dir = 0; dir < 2; dir++)
+    {
+        FilterControl fc;
+        fc.targetOct = log2f(3000.0f);
+        fc.targetQ = bwToQ(1.0f);
+        fc.targetMix = dir ? 1.0f : 0.0f; // dir 0: engage, dir 1: release
+        fc.blockUpdate();
+        SvfState s;
+        float prevX = 0, prevY = 0;
+        double maxDx = 0, maxDy = 0;
+        long idx = 0;
+        for (int blk = 0; blk < 120; blk++)
+        {
+            if (blk == 20)
+                fc.targetMix = dir ? 0.0f : 1.0f;
+            fc.blockUpdate();
+            SvfCoef c = fc.coef();
+            float mp = fc.prevMix(), mc = fc.mix();
+            if (mp <= 0 && mc <= 0)
+                s.clear();
+            for (int i = 0; i < 128; i++, idx++)
+            {
+                float x = (float)(10000.0 * sin(2.0 * 3.14159265358979 * 150.0 * idx / 44100.0));
+                float y = x;
+                if (mp > 0 || mc > 0)
+                {
+                    float m = mixAt(mp, mc, i, 128);
+                    y = x + m * (bandpass(s, c, x) - x);
+                }
+                if (idx > 0)
+                {
+                    maxDx = fmax(maxDx, fabs(x - prevX));
+                    maxDy = fmax(maxDy, fabs(y - prevY));
+                }
+                prevX = x;
+                prevY = y;
+            }
+        }
+        printf("  mix ramp %s: max output step %.0f, max input step %.0f\n", dir ? "release" : "engage", maxDy, maxDx);
+        CHECK(maxDy <= maxDx * 2.0);
+    }
+    CHECK_NEAR(mixAt(0.2f, 0.8f, 127, 128), 0.8, 1e-6);
+    CHECK(mixAt(0.2f, 0.8f, 0, 128) > 0.2f && mixAt(0.2f, 0.8f, 0, 128) < 0.21f);
+    // prevMix follows the previous block
+    FilterControl f2;
+    f2.targetMix = 1.0f;
+    f2.blockUpdate();
+    CHECK(f2.prevMix() == 1.0f); // the first update snaps, no ramp from the default
+    f2.targetMix = 0.0f;
+    f2.blockUpdate();
+    CHECK(f2.prevMix() == 1.0f && f2.mix() < 1.0f && f2.mix() > 0.5f);
+}
+
+static void test_band_mix_top_octave()
+{
+    CHECK(bandMix(20000.0f) == 0.0f && bandMix(19000.0f) == 0.0f);
+    CHECK(bandMix(9500.0f) >= 0.999f && bandMix(5000.0f) == 1.0f && bandMix(100.0f) == 1.0f);
+    CHECK(bandMix(18900.0f) > 0.0f && bandMix(18900.0f) < 0.02f); // one click below "open": still almost unfiltered
+    float last = -1.0f;
+    for (float hz = 19000.0f; hz >= 9000.0f; hz -= 100.0f) // monotone fade-in over the top octave
+    {
+        float m = bandMix(hz);
+        CHECK(m >= last);
+        last = m;
+    }
+    // about 12 semitone clicks from open to full band
+    uint16_t f = 19000;
+    int clicks = 0;
+    while (bandMix(f) < 1.0f && clicks < 100)
+    {
+        f = jogCenter(f, -1);
+        clicks++;
+    }
+    CHECK(clicks >= 10 && clicks <= 14);
+}
+
+// Top of the reverb size / delay feedback range (owner report: crackle at the top step on the v0.2.3 hardware)
+static void test_caps_and_soft_limit()
+{
+    CHECK(kReverbSizeCap == 0.90f && kDelayFeedbackCap == 88);
+    CHECK(capReverbSize(1.0f) == 0.90f && capReverbSize(0.5f) == 0.5f && capReverbSize(0.0f) == 0.0f);
+    CHECK(capDelayFeedback(99) == 88 && capDelayFeedback(88) == 88 && capDelayFeedback(50) == 50 && capDelayFeedback(0) == 0);
+    // soft limit: identity up to 3/4 scale, odd, monotone, never above the 16 bit range for the largest feedback sum
+    CHECK(softLimit(20480) == 20480 && softLimit(-20480) == -20480 && softLimit(100) == 100 && softLimit(0) == 0);
+    CHECK(softLimit(20484) == 20481 && softLimit(-20484) == -20481);
+    CHECK(softLimit(65534) == 31743 && softLimit(-65534) == -31743); // the largest feedback sum stays inside the 16 bit range
+    int32_t last = -1000000;
+    bool mono = true, odd = true;
+    for (int32_t v = -66000; v <= 66000; v += 7)
+    {
+        int32_t y = softLimit(v);
+        mono = mono && y >= last;
+        odd = odd && softLimit(-v) == -y;
+        last = y;
+    }
+    CHECK(mono && odd);
+
+    // model of the delay line write (effect_shortDelay.cpp): loud sustained tone, every feedback from 0 to 99 and the capped
+    // values: the written samples never hit the 16 bit rails and the step from one written sample to the next stays small
+    for (int amp : { 8000, 20000, 32000 })
+        for (int fb : { 50, 80, 88, 95, 99 })
+        {
+            int feedback = (int)(255 * (fb / 100.0));
+            const int D = 22050;
+            std::vector<int16_t> line(D, 0);
+            int head = 0, rails = 0;
+            long peak = 0, maxStep = 0;
+            int32_t prev = 0;
+            for (int n = 0; n < 44100 * 8; n++)
+            {
+                int32_t in = (int32_t)(amp * sin(2.0 * 3.14159265358979 * 220.0 * n / 44100.0));
+                int32_t d = line[head];
+                int32_t nv = (in << 8) + d * feedback;
+                nv = softLimit((nv + (nv < 0 ? 255 : 0)) >> 8);
+                if (nv >= 32767 || nv <= -32768)
+                    rails++;
+                line[head] = (int16_t)nv;
+                head = (head + 1) % D;
+                if (labs(nv) > peak)
+                    peak = labs(nv);
+                if (n > 0 && labs(nv - prev) > maxStep)
+                    maxStep = labs(nv - prev);
+                prev = nv;
+            }
+            CHECK(rails == 0);
+            CHECK(peak < 32000);
+            // no rail-to-rail jumps: the waveform of the compressed tone stays continuous (a hard clip of the loud sum would not)
+            CHECK(maxStep < peak / 2);
+            if (fb <= kDelayFeedbackCap)
+                CHECK(maxStep < peak * 3 / 10);
+        }
+
+    // the ring reverb at the largest size the controls can reach, with a loud sustained low tone + noise: the output stays inside
+    // the 16 bit range without sitting on the rails
+    std::vector<int16_t> ring, pre;
+    ringverb::RingReverb* r = new ringverb::RingReverb();
+    ring.assign(ringverb::kRingSize, 0);
+    pre.assign(2 * ringverb::kPreSize, 0);
+    r->init(ringverb::PlainRing{ ring.data() }, pre.data());
+    r->setParams(ringFade(kReverbSizeCap), ringColor(0.5f), ringApGain(0.85f), 100);
+    std::vector<int16_t> l(128), rr(128);
+    int rail = 0;
+    srand(77);
+    for (int blk = 0; blk < 44100 * 8 / 128; blk++)
+        for (int pass = 0; pass < 1; pass++)
+        {
+            for (int i = 0; i < 128; i++)
+            {
+                double ph = 2.0 * 3.14159265358979 * 80.0 * (blk * 128 + i) / 44100.0;
+                l[i] = rr[i] = (int16_t)(26000.0 * sin(ph) + (rand() % 6001) - 3000);
+            }
+            r->process(l.data(), rr.data(), 128);
+            for (int i = 0; i < 128; i++)
+                rail += (l[i] >= 32767 || l[i] <= -32768 || rr[i] >= 32767 || rr[i] <= -32768) ? 1 : 0;
+        }
+    CHECK(rail == 0);
+    delete r;
+}
+
 static void test_highpass()
 {
     SvfCoef c = svfCoef(200.0f, kHpQ);
@@ -819,6 +982,43 @@ static void test_ring_split_equals_plain()
     CHECK(a[5] == 11 && c[5] == 22);
 }
 
+static void test_ring_silence_bypass()
+{
+    std::vector<int16_t> ring, pre;
+    ringverb::RingReverb* r = makeRing(ring, pre);
+    r->setParams(ringFade(0.2f), ringColor(0.5f), ringApGain(0.68f), 0);
+    srand(31);
+    std::vector<int16_t> l(128), rr(128);
+    // a short burst, then silence for 3 s: the tail dies, then the bypass takes over and the output stays exactly the dry share
+    for (int blk = 0; blk < 44100 * 3 / 128; blk++)
+    {
+        for (int i = 0; i < 128; i++)
+            l[i] = rr[i] = blk < 20 ? (int16_t)((rand() % 16001) - 8000) : 0;
+        r->process(l.data(), rr.data(), 128);
+    }
+    bool zero = true;
+    for (int i = 0; i < 128; i++)
+        zero = zero && l[i] == 0 && rr[i] == 0;
+    CHECK(zero);
+    // after the bypass is active, input wakes it up at once: the dry share is immediate, a tail follows
+    for (int i = 0; i < 128; i++)
+        l[i] = rr[i] = 8000;
+    r->process(l.data(), rr.data(), 128);
+    CHECK(l[5] == (8000 * 51) >> 8);
+    double e = 0;
+    for (int blk = 0; blk < 200; blk++)
+    {
+        for (int i = 0; i < 128; i++)
+            l[i] = rr[i] = blk < 5 ? (int16_t)((rand() % 16001) - 8000) : 0;
+        r->process(l.data(), rr.data(), 128);
+        if (blk > 40)
+            for (int i = 0; i < 128; i++)
+                e += fabs((double)l[i]) + fabs((double)rr[i]);
+    }
+    CHECK(e > 100.0);
+    delete r;
+}
+
 static void test_ring_geometry()
 {
     // the loop must fit into the ring with the deepest shimmer tap
@@ -846,7 +1046,10 @@ static void test_ring_geometry()
 int main()
 {
     test_bandpass_width();
+    test_caps_and_soft_limit();
     test_highpass();
+    test_mix_ramp_no_click();
+    test_band_mix_top_octave();
     test_tan_approx();
     test_extremes_finite();
     test_control_smoothing();
@@ -856,6 +1059,7 @@ int main()
     test_sidecar();
     test_type_switch();
     test_ring_geometry();
+    test_ring_silence_bypass();
     test_ring_split_equals_plain();
     test_ring_allpass_equals_original();
     test_ring_silence_and_decay();

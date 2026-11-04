@@ -64,6 +64,7 @@ class cMasterParams : public ModuleBase
     void showReverbPredelay();
     void showReverbDiffusion();
     void showReverbType();
+    void showReverbCpu();
     // limiter
     void showLimiterScreen();
     void showLimiterAttack();
@@ -411,6 +412,7 @@ class cMasterParams : public ModuleBase
     char reverbPredelayVal[4];
     char reverbDiffusionVal[4];
     char reverbTypeVal[8];
+    char reverbCpuVal[16];
 
     char limitAttackVal[8];
     char limitReleaseVal[8];
