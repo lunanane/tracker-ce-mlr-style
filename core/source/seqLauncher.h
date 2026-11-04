@@ -19,6 +19,10 @@ bool seqSessionStopTrack(uint8_t track);                   // silent from the qu
 bool seqSessionStopTrackQ(uint8_t track, uint8_t quant);
 bool seqSessionStopAll();
 bool seqSessionLaunchScene(uint8_t pattern);               // stock pattern switch (pattern end; the song mode goes on), or at once when stopped
+// Scene from the launcher pad: follows the launch quantise (quant = kQuantGlobal or a Quant). Bar / now: the pattern is read at once, the
+// swap happens at the quantise boundary (plan 007 B2); pattern end (or a loop selection): the stock switch above.
+bool seqSessionLaunchSceneQ(uint8_t pattern, uint8_t quant);
+void seqSessionSceneDone();                                // a pattern switch happened: forget the queued quantised scene
 uint8_t seqSessionOwnPattern();                            // pattern currently loaded (mtProject.values.actualPattern)
 uint8_t seqSessionQueuedScene();                           // queued stock pattern switch, 0 = none
 uint8_t seqSessionLastRefusal();                          // seqsession::Refusal of the last refused launch

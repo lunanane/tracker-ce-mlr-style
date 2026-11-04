@@ -375,6 +375,105 @@ static void test_scene_countdown_is_pattern_end()
                    stepsToQuant(Q_BAR, pos, (uint16_t)L) <= 16 && stepsToQuant(Q_NOW, pos, (uint16_t)L) == 1);
 }
 
+// ---- plan 007 B2: a scene follows the launch quantise ----
+// The audio side calls sceneStepAction at every step boundary (pos = the step that plays next). Simulated here over a long pattern:
+// bar swaps at the next 16-step boundary, now at the next step, pattern end through the armed stock switch; the countdown shown
+// (stepsToQuant) is the number of boundaries until it happens; a read that is not ready at a boundary waits for the next one.
+static void test_scene_quantise()
+{
+    const int lens[] = { 16, 20, 64, 128, 200, 255 };
+    for (size_t li = 0; li < sizeof(lens) / sizeof(lens[0]); li++)
+    {
+        const int L = lens[li];
+        for (int qi = 0; qi < Q_COUNT; qi++)
+            for (int launchPos = 0; launchPos < L; launchPos += (L > 64 ? 5 : 1))
+            {
+                if (qi == Q_PATTERN) // pattern end: not the new path at all (the stock switch), nothing to decide here
+                {
+                    SCHECK(sceneStepAction(Q_PATTERN, (uint16_t)launchPos, (uint16_t)L, true, false) == SCENE_WAIT);
+                    continue;
+                }
+                // launched while the global position is launchPos (the step that plays next); the read is ready from boundary `readyAt`
+                for (int readyAt = 0; readyAt < 3; readyAt += 2)
+                {
+                    int pos = launchPos, steps = 0, armed = 0, swapAt = -1;
+                    const uint16_t shown = stepsToQuant((Quant)qi, (uint16_t)launchPos, (uint16_t)L);
+                    for (int b = 0; b < L * 3 && swapAt < 0; b++)
+                    {
+                        pos = (pos + 1) % L; // next boundary: the step that plays next
+                        steps++;
+                        bool ready = b >= readyAt;
+                        SceneAct a = sceneStepAction((Quant)qi, (uint16_t)pos, (uint16_t)L, ready, armed != 0);
+                        if (a == SCENE_SWAP)
+                            swapAt = steps;
+                        else if (a == SCENE_ARM_STOCK)
+                            armed = 1; // the stock switch swaps at the end of the last step = the boundary where pos wraps to 0
+                        if (armed && pos == 0 && swapAt < 0)
+                            swapAt = steps; // stock swap at the pattern end
+                    }
+                    SCHECK(swapAt > 0);
+                    if (readyAt == 0)
+                    {
+                        // ready at once: exactly the countdown, never later (the boundary shown is the launch point)
+                        SCHECK(swapAt == shown || (swapAt == shown + 1 && qi == Q_NOW));
+                        if (qi == Q_BAR) SCHECK(swapAt <= 16);
+                        if (qi == Q_NOW) SCHECK(swapAt <= 2);
+                    }
+                    else
+                    {
+                        // not ready at the first boundaries: the next hit after it is ready (bar: next 16, now: right after)
+                        if (qi == Q_BAR) SCHECK(swapAt <= 16 + 2);
+                        if (qi == Q_NOW) SCHECK(swapAt <= 4);
+                    }
+                }
+            }
+    }
+    // never swaps without the pattern read, never while the stock switch is armed, never for pattern end
+    SCHECK(sceneStepAction(Q_BAR, 16, 64, false, false) == SCENE_WAIT);
+    SCHECK(sceneStepAction(Q_BAR, 16, 64, true, true) == SCENE_WAIT);
+    SCHECK(sceneStepAction(Q_NOW, 7, 64, true, false) == SCENE_SWAP);
+    SCHECK(sceneStepAction(Q_BAR, 15, 64, true, false) == SCENE_WAIT && sceneStepAction(Q_BAR, 32, 64, true, false) == SCENE_SWAP);
+    // bar quantise in a pattern whose length is not a multiple of 16: the wrap of the pattern is a boundary too (arm, then stock swap)
+    SCHECK(sceneStepAction(Q_BAR, 19, 20, true, false) == SCENE_ARM_STOCK);
+    SCHECK(sceneStepAction(Q_BAR, 18, 20, true, false) == SCENE_WAIT);
+    // phase after the swap: the global position inside the new length of the track; the pattern end starts at 0
+    SCHECK(scenePhase(37, 16) == 5 && scenePhase(37, 128) == 37 && scenePhase(0, 16) == 0 && scenePhase(200, 256) == 200);
+    SCHECK(scenePhase(5, 0) == 0);
+    SCHECK(scenePhase(48, 16) == 0);
+}
+
+static void test_scene_state()
+{
+    Launcher l;
+    SCHECK(!l.scenePending());
+    l.beginScene(9, Q_BAR);
+    SCHECK(l.scenePending() && l.scenePattern() == 9 && l.sceneQuant() == Q_BAR && !l.sceneReady());
+    l.setSceneReady(true);
+    SCHECK(l.sceneReady());
+    l.advance(37, 128);
+    SCHECK(l.globalPosition() == 37 && l.globalLength() == 128);
+    // the clip counter freezes after a launch, the scene's position is the pattern's own
+    l.postClip(2, 4);
+    l.drain();
+    uint8_t p = 0;
+    l.onStep(2, 48, p);
+    l.advance(60, 128);
+    SCHECK(l.globalPosition() == 60);
+    l.onTransportStop();
+    SCHECK(!l.scenePending() && !l.sceneReady() && l.scenePattern() == 0); // Stop is the panic
+    l.beginScene(3, Q_NOW);
+    l.panic();
+    SCHECK(!l.scenePending());
+    l.beginScene(3, Q_NOW);
+    l.cancelScene();
+    SCHECK(!l.scenePending());
+    // a clip launch does not touch a queued scene
+    l.beginScene(5, Q_BAR);
+    l.postClip(1, 7);
+    l.drain();
+    SCHECK(l.scenePending() && l.scenePattern() == 5);
+}
+
 static void test_navigation()
 {
     // Up / Down move the pad window by one row (pattern), Shift by a whole window
@@ -850,6 +949,8 @@ int sessionTests(int& checks)
     test_quant_cycle_and_countdown();
     test_long_pattern_quant();
     test_scene_countdown_is_pattern_end();
+    test_scene_quantise();
+    test_scene_state();
     test_navigation();
     test_pad_gestures();
     test_play_mode_wheel();

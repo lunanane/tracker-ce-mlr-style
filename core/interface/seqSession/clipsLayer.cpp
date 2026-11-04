@@ -96,7 +96,7 @@ void ClipsLayer::pad(uint8_t col, uint8_t row, bool down)
             break;
         case OP_LAUNCH: ok = seqSessionLaunchClip(track, pattern); break;
         case OP_STOP_ALL: ok = seqSessionStopAll(); break;
-        case OP_SCENE: ok = seqSessionLaunchScene(pattern); break;
+        case OP_SCENE: ok = seqSessionLaunchSceneQ(pattern, kQuantGlobal); break;
         default: return; // OP_FOCUS: button 1 held, the pads only focus
     }
     if (!ok)
@@ -435,7 +435,11 @@ void ClipsLayer::build(clipgrid::View& v, clipgrid::Marks& m)
     if (playing && (userQueued || scene))
     {
         uint16_t len = seqLauncher.length(), pos = seqLauncher.position();
-        uint16_t n = scene ? stepsToQuant(Q_PATTERN, pos, len) : 0xFFFFu;
+        uint16_t n = 0xFFFFu;
+        if (scene)
+            n = seqLauncher.scenePending() // a scene with bar / now quantise counts like a clip, from the pattern's own position
+                  ? stepsToQuant(seqLauncher.sceneQuant(), seqLauncher.globalPosition(), seqLauncher.globalLength())
+                  : stepsToQuant(Q_PATTERN, pos, len);
         if (userQueued)
         {
             uint16_t q = stepsToQuant(seqLauncher.quant(), pos, len);

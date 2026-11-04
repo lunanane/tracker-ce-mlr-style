@@ -640,8 +640,42 @@ uint8_t seqSessionQueuedScene()
 
 bool seqSessionLaunchScene(uint8_t pattern)
 {
+    return seqSessionLaunchSceneQ(pattern, seqsession::Q_PATTERN);
+}
+
+void seqSessionSceneDone()
+{
+    if (seqLauncher.scenePending() && !sequencer.sequencialSwitch_IsArmed())
+        sequencer.sequencialSwitch_Reset(); // overtaken by another switch (song advance): no stale "queued scene"
+    seqLauncher.cancelScene();
+}
+
+bool seqSessionLaunchSceneQ(uint8_t pattern, uint8_t quant)
+{
     if (pattern < 1)
         return false;
+    const seqsession::Quant q = quant == seqsession::kQuantGlobal ? seqLauncher.quant() : (seqsession::Quant)quant;
+    if (sequencer.isPlay() && q != seqsession::Q_PATTERN && q != seqsession::Q_CLIPEND)
+    {
+        // bar / now: read the pattern into the next-pattern buffer now (asynchronous, the main loop never blocks), the audio side swaps
+        // it in at the quantise boundary once the read is done (seqSessionSceneBoundary)
+        if (!newFileManager.isIdleForScratch() || sequencer.sequencialSwitch_IsLoaded() || sequencer.isLastPatternStep())
+            return false; // a read is running, or the stock switch is about to happen
+        if (seqLauncher.scenePending() && seqLauncher.scenePattern() == pattern && seqLauncher.sceneQuant() == q)
+            return true;
+        seqLauncher.setSceneReady(false); // an earlier scene must not swap while the buffer is read again
+        if (!newFileManager.loadWorkspacePattern(pattern))
+            return false;
+        if (sequencer.globalStepIsSetReady())
+            sequencer.setOnGlobalStep(nullCallback); // an earlier pattern-end scene was waiting to arm
+        DISABLE_AUDIO_INTERRUPTS();
+        seqLauncher.cancelScene();
+        sequencer.sequencialSwitch_Reset();
+        sequencer.sequencialSwitch_SetPattern(pattern);
+        seqLauncher.beginScene(pattern, q);
+        ENABLE_AUDIO_INTERRUPTS();
+        return true;
+    }
     if (sequencer.isPlay())
     {
         // stock pattern switch: queued, happens at the end of the pattern (like Pattern + left / right)
@@ -685,8 +719,30 @@ bool seqSessionTakeUndoCleared()
     return v;
 }
 
+// A quantised scene (plan 007 B2): tell the audio side when the next-pattern buffer holds the scene's pattern.
+static void sceneHousekeeping()
+{
+    if (!seqLauncher.scenePending())
+        return;
+    const uint8_t pattern = seqLauncher.scenePattern();
+    if (!sequencer.isPlay() || sequencer.sequencialSwitch_GetNext() != pattern)
+    {
+        // Stop (panic), or the Pattern / Song page took the switch over
+        if (!sequencer.isPlay())
+            sequencer.sequencialSwitch_Reset();
+        seqLauncher.cancelScene();
+        return;
+    }
+    const bool idle = newFileManager.isIdleForScratch();
+    const bool ready = idle && newFileManager.getLoadedPatternIndex() == pattern;
+    if (idle && !ready && !sequencer.sequencialSwitch_IsArmed())
+        newFileManager.loadWorkspacePattern(pattern); // somebody else used the buffer meanwhile: read again
+    seqLauncher.setSceneReady(ready);
+}
+
 void seqSessionUpdate()
 {
+    sceneHousekeeping();
     bool play = sequencer.isPlay();
     if (s_wasPlay && !play)
     {

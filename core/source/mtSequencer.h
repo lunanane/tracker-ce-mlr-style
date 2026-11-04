@@ -763,6 +763,9 @@ class Sequencer
     void sequencialSwitch_Reset();
     uint16_t sequencialSwitch_GetNext();
     bool sequencialSwitch_IsLoaded() { return player.sequencialSwitch_loaded; } // sequencer tracks mod (plan 006)
+    void sequencialSwitch_SetPattern(uint8_t pattern) { player.sequencialSwitch_pattern = pattern; } // plan 007 B2: a quantised scene names its pattern, armed later
+    bool sequencialSwitch_IsArmed() { return player.sequencialSwitch_isArmed; }
+    void seqSessionSceneBoundary(); // plan 007 B2 (audio): step boundary after all tracks stepped; swaps / arms a quantised scene
     bool globalStepIsSetReady();                                                // the global-step slot holds the scene arm callback
 
     void playPattern();
@@ -790,6 +793,7 @@ class Sequencer
     bool seqRecVelocity() { return recVelocity() != 0; }
     // CUT (MLR) layer glue (seqTracks.cpp)
     void seqCutPreSwitch(uint8_t row);  // inc_uStep, before switchRowStep: restore the stock position of a cut track
+    void seqCutPatternSwitched();       // plan 007 B2: a scene swapped the pattern mid-pattern: the stock positions of the cut tracks changed
     void seqCutPostSwitch(uint8_t row); // inc_uStep, after switchRowStep: remember the stock position
     void seqCutApply();                 // after the step switch of all tracks: the playheads decide the next positions
     void seqCutMicroStep(int row);      // play_microStep, plus the second half-step of a rate-2 track
@@ -809,6 +813,7 @@ class Sequencer
     void seqSessionApplyClip(uint8_t track, bool restart);
     void seqSessionApplyStop(uint8_t track);
     void seqSessionPatternSwitched();
+    void seqSessionSceneSwap();
     void seqSessionEnterPerformance();
     void continueSong(uint8_t songPos);
     void loopCurrentPattern(uint8_t songPos);

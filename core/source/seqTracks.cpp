@@ -198,6 +198,20 @@ void Sequencer::seqCutPreSwitch(uint8_t row)
     seqCutPending |= (uint16_t)(1u << row);
 }
 
+// A scene swapped the pattern mid-pattern: every active cut track has a new stock position; the playheads are applied right after.
+void Sequencer::seqCutPatternSwitched()
+{
+    seqcut::Cut* c = seqEngine.cut();
+    if (!c)
+        return;
+    for (uint8_t row = 0; row < seqlogic::kTracks; row++)
+        if ((c->activeMask() >> row) & 1u)
+        {
+            c->setStock(row, player.track[row].actual_pos);
+            seqCutPending |= (uint16_t)(1u << row);
+        }
+}
+
 // inc_uStep, after switchRowStep: remember where the stock sequencer is now.
 void Sequencer::seqCutPostSwitch(uint8_t row)
 {
