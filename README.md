@@ -23,8 +23,8 @@ This branch adds sequencers per track and a clip launcher on top of Tracker CE. 
 
 **How to enter**
 * Pattern page: tap the bottom-right key (**Perform**, the firmware's Pattern key) to switch Play mode on and off. Left / Right switch the strip between tracks 1-8 and 9-16; a screen button selects a track; hold a screen button and turn the wheel to pick its sequencer type; hold Shift to see what the pads do.
-* Song page: tap Song (once, on the Song page) for the clip launcher (Session view); tap Song again to return. From another page press Song to arrive on the Song page first. The bottom-right **Perform** key (the firmware's Pattern key) only toggles Play mode.
-* Performance: **Shift + the top-row Perform key** (the firmware's Performance key) for the fader page.
+* Clip launcher (Session view): double tap Song (two short presses within about 0.35 s) from any page. A single press still goes to the Song page and a hold is still the momentary peek; Song inside the launcher returns to the Song page. The bottom-right **Perform** key (the firmware's Pattern key) only toggles Play mode.
+* Performance: the top-row **Perform** key (the firmware's Performance key) opens the fader page; **Shift + Perform** opens the stock Performance page (and back).
 
 **Install and recovery**
 1. Build (`make original`, `make plus`, `make mini`) or take a release: `PolyendTracker_SEQ_0.2.ptf`, `TrackerPlus_SEQ_0.2.ptf`, `TrackerMini_SEQ_0.2.ptf` (the device shows the version as `1.0.0 CE-SEQ0.2`).

@@ -42,6 +42,35 @@ struct TapDetector
     bool refusedLast() const { return refused; } // the last up() was a quick press that is not a tap
 };
 
+// Song key double tap (opens the clip launcher from any page): two short Song taps whose PRESSES are at most kGapMs apart. Feed
+// every Song press with press() and every release with release(isTap) (isTap = TapDetector result: short, plain, no other
+// button). A long hold or a refused press breaks the sequence, so a hold never opens the launcher. release() is true on the
+// release of the second tap.
+struct DoubleTap
+{
+    enum { kGapMs = 350 };
+    bool have = false; // a first tap is waiting for its partner
+    uint32_t t1 = 0;   // press time of the first tap
+    uint32_t tNow = 0; // press time of the press in progress
+    void press(uint32_t nowMs) { tNow = nowMs; }
+    bool release(bool isTap)
+    {
+        if (!isTap)
+        {
+            have = false;
+            return false;
+        }
+        if (have && (uint32_t)(tNow - t1) <= (uint32_t)kGapMs)
+        {
+            have = false;
+            return true;
+        }
+        have = true;
+        t1 = tNow;
+        return false;
+    }
+};
+
 inline uint8_t padCol(uint8_t pad) { return (uint8_t)(pad % kPadCols); }
 inline uint8_t padRow(uint8_t pad) { return (uint8_t)(pad / kPadCols); }
 

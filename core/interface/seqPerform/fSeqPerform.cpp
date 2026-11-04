@@ -55,7 +55,7 @@ void cSeqPerform::start(uint32_t options)
     (void)options;
     moduleRefresh = 1;
 
-    ip->setButtonObj(interfaceButtonPerformance, functPerformanceButton); // a press = back to the stock page
+    ip->setButtonObj(interfaceButtonPerformance, functPerformanceButton); // Shift + press = the stock page
     ip->setButtonObj(interfaceButtonParams, buttonPress, functSwitchModule);
     ip->setButtonObj(interfaceButtonFile, buttonPress, functSwitchModule);
     ip->setButtonObj(interfaceButtonConfig, buttonPress, functSwitchModule);
@@ -849,7 +849,7 @@ void cSeqPerform::jog(int16_t value)
     screenDirty = true;
 }
 
-// Performance press: back to the stock Performance page (FX state stays as the stock page expects it)
+// Shift + Performance: to the stock Performance page (FX state stays as the stock page expects it)
 void cSeqPerform::leaveToStock()
 {
     leaveKind = LEAVE_HAND_OVER;
@@ -1132,7 +1132,9 @@ static void functSwitchModule(uint8_t button)
 // Performance press on the fader page: back to the stock page. The press is enough (the v0.1 double tap is gone, plan 005 R3).
 static void functPerformanceButton(uint8_t state)
 {
-    if (state == buttonPress)
+    // Shift + Performance = the stock Performance page; a plain press stays (the fader page is the default Performance page).
+    // shiftHeld() ignores a Shift that is still held from the entry press.
+    if (state == buttonPress && SP->shiftHeld())
         SP->leaveToStock();
 }
 

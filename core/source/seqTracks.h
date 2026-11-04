@@ -7,6 +7,8 @@ extern seqtracks::Engine seqEngine;
 extern seqlogic::TapDetector seqPatternTap; // Pattern button tap detection (interface inputs + pattern editor)
 extern seqlogic::TapDetector seqPerformTap; // Performance button tap detection (interface inputs + Performance pages)
 extern seqlogic::TapDetector seqSongTap;    // Song button tap detection (interface inputs + Song page)
+extern seqlogic::DoubleTap seqSongDouble; // Song key double tap, fed by Interface::buttonChange (any page)
+extern bool seqSongDoubleNow;             // set for the duration of the Song release that completed a double tap
 extern uint8_t seqPadsHeld; // pads currently held (any page); informational, held pads do not block a tap (plan 005 M4)
 
 uint32_t seqNowMs(); // free-running milliseconds (tap timing)

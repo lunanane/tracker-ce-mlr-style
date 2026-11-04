@@ -1453,17 +1453,6 @@ static void functSwitchModeSong(uint8_t state)
         {
             return;
         }
-        // sequencer tracks mod: arm the Song tap (plain press, no other button held) for the clip launcher (plan 005 R2)
-        bool othersHeld = false;
-        for (int b = 0; b < interfaceButtonsCount; b++)
-        {
-            if (b != interfaceButtonSong && SE->buttons->isButtonPressed(b))
-            {
-                othersHeld = true;
-                break;
-            }
-        }
-        seqSongTap.down(!othersHeld, seqNowMs());
         SE->pressedSongButton = true;
         SE->lastSelectedPlace = SE->selectedPlace;
         SE->selectedPlace = 2;
@@ -1480,7 +1469,9 @@ static void functSwitchModeSong(uint8_t state)
     }
     else if (state == buttonRelease)
     {
-        bool tap = seqTapUp(seqSongTap);
+        // sequencer tracks mod: a short double tap of Song (detected in Interface::buttonChange, any page) opens the clip launcher
+        bool tap = seqSongDoubleNow;
+        seqSongDoubleNow = false;
         if (SE->pressedSongButton)
         {
             SE->selectedPlace = SE->lastSelectedPlace;
@@ -1491,7 +1482,7 @@ static void functSwitchModeSong(uint8_t state)
         {
             SE->eventFunct(eventSwitchToPreviousModule, SE, 0, 0);
         }
-        else if (tap && seqClipsSongTap())
+        else if (tap)
         {
             SE->activateLabelsBorder();
             SE->eventFunct(eventActivateSeqSession, SE, 0, 0); // clip launcher (R2)

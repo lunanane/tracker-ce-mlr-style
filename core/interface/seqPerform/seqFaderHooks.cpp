@@ -11,8 +11,9 @@ bool seqFaderShiftFromStock()
     return true;
 }
 
-// Any other module: Shift + Performance opens the fader page. On the fader page itself the Performance button is bound by the
-// page (a press goes back to the stock page), so the stock switching is left alone there.
+// Any other module: the plain Performance key opens the fader page (Shift + Performance goes the stock way, to the stock page).
+// On the fader page itself the Performance button is bound by the page (Shift + press goes to the stock page), so the stock
+// switching is left alone there.
 bool seqFaderShiftFromElsewhere(bool onFaderPage)
 {
     if (onFaderPage)

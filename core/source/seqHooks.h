@@ -20,11 +20,11 @@ bool seqPlayRoutePot(uint8_t pot, int16_t value);
 // true = the launcher should open (the caller then sends eventActivateSeqSession). ----
 bool seqClipsSongTap();
 
-// ---- R3: Shift + Performance. ----
+// ---- R3: fader page = Performance key, stock Performance page = Shift + Performance (owner change 2026-11-04). ----
 // On the stock Performance page (fPerformance.cpp functPerformanceButton, Shift held on the press): true = open the fader page
 // with the perform FX state handed over (v0.1 flow); false = do the stock thing (flip the tracks page + mute view).
 bool seqFaderShiftFromStock();
-// From any other module (Interface::switchModuleByButton, before the module is deactivated): true = the caller then activates
+// From any other module, plain Performance key (Interface::switchModuleByButton, before the module is deactivated): true = the caller then activates
 // seqPerform (the hook has made sure its start() finds a clean state, e.g. read the perform data). false = stock switching.
 // onFaderPage: the fader page is the module that is on screen now.
 bool seqFaderShiftFromElsewhere(bool onFaderPage);

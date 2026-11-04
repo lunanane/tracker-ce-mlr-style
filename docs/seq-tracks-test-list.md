@@ -9,14 +9,14 @@ any change.
 ## Start here: the highest-value on-device tests
 Do these first (the full list below is the detail):
 1. Shift+Rec a loop in Play mode, Stop, go to Performance, then Pattern, reopen the project: the whole recording is there.
-2. Record on track 3, go to the launcher (Song tap on the Song page), launch another clip on track 3, then launch the own scene: the recording is intact.
+2. Record on track 3, go to the launcher (double tap Song), launch another clip on track 3, then launch the own scene: the recording is intact.
 3. Launch clips, wait 15 s, Save, Save As, power cycle: the original pattern files are unchanged and edits on other tracks are kept; also in song mode.
 4. A project that never used the mod behaves like stock CE (section 12).
 5. CUT jumps on track 1 while Chord/Arp runs elsewhere: the arp stays on the bar.
 6. External MIDI clock start / stop / cable pull with Chord/Arp + Mono: no hung notes, a recording ends.
 7. Clips running, visit Master, come back: the clips keep playing.
 8. Reflash the stock .ptf to confirm the recovery path.
-9. R2: a Song tap on the Song page opens the launcher; with the song playing launch a clip (LIVE, song frozen), BACK:SONG resumes; a Play 1x clip chains into the next row; Stop = panic (section 9, 9b, 9c).
+9. R2: a double tap of Song (from any page) opens the launcher; with the song playing launch a clip (LIVE, song frozen), BACK:SONG resumes; a Play 1x clip chains into the next row; Stop = panic (section 9, 9b, 9c).
 
 Contents: 1-6 Play mode | 7 Record | 8 save / load | 9 Session CLIPS | 10 Session CUT (10c lane screen, SYNC ALL, panic) | 11 alt Performance page | 12 stock-behaviour checks.
 
@@ -184,7 +184,7 @@ Known limits of step B: the sidecar is rewritten about once a second after a cha
 not written to patterns other than the one you started in; sample-track chords keep the lowest note only; no pad-velocity record.
 
 # Session view: CLIPS (section 9) and CUT (section 10)
-**Plan 005 R2.** The clip launcher is reached with a **Song tap** (on the Song page): press **Song** to arrive on the Song page, then tap **Song** again (press and release inside 0.4 s, no other button): from the Song page one Song tap opens the launcher, another Song tap returns to the Song page (from any other page, press Song to arrive on the Song page first, then tap it again). Screen button 8 switches between the CLIPS and the CUT layer; all 12 x 4 pads belong to the active layer. A *clip* = one track of one pattern, a *scene* = a whole
+**Plan 005 R2.** The clip launcher is reached with a **double tap of Song** from any page (two short presses, no other button, the second press within 0.35 s of the first; the press that switches to the Song page counts as the first tap). A single Song press only goes to the Song page, and Song in the launcher returns to the Song page. Screen button 8 switches between the CLIPS and the CUT layer; all 12 x 4 pads belong to the active layer. A *clip* = one track of one pattern, a *scene* = a whole
 pattern. **Rows are patterns** (row n = pattern n, moved by hand, independent of the song arrangement). Needs patterns 1-8 that hold different notes on a few tracks, saved in the project. Tracks that have no notes in a pattern are empty clips.
 
 ## 9. Session view, CLIPS layer (plan 005 R2)
@@ -192,8 +192,8 @@ Pads (1-based): columns 1-8 = the 8 tracks of the window, **column 9 empty (gap)
 Screen (ASCII text and shapes only): a grid of 12 pattern rows x 16 tracks (gap after track 8) and the scene column; **a red frame round the 8 x 4 pad window** (and one round its scene cells); empty cell dark, clip with notes grey, playing green with a dark progress bar, queued blinking white, follow action armed = steady green outline; a notch in the top right corner = Play 1x (red notch = the next row is empty, the track stops after this clip); a dim square in an empty cell of a sounding track = pressing that pad stops the track; a white outline = the focused clip; a green bar on the left edge = the row the transport plays. Right column: launch quantise, countdown ("next in N steps"), LIVE state, focused clip and its mode, short help.
 | Press | Expected |
 |---|---|
-| Song page, tap **Song** once (a short press; from another page: press Song to arrive, then tap it again) | The launcher opens: grid, red frame round tracks 1-8 x rows 1-4, labels `MODE LOOP` `Q: bar` `STOP` (button 4 empty) and `CUT` on 8. Pad LEDs: playing clips bright (the loaded pattern's row), clips with notes dim, empty clips off (a dimmer light for empty pads of a sounding track), scene pads of the loaded pattern bright. |
-| Press **Song** once (not a tap: hold it > 0.4 s, or press another button with it) | No launcher; the stock Song page behaves as before (slot list focus while held). |
+| From any page (also the Song page), double tap **Song** (two short presses within 0.35 s) | The launcher opens: grid, red frame round tracks 1-8 x rows 1-4, labels `MODE LOOP` `Q: bar` `STOP` (button 4 empty) and `CUT` on 8. Pad LEDs: playing clips bright (the loaded pattern's row), clips with notes dim, empty clips off (a dimmer light for empty pads of a sounding track), scene pads of the loaded pattern bright. |
+| Press **Song** once (a single quick tap on the Song page or another page), or hold it > 0.4 s, or press another button with it, or tap twice slower than 0.35 s | No launcher; the stock behaviour as before (single press = Song page, hold = momentary peek and back on release). |
 | **Pattern**, **Performance**, any other module button in the launcher | Leaves the launcher for that page; the clips keep playing. **Song** returns to the Song page. |
 | **Right** / **Left** | The red frame and the pads jump to tracks 9-16 / 1-8; the pad columns show those tracks. At tracks 9-16 **Right** does nothing, at 1-8 **Left** does nothing. |
 | **Down** / **Up** (Shift + key) | The frame moves one row (4 rows) down / up; the grid scrolls when the frame would leave the 12 shown rows. Not above pattern 1, not below pattern 255. The jog wheel does the same (Shift = 4). |
@@ -252,7 +252,7 @@ The clip screen is budgeted in software (grid at most about 5.5 KB of the 8 KB f
 
 
 ## 10. Session CUT (MLR playhead, plan 002 S2)
-Open it with a Song tap on the Song page (launcher) > screen button 8 (CUT). Title "Session: CUT   tracks 1-4"; screen buttons 1-4 choose the four tracks shown (1-4, 5-8, 9-12, 13-16); the CUT layer draws its own lane screen (no info lines). Use a project with: track 1 = ONE long
+Open it with a double tap of Song (launcher) > screen button 8 (CUT). Title "Session: CUT   tracks 1-4"; screen buttons 1-4 choose the four tracks shown (1-4, 5-8, 9-12, 13-16); the CUT layer draws its own lane screen (no info lines). Use a project with: track 1 = ONE long
 loop sample on step 1 only (e.g. a 2 s drum loop, pattern 16 steps, tempo so the loop fits the 16 steps, note at the sample's
 original pitch, play mode One-shot or Loop), track 2 = a normal drum pattern, track 3 = a MIDI track with a few notes.
 Pad grid of the layer (all 12 columns, none reserved): 4 rows = 4 tracks of the group; pads 1-8 of a row = 8 positions; pad 9 = STOP/START,
@@ -338,24 +338,26 @@ Use the project of section 10 (track 1 loop sample, track 2 drums, track 3 MIDI)
 
 # Alt Performance page (8-step faders) — plans/004-perform-faders.md, reworked in plan 005 R3 (v0.2)
 
-Entry is **Shift + the top-row Performance button** (firmware "Performance"), from the stock Performance page AND from every other page.
+Entry is the **top-row Performance button** (firmware "Performance") from every other page; the stock Performance page is **Shift + Performance** (owner change 2026-11-04). On the stock page itself a plain press keeps its stock meaning (flips the tracks page) and Shift + Performance goes to the fader page.
 Fader positions and active FX are NOT saved with the project: after loading a project every perform FX is off.
 Provisional parts (owner did not specify): LATCH pads, jog-wheel settings, the steps' value mapping, what DISENGAGE does to PING / REV project values (restores the earlier value).
 
-## 11. Alt Performance page (Shift + Performance)
+## 11. Alt Performance page (the Performance key; stock page = Shift + Performance)
 Setup: a project with tracks playing; on the stock Performance page give the slots a few FX (e.g. slot 1 low-pass, slot 2 sample volume,
 slot 5 pan, slot 9 tune).
 
 | Press | Expected |
 |---|---|
-| **Performance** (plain press, from any page) | Stock Performance page opens (as always). |
+| **Performance** (plain press, from any other page) | The fader page opens. |
+| **Shift + Performance** (from any other page) | The stock Performance page opens (as always). |
 | **Performance** pressed twice quickly on the stock page | Stock behaviour only: the tracks page flips and flips back (1-8 / 9-16). The fader page does NOT open. |
+| **Performance** (plain press) on the fader page | Nothing happens; the fader page stays (no flip). |
 | **Shift + Performance** on the stock Performance page | Fader page. The tracks page and the 8 track buttons are as you left them; FX that were latched on the stock pad rows show as lit rows. |
-| **Shift + Performance** from Pattern, Song, Master, Params, Sample pages, File ... | Fader page. No track is affected yet (buttons under the screen show 1-8 without brackets, the header says "no track selected" in a warning colour), every row is DISENGAGED. |
-| **Performance** (plain press) on the fader page | Back on the stock Performance page; the 8 buttons keep their state; FX that were playing from the stock pad rows still sound and their pads are lit. |
+| **Performance** (plain) from Pattern, Song, Master, Params, Sample pages, File ... | Fader page. No track is affected yet (buttons under the screen show 1-8 without brackets, the header says "no track selected" in a warning colour), every row is DISENGAGED. |
+| **Shift + Performance** on the fader page | Back on the stock Performance page; the 8 buttons keep their state; FX that were playing from the stock pad rows still sound and their pads are lit. |
 | Screen layout | Below the title bar: a chip row (FX 1-4, FX 5-8, FX 9-12 | PING, REV = pad columns 9 / 10; the page you are on is filled, a green dot marks a page with something dialled in) and on the right "affects tracks 1-4 7". Under the chips the step numbers 1-8. Four bands = the four pad rows: row number, FX name, current value, a long bar of 8 steps (lit from the left), a LATCH and a DISENGAGE cell (pad columns 11 / 12), the state word under them (DISENGAGED / ENGAGED / LATCHED; PING / REV project rows: PROJECT / DIALLED) and a second line (slot number and range). A strip at the bottom shows the group line (FX pages: how many are dialled in; PING: time / rate, feedback, filter, ping-pong, sync; REV: size, damp, predelay, diffusion). An empty slot is drawn dim with "(empty slot)". |
 | Pad LEDs | Pad rows 1-4 lit only where a slot has an FX; column 9 group pads: current page bright, a page with something dialled in medium, others dim (row 4 dark on purpose); PING / REV (column 10) likewise; LATCH column dim (bright when latched); DISENGAGE column (12) bright where its row has something to take off, dim otherwise. |
-| Hold a pad, plain Performance press | Leaves at once (a held pad does not block it). |
+| Hold a pad, Shift + Performance press | Leaves at once (a held pad does not block it). |
 
 ## 11b. Perform FX on the faders (FX1-4 / FX5-8 / FX9-12)
 | Press | Expected |
@@ -405,19 +407,19 @@ Setup: tracks 1 and 2 selected, a filter on slot 1, a volume FX on slot 2; latch
 | Press | Expected |
 |---|---|
 | **Pattern** (opens the pattern editor), then tap Pattern again (Play mode) | The latched FX keep sounding in the pattern editor and in Play mode. Pads in Play mode drive the sequencer as in R1. |
-| **Song**, then the clip launcher (Song tap), MLR layer | The latched FX keep sounding in the launcher and in MLR; launching clips does not end them. |
-| Back with **Shift + Performance** from any of those | The fader page opens with the same rows ENGAGED / LATCHED (positions, latch, page you were on), nothing jumps. |
+| **Song**, then the clip launcher (double tap Song), MLR layer | The latched FX keep sounding in the launcher and in MLR; launching clips does not end them. |
+| Back with the plain **Performance** key from any of those | The fader page opens with the same rows ENGAGED / LATCHED (positions, latch, page you were on), nothing jumps. |
 | Hold a pad (not latched) and press Pattern | The held pad ends (momentary), the latched rows stay. |
 | Latched FX running, press **File**, **Config**, Sample pages | Stock rule: the FX end (at the pattern end while playing); the fader page is clean the next time. |
 | Latched FX running, press **Master** or **Params** | Stock rule: performance mode stays (as the stock Performance page does), the fader FX end. |
-| Latched FX running, press plain **Performance** | Stock Performance page; the FX that were kept from Pattern / Song end (the stock page starts fresh); a fader row you handed over from the stock page keeps working there. |
+| Latched FX running, press **Shift + Performance** | Stock Performance page; the FX that were kept from Pattern / Song end (the stock page starts fresh); a fader row you handed over from the stock page keeps working there. |
 | Latched FX running, any page, press **Stop** | Every perform FX ends (panic): fader rows DISENGAGED (also latches), rows handed over from the stock page too. PING / REV project values stay. Stop then Play = plain playback. |
 | Same on the fader page | Press Stop: all rows go DISENGAGED at once, the page stays open. |
 | Launch clips, open the fader page, dial an FX, leave and press Stop | Clips are stopped by the launcher panic, the FX ends; no pattern is reloaded while clips still own performance mode. |
 | Save the project with FX engaged, load it | All perform FX are off after loading (also a latched FX kept into the Pattern editor, even if you load while stopped); performance mode is not left on. |
 | Latched FX kept into the Pattern editor, edit steps (unsaved), press Stop | The FX end; the pattern is NOT reloaded from the SD card, the unsaved edits stay (reload only happens when per-track performance patterns were loaded on the stock page). |
 | From the Pattern editor (FX kept) go on to File / Config / Sample pages | The kept FX follow the stock rule: they end at the pattern end while playing, at once when stopped; Master / Params / Song / Pattern / Performance keep or hand over as above. |
-| Hold Shift while pressing Performance, keep Shift down and press a pad / jog | Shift is ignored until you release it once (no accidental Shift + DISENGAGE or Shift jog). |
+| On the stock page hold Shift while pressing Performance (to the fader page), keep Shift down and press a pad / jog | Shift is ignored until you release it once (no accidental Shift + DISENGAGE or Shift jog). |
 | Leave the fader page while playing (any button) | No SD / config write at that moment; DISENGAGE of a stock pad row marks the perform data, written after Stop. Device test: moving a PING / REV fader 2-4 sets the project changed flag, so the stock 10 s autosave can run while playing (same as the Master page). Watch for stream hiccups. |
 
 # Stock-behaviour checks (section 12) — run last, and after every change
@@ -431,6 +433,6 @@ A project with no sequencer set and no Session use must behave exactly like stoc
 | Hold **Pattern**, turn the jog wheel or press a pad, release Pattern | Nothing new happens. |
 | Hold **Shift** (or any button), tap **Pattern** | Play mode does not toggle. |
 | Come from another page (e.g. Song) by pressing Pattern | Pattern page opens, no Play mode (the first press only switches pages). |
-| Open a project, tap the bottom-right **Perform** key (firmware Pattern; Play mode) and back to the editor without touching any pad; Save | No `seqtracks.bin` is created, the pattern files are unchanged, playback is as before. (Pattern twice no longer enters Session: the launcher is reached from the Song page; Pattern only toggles Play mode.) |
-| Tap Performance once, play with the stock Performance page | Exactly the stock page (the alt fader page only opens with Shift + Performance). |
+| Open a project, tap the bottom-right **Perform** key (firmware Pattern; Play mode) and back to the editor without touching any pad; Save | No `seqtracks.bin` is created, the pattern files are unchanged, playback is as before. (Pattern twice no longer enters Session: the launcher is reached with a double tap of Song; Pattern only toggles Play mode.) |
+| Shift + Performance once, play with the stock Performance page | Exactly the stock page (the stock page is only reached with Shift + Performance; a plain Performance opens the alt fader page). |
 | Project with CUT used (rows cut, recorded loop), save and re-open | CUT is not saved: all rows stock after loading; `seqtracks.bin` is only written when a sequencer type is set. |

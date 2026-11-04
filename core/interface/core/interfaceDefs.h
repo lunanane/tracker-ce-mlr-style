@@ -275,11 +275,15 @@ enum interfaceEvents
 
     eventActivateTestingProcedure,
 
-    eventActivateSeqPerform, // sequencer tracks mod: Performance tap -> fader page
-    eventActivateSeqSession, // sequencer tracks mod: Pattern tap in Play mode -> Session view
+    // sequencer tracks mod: explicit values, never shift when a stock/earlier event is added or removed (a stale incremental build
+    // once dispatched the launcher event as the fader-page event)
+    eventActivateSeqPerform = 12, // Performance key -> fader page
+    eventActivateSeqSession = 13, // Song double tap -> clip launcher (Session view)
 
     interfaceEventsCount
 };
+static_assert(eventActivateTestingProcedure == 11 && eventActivateSeqSession + 1 == interfaceEventsCount,
+              "mod events 12/13 must follow the stock events and stay last");
 
 enum enumMtOperatingMode
 {

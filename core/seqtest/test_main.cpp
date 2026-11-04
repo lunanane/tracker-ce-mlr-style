@@ -121,6 +121,39 @@ static void test_tap()
     CHECK(!t.up(0x300u));
 }
 
+static void test_double_tap()
+{
+    DoubleTap d;
+    d.press(1000);
+    CHECK(!d.release(true)); // first tap
+    d.press(1300);
+    CHECK(d.release(true)); // second press 300 ms after the first: double
+    d.press(1400);
+    CHECK(!d.release(true)); // a third quick tap starts a new pair
+    d.press(1500);
+    CHECK(d.release(true));
+    d.press(2000);
+    CHECK(!d.release(true));
+    d.press(2400);
+    CHECK(!d.release(true)); // 400 ms between the presses: too slow, becomes tap 1 of a new pair
+    d.press(2500);
+    CHECK(d.release(true));
+    d.press(3000);
+    CHECK(!d.release(true));
+    d.press(3200);
+    CHECK(!d.release(false)); // second press was a hold / refused: never opens
+    d.press(3300);
+    CHECK(!d.release(true)); // and it broke the sequence
+    d.press(4000);
+    CHECK(!d.release(false)); // a long first press is no tap
+    d.press(4100);
+    CHECK(!d.release(true));
+    d.press(0xFFFFFF00u);
+    CHECK(!d.release(true));
+    d.press(0x40u);
+    CHECK(d.release(true)); // across the 32-bit wrap
+}
+
 static void test_logic()
 {
     CHECK(trackFromScreenButton(0, false) == 0 && trackFromScreenButton(7, false) == 7);
@@ -1298,6 +1331,7 @@ int sessionTests(int& checks);
 int main()
 {
     test_tap();
+    test_double_tap();
     test_logic();
     test_sidecar_policy();
     test_pending_release_retry();

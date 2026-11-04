@@ -33,6 +33,30 @@ void Interface::buttonChange(uint8_t n, uint8_t value)
     // only buttons break a mode-button tap; a mode button does not break its own tap
     seqNoteButtonInput(n == interfaceButtonPattern, n == interfaceButtonPerformance, n == interfaceButtonSong);
 
+    // Song double tap (clip launcher from any page): tracked here because the first press switches modules
+    seqSongDoubleNow = false;
+    if (n == interfaceButtonSong)
+    {
+        if (value == buttonPress)
+        {
+            bool othersHeld = false;
+            for (int b = 0; b < interfaceButtonsCount; b++)
+            {
+                if (b != interfaceButtonSong && getPlatform()->getButtons()->isButtonPressed(b))
+                {
+                    othersHeld = true;
+                    break;
+                }
+            }
+            seqSongTap.down(!othersHeld, seqNowMs());
+            seqSongDouble.press(seqNowMs());
+        }
+        else if (value == buttonRelease)
+        {
+            seqSongDoubleNow = seqSongDouble.release(seqTapUp(seqSongTap)) && seqClipsSongTap();
+        }
+    }
+
     if (seqPlayRouteButton(n, value))
         return; // consumed by the Play overlay (R1)
 

@@ -23,6 +23,8 @@ extern strMtProject mtProject;
 seqlogic::TapDetector seqPatternTap;
 seqlogic::TapDetector seqPerformTap;
 seqlogic::TapDetector seqSongTap;
+seqlogic::DoubleTap seqSongDouble;
+bool seqSongDoubleNow = false;
 volatile bool seqTapRefusedFlag = false;
 uint8_t seqPadsHeld = 0;
 

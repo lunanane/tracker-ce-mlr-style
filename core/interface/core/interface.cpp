@@ -465,9 +465,9 @@ void Interface::switchModuleByButton(hModule module, uint8_t button, uint32_t op
     if (modules[modulesButtons[index][1]] == module)
         return;
 
-    // sequencer tracks mod: Shift + Performance opens the alt fader page. The check runs before deactivateModule, which fakes a
-    // Shift release (plan 005 R3).
-    if (button == interfaceButtonPerformance && getPlatform()->getButtons()->isButtonPressed(interfaceButtonShift) &&
+    // sequencer tracks mod: the Performance key opens the alt fader page; Shift + Performance the stock Performance page (owner
+    // change 2026-11-04). The check runs before deactivateModule, which fakes a Shift release (plan 005 R3).
+    if (button == interfaceButtonPerformance && !getPlatform()->getButtons()->isButtonPressed(interfaceButtonShift) &&
         seqFaderShiftFromElsewhere(isSeqPerformScreenActive()))
     {
         deactivateModule(module);
