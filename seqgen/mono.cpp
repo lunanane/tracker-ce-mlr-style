@@ -157,8 +157,8 @@ void Mono::notePad(int col, int row, bool down) {
     case 9 * 4 + 2: ti_ = !ti_; break;                                        // TIE
     case 10 * 4 + 0: if (spPos_ > 1) { spPos_--; div_ = kSpd[spPos_ - 1]; } break;   // slower
     case 10 * 4 + 1: if (spPos_ < 12) { spPos_++; div_ = kSpd[spPos_ - 1]; } break;  // faster
-    case 10 * 4 + 2: if (floormod(vg_ - 1, 8) > 0) vg_--; break;   // VEL- (previous velocity pattern, blend kept)
-    case 11 * 4 + 2: if (floormod(vg_ - 1, 8) < 7) vg_++; break;  // VEL+
+    case 10 * 4 + 2: if (vg_ > 1) vg_--; break;   // VEL- / VEL+ walk 1..12 like the menu row (9..12 = blends with pattern 1)
+    case 11 * 4 + 2: if (vg_ < 12) vg_++; break;
     default: break;
   }
 }
