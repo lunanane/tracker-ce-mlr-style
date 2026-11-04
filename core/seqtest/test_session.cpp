@@ -2,6 +2,7 @@
 // Host tests of the Session view logic (seqSessionLogic.h).
 #include "seqSessionLogic.h"
 #include <stdio.h>
+#include <string.h>
 
 using namespace seqsession;
 
@@ -79,24 +80,12 @@ static void test_leds_and_pads()
     SCHECK(groupFromButton(0, 4) == 0 && groupFromButton(1, 4) == 4 && groupFromButton(2, 4) == 8 && groupFromButton(3, 4) == 12);
     SCHECK(groupFromButton(4, 4) == 0xFF && groupFromButton(6, 4) == 0xFF && groupFromButton(0, 0) == 0xFF);
     SCHECK(alignGroup(12, 8) == 8 && alignGroup(4, 8) == 0 && alignGroup(8, 4) == 8 && alignGroup(0, 4) == 0);
-    SCHECK(kButtonClips == 6 && kButtonCut == 7);
-}
-
-static void test_cache()
-{
-    NoteCache c;
-    c.invalidate(5);
-    SCHECK(c.nextToScan() == 0 && !c.hasNotes(0, 3));
-    c.set(0, 0x0008);
-    SCHECK(c.hasNotes(0, 3) && !c.hasNotes(0, 4) && c.nextToScan() == 1);
-    c.set(1, 0);
-    c.set(2, 0xFFFF);
-    c.set(3, 1);
-    SCHECK(c.nextToScan() == -1 && c.hasNotes(2, 15) && c.hasNotes(3, 0));
-    c.invalidateRow(2);
-    SCHECK(c.nextToScan() == 2 && !c.hasNotes(2, 15));
-    c.invalidate(6);
-    SCHECK(c.nextToScan() == 0 && c.first == 6 && !c.hasNotes(0, 3));
+    // host layout: 6 (button 6) belongs to the active layer, 7 is an empty gap, 8 switches CLIPS <-> CUT
+    SCHECK(kButtonLayer == 5 && kButtonGap == 6 && kButtonSwitch == 7);
+    SCHECK(kButtonLayer < kButtonGap && kButtonGap < kButtonSwitch && kButtonSwitch < 8);
+    // the buttons that choose a group (CUT: 1-4) never collide with the layer button, the gap or the switch
+    for (uint8_t b = 0; b < 8; b++)
+        if (groupFromButton(b, 4) != 0xFF) SCHECK(b < kButtonLayer);
 }
 
 static void test_launcher_bar()
@@ -368,7 +357,7 @@ static void test_pad_gestures()
 
     // screen buttons of the CLIPS layer: 1 mode, 2 quantise, 3 stop, 4 back to song; 7 / 8 stay the layer buttons of the host
     SCHECK(kBtnMode == 0 && kBtnQuant == 1 && kBtnStop == 2 && kBtnBackToSong == 3);
-    SCHECK((int)kBtnBackToSong < (int)kButtonClips);
+    SCHECK((int)kBtnBackToSong < (int)kButtonLayer);
 
     // pad LEDs: follow action armed = steady medium, the dim light of an empty pad of a sounding track
     SCHECK(clipState(true, true, true, true) == CS_FOLLOW && clipState(true, true, true, false) == CS_QUEUED);
@@ -472,7 +461,7 @@ static void test_clip_end_quant()
     s.drain();
     SCHECK(s.onStep(4, 1, p, 4) == Launcher::A_NONE && s.onStep(4, 2, p, 4) == Launcher::A_NONE && s.onStep(4, 3, p, 4) == Launcher::A_NONE);
     SCHECK(s.onStep(4, 4, p, 4) == Launcher::A_STOP); // 4 steps after the switch, not 1
-    // Stop of the transport: the next Play starts every clip at its first step again
+    // Stop of the transport: the next Play counts from the step it starts at (advance is called once per step by track 1)
     Launcher u;
     u.postClip(6, 5);
     u.drain();
@@ -481,8 +470,26 @@ static void test_clip_end_quant()
     u.onTransportStop();
     u.postStop(6, Q_CLIPEND);
     u.drain();
-    SCHECK(u.onStep(6, 1, p, 4) == Launcher::A_NONE && u.onStep(6, 2, p, 4) == Launcher::A_NONE && u.onStep(6, 3, p, 4) == Launcher::A_NONE);
-    SCHECK(u.onStep(6, 4, p, 4) == Launcher::A_STOP);
+    for (uint16_t g = 1; g <= 3; g++)
+    {
+        u.advance(g, 40);
+        SCHECK(u.onStep(6, g, p, 4) == Launcher::A_NONE);
+    }
+    u.advance(4, 40);
+    SCHECK(u.onStep(6, 4, p, 4) == Launcher::A_STOP); // Play from step 0: the clip ends after 4 steps
+
+    // Play started away from step 0 (at 6, clip of 4 steps): the clip end is where the clip wraps (8), not 4 steps after Play
+    Launcher w;
+    w.postClip(7, 5);
+    w.drain();
+    w.onStep(7, 0, p, 4);
+    w.onTransportStop();
+    w.postStop(7, Q_CLIPEND);
+    w.drain();
+    w.advance(7, 40); // first step boundary after Play from 6
+    SCHECK(w.onStep(7, 7, p, 4) == Launcher::A_NONE);
+    w.advance(8, 40);
+    SCHECK(w.onStep(7, 8, p, 4) == Launcher::A_STOP);
 
     // the other quantise values are unchanged by the clip length argument
     Launcher v;
@@ -634,12 +641,156 @@ static void test_grid_geometry()
     SCHECK(msgText(MSG_NONE)[0] == 0 && msgText(MSG_BUSY)[0] != 0 && msgText(MSG_UNDO_CLEARED)[0] != 0);
 }
 
+// ---------------------------------------------------------------------------------------------------------------------------
+// Plan 005 R2 review fixes: undrained taps, join phase, pattern-switch ticks, display list budget
+
+static void test_undrained_tap_vs_follow()
+{
+    Launcher l;
+    uint8_t p = 0;
+    l.postClip(0, 5);
+    l.drain();
+    l.onStep(0, 0, p, 4);
+    SCHECK(followMayQueue(l, 0)); // quiet: the follow action may be queued
+
+    // a tap of the performer is in the ring but the audio side has not drained it: kind is still NONE
+    SCHECK(l.ringFree() == 31);
+    SCHECK(l.postClip(0, 9));
+    SCHECK(l.ringPending() && l.queuedKind(0) == Launcher::K_NONE && l.ringFree() == 30);
+    SCHECK(!followMayQueue(l, 0) && !followMayQueue(l, 3)); // no track: the ring is shared, the buffer slot is not safe
+    l.drain();
+    SCHECK(!l.ringPending() && l.queuedKind(0) == Launcher::K_CLIP && l.queuedPattern(0) == 9);
+    SCHECK(!followMayQueue(l, 0));   // the tap is queued now: the newest tap wins
+    SCHECK(followMayQueue(l, 3));    // other tracks are free again
+
+    // a stopped track and a bad track never take a follow action
+    l.postStop(2);
+    l.drain();
+    l.onStep(2, 0, p, 4);
+    SCHECK(l.stopped(2) && !followMayQueue(l, 2) && !followMayQueue(l, 16));
+
+    // the ring tells how many commands fit (a batch of follow actions checks it before it starts)
+    Launcher f;
+    int n = 0;
+    while (f.ringFree() > 0 && f.postClip(n % 16, 2))
+        n++;
+    SCHECK(n == 31 && f.ringFree() == 0 && !f.postStop(0));
+    f.drain();
+    SCHECK(f.ringFree() == 31);
+}
+
+static void test_join_phase_and_switch_ticks()
+{
+    uint8_t p = 0;
+    // Q_NOW join: the clip enters its loop at step 2 (position 6 in a clip of 4), so its end comes after 2 more steps, not 4
+    Launcher a;
+    a.setQuant(Q_NOW);
+    a.postClip(3, 5);
+    a.drain();
+    SCHECK(a.onStep(3, 6, p, 8) == Launcher::A_CLIP);
+    a.setPhase(3, (uint16_t)(6 % 4)); // what seqSessionApplyClip does for a join (restart = false)
+    a.postStop(3, Q_CLIPEND);
+    a.drain();
+    SCHECK(a.onStep(3, 7, p, 4) == Launcher::A_NONE);   // step 3 of the clip
+    SCHECK(a.onStep(3, 8, p, 4) == Launcher::A_STOP);   // step 0 again: the clip would restart here
+    // a restart (bar) keeps the counter at the first step: the end comes after the whole clip
+    Launcher b;
+    b.postClip(3, 5);
+    b.drain();
+    b.onStep(3, 16, p, 8);
+    b.postStop(3, Q_CLIPEND);
+    b.drain();
+    for (int i = 1; i < 4; i++)
+        SCHECK(b.onStep(3, (uint16_t)(16 + i), p, 4) == Launcher::A_NONE);
+    SCHECK(b.onStep(3, 20, p, 4) == Launcher::A_STOP);
+    SCHECK(Launcher().ticks() == 0);
+
+    // The pattern switches in the middle of a step: tracks visited before the switch (0) and after it (15) are both on their first
+    // step in this tick, so their clip ends stay in line
+    Launcher l;
+    l.advance(1, 12);
+    l.onStep(0, 1, p, 3);
+    l.onPatternSwitched();
+    l.onStep(15, 0, p, 3);
+    l.postStop(0, Q_CLIPEND);
+    l.postStop(15, Q_CLIPEND);
+    l.drain();
+    for (uint16_t tick = 2; tick <= 3; tick++)
+    {
+        l.advance(tick, 12);
+        SCHECK(l.onStep(0, tick, p, 3) == Launcher::A_NONE);
+        SCHECK(l.onStep(15, tick, p, 3) == Launcher::A_NONE);
+    }
+    l.advance(4, 12);
+    Launcher::Action a0 = l.onStep(0, 4, p, 3), a15 = l.onStep(15, 4, p, 3);
+    SCHECK(a0 == Launcher::A_STOP && a15 == Launcher::A_STOP); // both end on the same step
+
+    // ticks follow the music: the retry rate limit of the main loop
+    Launcher t;
+    SCHECK(t.ticks() == 0);
+    t.advance(1, 16);
+    t.advance(2, 16);
+    SCHECK(t.ticks() == 2);
+}
+
+static void test_grid_budget()
+{
+    using namespace clipgrid;
+    View v;
+    memset(&v, 0, sizeof(v));
+    GridPlan empty = planGrid(v);
+    SCHECK(empty.outlines && empty.notches && empty.stops && !empty.help); // the help lines need button 1 or 3
+    SCHECK(empty.cost > 2000 && empty.cost < kGridBudget);
+
+    v.modeHeld = 1;
+    GridPlan held = planGrid(v);
+    SCHECK(held.help && held.cost > empty.cost && held.cost <= kGridBudget);
+    v.modeHeld = 0;
+    v.stopHeld = 1;
+    SCHECK(planGrid(v).help);
+    v.stopHeld = 0;
+
+    // worst case: every cell armed, every clip Play 1x, every empty cell marked, LIVE, a message, a button held
+    View w;
+    memset(&w, 0, sizeof(w));
+    for (uint8_t r = 0; r < kVisRows; r++)
+    {
+        for (uint8_t t = 0; t < kTracks; t++)
+        {
+            w.cell[r][t] = CELL_FOLLOW;
+            w.flags[r][t] = F_ONEX | F_STOPMARK | F_END;
+        }
+        w.sceneFlags[r] = F_ONEX;
+    }
+    w.live = 1;
+    w.msg = MSG_UNDO_CLEARED;
+    w.modeHeld = 1;
+    GridPlan worst = planGrid(w);
+    SCHECK(worst.cost <= kGridBudget);                 // never above the budget whatever is lit
+    SCHECK(!worst.outlines && !worst.stops); // 192 armed cells and 192 dim squares do not fit: dropped, not truncated
+    // the mandatory part alone is far below the budget, so the optional parts are what gets dropped
+    SCHECK(empty.cost + 7 * textCost(22) < kGridBudget);
+    // realistic worst case: one window of 32 stop squares, a dozen notches, a few armed
+    View r1;
+    memset(&r1, 0, sizeof(r1));
+    for (uint8_t r = 0; r < 4; r++)
+        for (uint8_t t = 0; t < 8; t++)
+            r1.flags[r][t] = F_STOPMARK;
+    for (uint8_t t = 0; t < 12; t++)
+        r1.flags[5][t] = F_ONEX;
+    for (uint8_t t = 0; t < 4; t++)
+        r1.cell[6][t] = CELL_FOLLOW;
+    GridPlan real = planGrid(r1);
+    SCHECK(real.outlines && real.notches && real.stops && real.cost < 4500);
+    // costs add up in whole display list words
+    SCHECK(kRectCost % 4 == 0 && kOutlineCost % 4 == 0 && textCost(5) % 4 == 0 && kNumberCost % 4 == 0);
+}
+
 int sessionTests(int& checks)
 {
     test_quant();
     test_window();
     test_leds_and_pads();
-    test_cache();
     test_launcher_bar();
     test_launcher_quant_modes();
     test_launcher_loading_blocks();
@@ -657,6 +808,9 @@ int sessionTests(int& checks)
     test_live_state();
     test_panic();
     test_grid_geometry();
+    test_undrained_tap_vs_follow();
+    test_join_phase_and_switch_ticks();
+    test_grid_budget();
     checks += s_checks;
     return s_fail;
 }

@@ -1,7 +1,7 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 // Clip launcher screen (plan 005 R2). Shapes and ASCII text only (the fonts have no symbols). Display list budget: the whole frame
 // may use about 8 KB (display.cpp step3), shared with the title bar and the 8 labels, so the grid draws cells in one RECTS batch per
-// colour (8 bytes per cell), numbers and a few text lines, and skips the optional markers when it is already large.
+// colour (8 bytes per cell), numbers and a few text lines; planGrid() (seqSessionLogic.h) sums the cost from the View first and drops the optional parts that do not fit.
 #include "FT812.h"
 #include "display.h"
 #include "displayControls.h"
@@ -13,8 +13,6 @@ using namespace seqsession::clipgrid;
 
 namespace
 {
-constexpr uint32_t kOptionalMarkersBelow = 5200; // bytes of display list: above this the flags are left out
-
 // theme colours (songPlayerColors): 0 text, 4 dim, 5 red, 6 black, 7 mid grey, 8 block, 9 green
 struct Palette
 {
@@ -80,6 +78,7 @@ void cSeqClipGrid::update()
     if (view == nullptr)
         return;
     const View& v = *view;
+    const GridPlan plan = planGrid(v); // what fits in the display list budget (summed, never read back from the driver)
     const Palette pal = palette(colors);
     const strFont* f = &fonts[0];                              // 14 px regular
     const strFont* fs = &fonts[displayFontCount > 4 ? 4 : 0];  // 12 px regular for the numbers
@@ -119,20 +118,20 @@ void cSeqClipGrid::update()
     }
 
     // ---- armed follow actions: a steady green outline (the blink of a launch the performer queued is in the marks control)
-    API_LINE_WIDTH(16);
-    API_COLOR(pal.play);
-    for (uint8_t r = 0; r < kVisRows; r++)
-    {
-        for (uint8_t t = 0; t < kTracks; t++)
-            if (v.cell[r][t] == CELL_FOLLOW)
-                outline(colX(t), rowY(r), colX(t) + kCellW - 1, rowY(r) + kCellH - 1);
-    }
-
-    // ---- optional markers (skipped when the frame is already large)
-    if (display.getDisplayDriver()->getDisplayListOffset() < kOptionalMarkersBelow)
+    if (plan.outlines)
     {
         API_LINE_WIDTH(16);
-        // dim square: an empty cell of a track that sounds - pressing it stops the track
+        API_COLOR(pal.play);
+        for (uint8_t r = 0; r < kVisRows; r++)
+            for (uint8_t t = 0; t < kTracks; t++)
+                if (v.cell[r][t] == CELL_FOLLOW)
+                    outline(colX(t), rowY(r), colX(t) + kCellW - 1, rowY(r) + kCellH - 1);
+    }
+
+    // ---- dim square: an empty cell of a sounding track inside the pad window - pressing it stops the track
+    if (plan.stops)
+    {
+        API_LINE_WIDTH(16);
         API_COLOR(pal.dim);
         API_BEGIN(RECTS);
         for (uint8_t r = 0; r < kVisRows; r++)
@@ -140,7 +139,11 @@ void cSeqClipGrid::update()
                 if (v.flags[r][t] & F_STOPMARK)
                     rect(colX(t) + kCellW / 2 - 3, rowY(r) + kCellH / 2 - 3, colX(t) + kCellW / 2 + 3, rowY(r) + kCellH / 2 + 3);
         API_END();
-        // notch top right: Play 1x. Red: the next row is empty, so the track stops after this clip.
+    }
+    // ---- notch top right of a clip with content: Play 1x. Red: the next row is empty, so the track stops after this clip.
+    if (plan.notches)
+    {
+        API_LINE_WIDTH(16);
         for (uint8_t pass = 0; pass < 2; pass++)
         {
             API_COLOR(pass == 0 ? pal.text : pal.red);
@@ -189,7 +192,7 @@ void cSeqClipGrid::update()
         API_CMD_TEXT(kX0, kY0 + kVisRows * kRowH + 8, f->handle, 0, msgText(v.msg));
     }
 
-    // ---- info column
+    // ---- info column (x 616-796: at most about 23 characters per line)
     int x = kInfoX, y = posY + 8;
     API_COLOR(pal.text);
     snprintf(buf, sizeof(buf), "Launch: %s", quantShort((Quant)v.quant));
@@ -198,8 +201,8 @@ void cSeqClipGrid::update()
     if (v.live)
     {
         API_COLOR(pal.red);
-        API_CMD_TEXT(x, y, f->handle, 0, "LIVE - song frozen");
-        snprintf(buf, sizeof(buf), "slot %d (button 4: back)", v.liveSlot);
+        API_CMD_TEXT(x, y, f->handle, 0, "LIVE: song frozen");
+        snprintf(buf, sizeof(buf), "slot %d, btn 4: back", v.liveSlot);
         API_CMD_TEXT(x, y + 20, f->handle, 0, buf);
     }
     y += 52;
@@ -214,15 +217,18 @@ void cSeqClipGrid::update()
     {
         API_CMD_TEXT(x, y, f->handle, 0, "Press a clip pad");
     }
-    API_COLOR(v.modeHeld ? pal.text : pal.dim);
-    API_CMD_TEXT(x, y + 52, f->handle, 0, "Hold 1 + wheel: mode");
-    API_CMD_TEXT(x, y + 72, f->handle, 0, "Shift: whole row");
-    API_COLOR(v.stopHeld ? pal.text : pal.dim);
-    API_CMD_TEXT(x, y + 100, f->handle, 0, "Hold 3 + pad: stop");
-    API_COLOR(pal.dim);
-    API_CMD_TEXT(x, y + 120, f->handle, 0, "Empty pad: stops track");
-    API_CMD_TEXT(x, y + 148, f->handle, 0, "Notch = plays once,");
-    API_CMD_TEXT(x, y + 168, f->handle, 0, "red: next row empty");
+    if (plan.help) // only while button 1 or 3 is held
+    {
+        API_COLOR(v.modeHeld ? pal.text : pal.dim);
+        API_CMD_TEXT(x, y + 52, f->handle, 0, "Wheel: loop / 1x");
+        API_CMD_TEXT(x, y + 72, f->handle, 0, "Shift: whole row");
+        API_COLOR(v.stopHeld ? pal.text : pal.dim);
+        API_CMD_TEXT(x, y + 100, f->handle, 0, "Hold 3 + pad: stop");
+        API_COLOR(pal.dim);
+        API_CMD_TEXT(x, y + 120, f->handle, 0, "Empty pad = stop");
+        API_CMD_TEXT(x, y + 148, f->handle, 0, "Notch = plays once");
+        API_CMD_TEXT(x, y + 168, f->handle, 0, "red: next row empty");
+    }
 }
 
 //--------------------------------------------------------------------------------

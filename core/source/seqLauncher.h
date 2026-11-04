@@ -21,6 +21,7 @@ bool seqSessionStopAll();
 bool seqSessionLaunchScene(uint8_t pattern);               // stock pattern switch (pattern end), or at once when stopped
 uint8_t seqSessionOwnPattern();                            // pattern currently loaded (mtProject.values.actualPattern)
 uint8_t seqSessionQueuedScene();                           // queued stock pattern switch, 0 = none
+uint8_t seqSessionLastRefusal();                          // seqsession::Refusal of the last refused launch
 
 // Tracks of a pattern that hold content (bit per track). From the project bitmasks the stock Song page uses (no SD access);
 // the loaded pattern is read from RAM, so unsaved edits count.

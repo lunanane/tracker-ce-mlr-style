@@ -24,6 +24,14 @@ bool ClipsLayer::hasNotes(uint8_t pattern, uint8_t track) const
     return track < kTracks && ((seqSessionPatternMask(pattern) >> track) & 1u);
 }
 
+namespace
+{
+uint8_t refusalMsg()
+{
+    return seqSessionLastRefusal() == REFUSE_STOP_TO_SAVE ? clipgrid::MSG_STOP_TO_SAVE : clipgrid::MSG_BUSY;
+}
+} // namespace
+
 void ClipsLayer::say(uint8_t msg)
 {
     msg_ = msg;
@@ -44,6 +52,7 @@ void ClipsLayer::enter(uint8_t firstTrack)
         focusPattern_ = window_.first;
         focusTrack_ = first_;
     }
+    seqSessionTakeUndoCleared(); // a note from before the view was entered is stale
     showControls(true);
     dirty_ = true;
 }
@@ -91,7 +100,7 @@ void ClipsLayer::pad(uint8_t col, uint8_t row, bool down)
         default: return; // OP_FOCUS: button 1 held, the pads only focus
     }
     if (!ok)
-        say(clipgrid::MSG_BUSY);
+        say(refusalMsg());
 }
 
 void ClipsLayer::leds(uint8_t out[48])
@@ -365,14 +374,15 @@ void ClipsLayer::build(clipgrid::View& v, clipgrid::Marks& m)
                 default: v.cell[r][t] = CELL_EMPTY; break;
             }
             uint8_t fl = 0;
-            if (seqClipMode(pattern, t) == seqclips::CLIP_PLAY1X)
+            if (has && seqClipMode(pattern, t) == seqclips::CLIP_PLAY1X) // the notch only marks clips that have content
             {
                 fl |= F_ONEX;
                 bool nextHas = pattern < kPatternMax && ((masks[r + 1] >> t) & 1u);
                 if (!nextHas)
                     fl |= F_END; // nothing below: the track stops after this clip
             }
-            if (!has && sounds[t])
+            bool inWindow = (int)r >= (int)window_.first - (int)top_ && (int)r < (int)window_.first - (int)top_ + kWinRows && t >= first_ && t < first_ + 8;
+            if (!has && sounds[t] && inWindow) // the dim square only where a pad reaches
                 fl |= F_STOPMARK;
             v.flags[r][t] = fl;
         }
