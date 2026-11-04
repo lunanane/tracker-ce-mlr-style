@@ -1,8 +1,8 @@
 # Polyend Tracker Community Edition (CE) Centralized Version Configuration
 
-# Sequencer tracks mod (branch seq-tracks): own edition label (shown on the device: "1.0.0 CE-SEQ0.2") and own .ptf names
-# (<target>_SEQ_<mod version>.ptf, e.g. PolyendTracker_SEQ_0.2.ptf; /Firmware/ file names are limited to 31 characters).
-SEQ_MOD_VERSION := 0.2
+# Sequencer tracks mod (branch seq-tracks): own edition label (shown on the device: "1.0.0 CE-SEQ0.2.1") and own .ptf names
+# (<target>_SEQ_<mod version>.ptf, e.g. PolyendTracker_SEQ_0.2.1.ptf; /Firmware/ file names are limited to 31 characters).
+SEQ_MOD_VERSION := 0.2.1
 EDITION_NAME := CE-SEQ$(SEQ_MOD_VERSION)
 VER_ROOT_DIR := $(abspath $(dir $(lastword $(MAKEFILE_LIST))))
 BUILD_TAG    ?= $(shell git -C "$(VER_ROOT_DIR)" rev-parse --short=7 HEAD 2>/dev/null || date +"%Y%m%d")

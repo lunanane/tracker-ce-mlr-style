@@ -75,6 +75,12 @@ endif
 
 
 
+# sequencer tracks mod: on MK66 the mod's screen/UI code (not the audio path) is built for size, so the image stays
+# below 0xF0000 (960 KB): v0.2 at 0xF04B0 was refused by the original Tracker's updater, v0.1 at 0xE73D8 flashed fine
+ifeq ($(PLATFORM), MK66)
+$(OBJ_DIR)/interface/seqPlay/%.o $(OBJ_DIR)/interface/seqSession/%.o $(OBJ_DIR)/interface/seqPerform/%.o: COMPILER_OPTIONS += -Os
+endif
+
 # Build rules
 
 $(OBJ_DIR)/%.o: %.cpp
