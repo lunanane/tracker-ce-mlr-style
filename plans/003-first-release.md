@@ -15,8 +15,8 @@ Order is sequential (one implementation agent at a time, lead reviews + builds b
    `seqtracks.bin` save/load with the project.
 3. **C — Session view** (plan 002): C1 clip launcher (CLIPS layer: launch track clips and scenes, Ableton-style), then C2 (S2): Pattern tap cycle Editor → Play → Session; 4 tracks × columns, jumps,
    two-pad loops, playhead recording with seqgen::Playhead; retrigger with sample offset. Cut cache (S3) → v0.2.
-4. **D — Alt Performance page** (plan 004): Performance tap toggles; 4 horizontal 8-step faders, 8 function
-   groups (stock perform FX, sends, ping-pong, reverb). In v0.1 only if solid in time.
+4. **D — Alt Performance page** (plan 004): Performance tap toggles; 4 horizontal 8-step faders; groups FX1-4, FX5-8,
+   FX9-12 (stock slots), PING (delay send + settings), REV (reverb send + settings). In v0.1 only if solid in time.
 5. **Release**: fork pushed to the owner's GitHub (PolyForm NC Required Notice kept, README section "Sequencer
    tracks mod" + on-device test list + recovery steps), tag `seq-v0.1`, `.ptf` built from the tag.
 
