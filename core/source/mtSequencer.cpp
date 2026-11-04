@@ -270,6 +270,8 @@ AUDIO_CORE_RAM void Sequencer::tick_uStep(void)
                     play_microStep(trackIdx);
                 inc_uStep(trackIdx);
             }
+            if (cutOn)
+                seqCutApply(); // sequencer tracks mod: the playheads of the CUT tracks decide the next positions
         }
     }
 }
@@ -287,14 +289,17 @@ AUDIO_CORE_FLASH void Sequencer::play_microStep(int row)
     bool forceFirstRollWhenNoNote = 0; // potrzebne jak rolka wchodzi jako efekt bez nuty
     int forceFirstRollWhenNoNote_fxIndex = 0;
 
-    if (row == 0 && playerRow.uStep == 1 && isRec())
+    // sequencer tracks mod: a CUT track reports the position the stock sequencer would be at (pattern preload, metronome)
+    const int16_t stockPos = seqEngine.cutMask() ? seqCutStockPos(row) : playerRow.actual_pos;
+
+    if (row == 0 && playerRow.uStep == 1 && isRec() && !seqCutMid)
     {
         if (isMetronomeActive() &&
-            playerRow.actual_pos % (getMetronomeDenominator() * getMetronomeNumerator()) == 0)
+            stockPos % (getMetronomeDenominator() * getMetronomeNumerator()) == 0)
         {
             engine.makeMetronomeTick(1);
         }
-        else if (isMetronomeActive() && playerRow.actual_pos % getMetronomeDenominator() == 0)
+        else if (isMetronomeActive() && stockPos % getMetronomeDenominator() == 0)
         {
             engine.makeMetronomeTick(0);
         }
@@ -374,12 +379,12 @@ AUDIO_CORE_FLASH void Sequencer::play_microStep(int row)
     }
 
     // jeśli ostatni step, zażądaj ładowania kolejnego patternu
-    if (playerRow.uStep == 1 && player.isPlay && row == 0)
+    if (playerRow.uStep == 1 && player.isPlay && row == 0 && !seqCutMid)
     {
 
-        bool isLastStepInPattern = playerRow.actual_pos == patternRow.length;
+        bool isLastStepInPattern = stockPos == patternRow.length;
         bool isLastStepInSelectionMode =
-          player.selectionModeLooped && playerRow.actual_pos == player.selectionModeLastStep;
+          player.selectionModeLooped && stockPos == player.selectionModeLastStep;
 
         if ((isLastStepInPattern || isLastStepInSelectionMode) &&
             player.sequencialSwitch_isArmed > 0)
@@ -390,7 +395,7 @@ AUDIO_CORE_FLASH void Sequencer::play_microStep(int row)
                 player.sequencialSwitch_loaded = true;
             }
         }
-        else if (((playerRow.actual_pos == patternRow.length)) && player.songMode)
+        else if (((stockPos == patternRow.length)) && player.songMode)
         {
             loadNextPattern(newFileManager.getNextSongPattern());
         }
@@ -413,8 +418,10 @@ AUDIO_CORE_FLASH void Sequencer::play_microStep(int row)
 
     if (seqEngine.isTakenOver(row))
         return; // sequencer tracks mod: a sequencer plays this track, the pattern step is ignored
-    if (seqEngine.cutMask() && seqEngine.cut()->holding(row))
-        return; // sequencer tracks mod: CUT layer holds this step (stopped track / second half of a slow step)
+    const bool cutOn = seqEngine.cutMask() != 0;
+    if (cutOn && seqEngine.cut()->stopped(row))
+        return; // sequencer tracks mod: CUT layer stopped this track
+    const bool cutHold = cutOn && seqEngine.cut()->holding(row); // second half of a slow position: no new step, the rest runs on
     if (!playerRow.isActive)
         return;
     if (isTrackEngineMuted(row))
@@ -429,7 +436,7 @@ AUDIO_CORE_FLASH void Sequencer::play_microStep(int row)
     int16_t randomisedValue = -1;
     int16_t gateLength = -1;
 
-    if (playerRow.uStep == 1)
+    if (playerRow.uStep == 1 && !cutHold)
     {
 
         if (stepToSend.fx[0].type == fx.FX_TYPE_RANDOM_VALUE)
@@ -824,7 +831,7 @@ AUDIO_CORE_FLASH void Sequencer::play_microStep(int row)
     if (stepToSend.note != STEP_NOTE_EMPTY)
     {
         // !micromove
-        if (!playerRow.micromove.isActive && playerRow.uStep == 1 && !playerRow.cancelStep)
+        if (!playerRow.micromove.isActive && playerRow.uStep == 1 && !playerRow.cancelStep && !cutHold)
         {
             startStep = 1;
             playerRow.micromove.reset();
@@ -1352,7 +1359,7 @@ AUDIO_CORE_RAM void Sequencer::play(uint8_t fromPos)
 
     player.isStop = 0;
     player.isPlay = 1;
-    seqEngine.cutPlayStarted(); // sequencer tracks mod: CUT playheads restart with the transport
+    seqEngine.cutPlayStarted(fromPos); // sequencer tracks mod: CUT playheads restart with the transport
     timerTicks = 1;
     internalTickAccumulatorUs = 0.0;
 
@@ -1419,6 +1426,7 @@ void Sequencer::playSelection(bool looped) // potrzebuje aktualnego zaznaczenia
 
     player.isStop = 0;
     player.isPlay = 1;
+    seqEngine.cutPlayStarted(player.loopSelection.firstStep); // sequencer tracks mod
 
     if (looped)
     {
@@ -2335,9 +2343,12 @@ AUDIO_CORE_RAM void Sequencer::inc_uStep(uint8_t row)
     if (player.track[row].uStep > 48)
     {
         player.track[row].uStep = 1;
+        const bool cutRow = seqEngine.cutMask() != 0;
+        if (cutRow)
+            seqCutPreSwitch(row); // sequencer tracks mod: the stock sequencer advances its own position of a CUT track
         switchRowStep(row);
-        if (seqEngine.cutMask() && player.isPlay)
-            seqCutBoundary(row); // sequencer tracks mod: the playhead of a CUT track decides the next position
+        if (cutRow)
+            seqCutPostSwitch(row);
     }
 }
 
@@ -2492,6 +2503,11 @@ AUDIO_CORE_RAM void Sequencer::sendNoteOn(uint8_t track,
     }
     else if (isSampleInstrument(step->instrument) && isSampleTrack(track))
     {
+        if (seqCutStart[track])
+        {
+            instrumentPlayer[track].pendingSeqStart = (int32_t)(seqCutStart[track] - 1);
+            seqCutStart[track] = 0;
+        }
         instrumentPlayer[track].noteOn(step->instrument,
                                        step->note,
                                        step->volume,

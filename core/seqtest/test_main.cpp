@@ -823,6 +823,7 @@ int main()
     test_cut_jump_and_retrigger();
     test_cut_loop_reverse_rate();
     test_cut_stop_resync_transport();
+    test_cut_review_fixes();
     test_cut_engine_ring();
     test_cut_layer();
     printf("%d checks, %d failures\n", g_checks, g_fail);

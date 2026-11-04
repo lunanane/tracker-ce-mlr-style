@@ -16,8 +16,9 @@ static View noView()
     return v;
 }
 
-Cut::Cut() : activeMask_(0), holdMask_(0)
+Cut::Cut() : activeMask_(0), holdMask_(0), stopMask_(0)
 {
+    memset(stock_, 0, sizeof(stock_));
     memset(&hooks_, 0, sizeof(hooks_));
     memset(scratch_, 0, sizeof(scratch_));
     memset(rt_, 0, sizeof(rt_));
@@ -35,6 +36,13 @@ void Cut::setHold(uint8_t t, bool h)
     holdMask_ = m;
 }
 
+void Cut::setStopped(uint8_t t, bool s)
+{
+    uint16_t m = stopMask_;
+    m = s ? (uint16_t)(m | (1u << t)) : (uint16_t)(m & ~(1u << t));
+    stopMask_ = m;
+}
+
 void Cut::activate(uint8_t t)
 {
     if ((activeMask_ >> t) & 1u) return;
@@ -44,6 +52,7 @@ void Cut::activate(uint8_t t)
     int pos = hooks_.trackPos ? hooks_.trackPos(hooks_.user, t) : 0;
     p.setLength(steps);
     p.restart((uint32_t)(pos + 1)); // the track continues where it is
+    stock_[t] = (int16_t)pos;
     memset(&rt_[t], 0, sizeof(Rt));
     rt_[t].view = noView();
     activeMask_ = (uint16_t)(activeMask_ | (1u << t));
@@ -53,6 +62,7 @@ void Cut::deactivate(uint8_t t)
 {
     activeMask_ = (uint16_t)(activeMask_ & ~(1u << t));
     setHold(t, false);
+    setStopped(t, false);
     memset(&rt_[t], 0, sizeof(Rt));
     rt_[t].view = noView();
     views_[t] = noView();
@@ -102,6 +112,12 @@ View Cut::view(uint8_t track) const
 
 void Cut::apply(uint8_t t, uint8_t arg)
 {
+    if (argSub(arg) == SUB_RESET)
+    {
+        for (uint8_t i = 0; i < kCutTracks; i++)
+            if ((activeMask_ >> i) & 1u) deactivate(i);
+        return;
+    }
     if (t >= kCutTracks) return;
     const uint8_t sub = argSub(arg);
     const bool down = argDown(arg);
@@ -136,7 +152,7 @@ void Cut::apply(uint8_t t, uint8_t arg)
             if (!r.stopped)
             {
                 r.stopped = true;
-                setHold(t, true);
+                setStopped(t, true);
                 if (hooks_.stopNote) hooks_.stopNote(hooks_.user, t);
             }
             else
@@ -198,19 +214,20 @@ StepPlan Cut::boundary(uint8_t t, int steps, int globalPos)
     {
         r.resync = false;
         r.stopped = false;
+        setStopped(t, false);
         r.held = 0;
-        p.resync((uint32_t)(globalPos + 1));
+        p.resync((uint32_t)globalPos);
         resynced = true;
     }
     else if (r.stopped)
     {
         plan.hold = true; // the stock position keeps running underneath, nothing is triggered
-        setHold(t, true);
         r.retrig = false;
         r.has2 = false;
         publish(t);
         return plan;
     }
+    const int prev = p.position();
     Playhead::StepOut s = p.step();
     plan.override = true;
     plan.pos = s.pos;
@@ -218,7 +235,11 @@ StepPlan Cut::boundary(uint8_t t, int steps, int globalPos)
     r.has2 = s.has2;
     r.pos2 = s.pos2;
     r.jumped2 = s.jumped2;
-    if (s.jumped && !s.hold) planJump(t, steps, s.pos, plan);
+    bool jumped = s.jumped && !s.hold;
+    // MIDI / synth tracks: reversed running is not a jump at every step (a note must not be struck again and again)
+    if (jumped && p.reverse() && hooks_.sampleTrack && !hooks_.sampleTrack(hooks_.user, t))
+        jumped = s.pos != (uint8_t)((prev + steps - 1) % steps);
+    if (jumped) planJump(t, steps, s.pos, plan);
     setHold(t, plan.hold);
     r.retrig = plan.retrigger;
     r.noteStep = plan.noteStep;
@@ -237,8 +258,8 @@ bool Cut::mid(uint8_t t, int steps, StepPlan& out)
     if (!r.has2 || r.stopped) return false;
     r.has2 = false;
     out.override = true;
-    out.pos = r.pos2;
-    if (r.jumped2) planJump(t, steps, r.pos2, out);
+    out.pos = steps > 0 ? (uint8_t)(r.pos2 % steps) : r.pos2; // the pattern may have become shorter since the boundary
+    if (r.jumped2) planJump(t, steps, out.pos, out);
     r.retrig = out.retrigger;
     r.noteStep = out.noteStep;
     r.elapsed = out.elapsed;
@@ -257,17 +278,18 @@ bool Cut::consumeRetrigger(uint8_t t, StepPlan& out)
     return true;
 }
 
-void Cut::transportStart()
+void Cut::transportStart(int fromPos)
 {
     for (uint8_t t = 0; t < kCutTracks; t++)
     {
         if (!((activeMask_ >> t) & 1u)) continue;
         Rt& r = rt_[t];
-        ph_[t].restart(1); // the stock sequencer plays step 0 right now
+        ph_[t].restart((uint32_t)(fromPos + 1)); // the stock sequencer plays step fromPos right now
+        stock_[t] = (int16_t)fromPos;
         r.retrig = false;
         r.has2 = false;
         r.resync = false;
-        setHold(t, r.stopped);
+        setHold(t, false);
         publish(t);
     }
 }

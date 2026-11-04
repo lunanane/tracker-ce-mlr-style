@@ -49,11 +49,13 @@ class Engine
     bool playing() const { return playing_; }
 
     // ---- CUT (MLR) layer, see seqCut.h (the Cut object lives outside the engine: the glue places it in external RAM) ----
-    void setCut(seqcut::Cut* c) { cut_ = c; }
-    seqcut::Cut* cut() const { return cut_; }
+    void setCut(seqcut::Cut* c) { __atomic_store_n(&cut_, c, __ATOMIC_RELEASE); } // the object is fully constructed first
+    seqcut::Cut* cut() const { return __atomic_load_n(&cut_, __ATOMIC_ACQUIRE); }
     bool postCut(uint8_t track, uint8_t arg); // arg = seqcut::packArg(...); main loop
-    uint16_t cutMask() const { return cut_ ? cut_->activeMask() : 0; } // tracks driven by their playhead
-    void cutPlayStarted() { cutRestart_ = true; } // any context: Play was pressed (transport restarts at step 0)
+    uint16_t cutMask() const { seqcut::Cut* c = cut(); return c ? c->activeMask() : 0; } // tracks driven by their playhead
+    // any context: Play was pressed, the transport restarts at step fromPos (playheads continue from fromPos + 1)
+    void cutPlayStarted(uint8_t fromPos = 0) { cutRestartPos_ = fromPos; cutRestart_ = true; }
+    bool seqActive() const { return !loading_ && (activeCount_ != 0 || head_ != tail_ || rec_.active()); } // without CUT
 
     // ---- record (main loop side) ----
     bool postRec(uint8_t track, uint8_t mode); // mode: REC_STOP / REC_PUNCH / REC_LOOP
@@ -147,6 +149,7 @@ class Engine
     volatile bool loading_;
     seqcut::Cut* cut_;
     volatile bool cutRestart_;
+    volatile uint8_t cutRestartPos_;
 };
 
 } // namespace seqtracks

@@ -150,6 +150,22 @@ AUDIO_CORE_RAM uint8_t playerEngine ::noteOn(uint8_t instr_idx,
     seqFx(fx2_id, fx2_val, 1); // mniej wazny najpierw
     seqFx(fx1_id, fx1_val, 0);
 
+    if (pendingSeqStart >= 0) // sequencer tracks mod: CUT layer retrigger, start point at full resolution (Position FX path)
+    {
+        uint8_t fxn = (fx1_id == Sequencer::strFxConsts::FX_TYPE_POSITION)
+                        ? 0
+                        : ((fx2_id == Sequencer::strFxConsts::FX_TYPE_POSITION) ? 1 : (fx1_id == 0 ? 0 : 1));
+        bool busy = (fxn == 0 ? fx1_id : fx2_id) != 0 && (fxn == 0 ? fx1_id : fx2_id) != Sequencer::strFxConsts::FX_TYPE_POSITION;
+        if (busy)
+            endFx(lastSeqFx[fxn], fxn);
+        currentSeqModValues.startPoint = (uint32_t)pendingSeqStart;
+        trackControlParameter[(int)controlType::sequencerMode + fxn][(int)parameterList::startPoint] = 1;
+        setFxStartPoint(fxn);
+        lastSeqFx[fxn] = Sequencer::strFxConsts::FX_TYPE_POSITION;
+        lastSeqVal[fxn] = (uint8_t)(((uint32_t)pendingSeqStart * 100u) / 65535u);
+        pendingSeqStart = -1;
+    }
+
     bool isFx1Slide = (fx1_id == Sequencer::strFxConsts::FX_TYPE_SLIDE_UP) ||
                       (fx1_id == Sequencer::strFxConsts::FX_TYPE_SLIDE_DOWN);
     bool isFx2Slide = (fx2_id == Sequencer::strFxConsts::FX_TYPE_SLIDE_UP) ||

@@ -129,7 +129,7 @@ Pad grid of the layer: 4 rows = 4 tracks of the group; pads 1-8 of a row = 8 pos
 |---|---|
 | Layer open, transport running, no pad pressed | Tracks play exactly as in the pattern editor (a track the layer never touched is stock). The playhead LED of every row follows the track (bright), the rest of the row is dim. |
 | Press position pad 5 on the loop-sample row | At the next step the loop sample jumps to the middle of the sample and keeps playing from there (not from its start, not silent). Then it carries on forward and wraps with the pattern. |
-| Press pads 1, 3, 5, 7 one after the other | The sample is cut to the matching positions each time. Note: the offset is rounded to 1% of the sample (Position FX resolution), so a jump can be up to ~0.5% of the sample early/late. |
+| Press pads 1, 3, 5, 7 one after the other | The sample is cut to the matching positions each time. |
 | Press a pad on the drum row | The drum pattern jumps to that position; a drum hit on the target step plays, otherwise the drum track sounds like the stock pattern would at that point (the last note before the position is retriggered with the offset, so a long kick tail is cut in). |
 | Jump on the MIDI row to a step without a note | The last MIDI note before that position is played again (no offset). Jump to a position after a note-off: silence. |
 | Hold two pads of a row (e.g. 2 and 4) | A loop over positions 2..4 starts at the next step; the pads between are lit as loop. Release one pad: the loop ends and the row runs on from where it is. |
@@ -142,12 +142,15 @@ Pad grid of the layer: 4 rows = 4 tracks of the group; pads 1-8 of a row = 8 pos
 | With a recorded loop running: switch the group (rows show other tracks), switch layers / pages | The recorded loop keeps playing. Switch back: LEDs show it. |
 | Press a pad on a row with a recorded loop | The pad overrides the recording while it is held (jump, loop); on release the row returns to the recorded loop in phase. |
 | Stop and start the transport | Cut rows with a recorded loop restart the loop with the pattern; rows with only a jump/loop/reverse/rate keep that setting and restart at step 1. |
-| Change the pattern while a row is cut | Known limit: the row keeps its own playhead; use RESYNC after a pattern change. |
+| Song mode / pattern chain with a cut row | The song advances at the real pattern end (not at the cut position); the cut row keeps its own position inside the new pattern (clamped to its length). Check: the next pattern loads and the song does not hang or skip. |
+| Rate 1/2 on a row with a micromove (delayed) note | The delayed note still fires; the row never goes silent for good. |
+| STOP a row, then START | The row is silent while stopped, restarts on the global position; a note you hold while live recording is not cut off. |
+| Open another project / New project while rows are cut | All rows are stock again. |
 | Track with a Slice / Beat-slice / Granular / Wavetable instrument | Jumps retrigger the note but without an offset (Position FX means something else there). |
 | Long sample streamed from the SD card (>= 256 KB, original Tracker) | Jumping past the first ~0.7 s may start late or with a short gap (the stream buffer refills on the main loop). Note how long the gap is and whether the main-loop redraws make it worse (listen on the loop track while a screen redraws). |
-| Pad jumps + an FX-heavy step (note step with 2 FX in use) | The Position FX replaces the second FX slot of the retriggered note (known limit). |
+| Pad jumps + an FX-heavy step (note step with 2 FX in use) | The retriggered note loses its second FX unless that is Slice / Reverse / Granular length (then it is replayed without offset). |
 | Save the project, reload | CUT state is NOT saved (v0.1): all rows are stock after loading. Recorded playhead loops are lost with the power-off. |
 
-Known limits of the CUT layer v0.1: the offset assumes the sample plays at its original speed; the offset resolution is 1% of the sample;
+Known limits of the CUT layer v0.1: the offset assumes the sample plays at its original speed; the offset has full 16-bit resolution and follows the note pitch / tune;
 reverse reverses the playhead order only (samples still play forward); a pattern switch (song mode / pattern chain) does not reset a cut row;
 selection looping and Performance-mode track lengths are ignored by cut rows; swing is ignored for the rate-2 half step.

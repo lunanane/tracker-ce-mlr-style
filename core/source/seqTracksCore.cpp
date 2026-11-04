@@ -16,7 +16,7 @@ enum
 
 Engine::Engine()
   : host_(0), head_(0), tail_(0), takenMask_(0), activeCount_(0), playing_(false), barPulse_(0), idleCount_(0), usAcc_(0),
-    rHead_(0), rTail_(0), recState_(seqrec::Planner::IDLE), recTrack_(0), recHints_(0), recEnds_(0), loading_(false), cut_(0), cutRestart_(false)
+    rHead_(0), rTail_(0), recState_(seqrec::Planner::IDLE), recTrack_(0), recHints_(0), recEnds_(0), loading_(false), cut_(0), cutRestart_(false), cutRestartPos_(0)
 {
     memset(ring_, 0, sizeof(ring_));
     memset(recRing_, 0, sizeof(recRing_));
@@ -136,8 +136,8 @@ void Engine::drain()
         }
         else if (c.kind == CMD_CUT)
         {
-            if (cut_)
-                cut_->apply(c.track, c.a);
+            if (seqcut::Cut* cu = cut())
+                cu->apply(c.track, c.a);
         }
     }
 }
@@ -369,8 +369,8 @@ void Engine::stepClock(uint16_t trackUStep)
     if (cutRestart_)
     {
         cutRestart_ = false;
-        if (cut_)
-            cut_->transportStart();
+        if (seqcut::Cut* c = cut())
+            c->transportStart(cutRestartPos_);
     }
     drain();
     if (activeCount_ == 0)
@@ -592,6 +592,8 @@ void Engine::resetState()
     activeCount_ = 0;
     takenMask_ = 0;
     recomputeContext();
+    if (cut())
+        postCut(0, seqcut::packArg(seqcut::SUB_RESET, true, 0)); // project load / new: every cut row back to stock
     loading_ = false;
 }
 

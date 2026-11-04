@@ -116,3 +116,20 @@ A clip = one track's part in one pattern; a scene = a whole pattern.
   LEDs are 4-byte snapshots read by the main loop. Playheads (5.8 KB) live in `.noinit.$EXTERNAL_RAM`, constructed by `seqCutInit()`.
 - Saving: **not in v0.1.** `seqtracks.bin` (version 1, fixed `kSidecarMax` read buffer) is left alone; a separate optional `seqcut.bin`
   (`Playhead::serialize`, 296 B x 16) can follow in v0.2.
+
+### CUT layer review fixes (c2-mlr, 2026-11-04)
+- Order inside a tick: `inc_uStepGlobal()` runs before the track loop, so at a step boundary `globalPos` is already the step that plays
+  next. RESYNC therefore aligns to `globalPos` (not +1), and the cut overrides are applied in one pass **after** the step switch of all
+  tracks (`seqCutApply`), so a song / pattern switch at the end of the pattern is already done.
+- Each cut track keeps a **shadow stock position** (`Cut::stock`): `inc_uStep` restores it into `actual_pos` before `switchRowStep` and saves
+  it afterwards, so wraps, `endOfPattern`, `passCount`, performance track switches and the row-0 duties (pattern preload, sequential
+  switch, metronome) follow the real pattern and not the cut position.
+- Rate 1/2: the held half does not start a step but the rest of `play_microStep` (micromove, roll, arp) keeps running. STOP drops
+  micromove / roll / arp and silences the note unless the user holds it while live-recording (`recOpen`).
+- Retrigger start: instrument start point + elapsed time x pitch ratio (note, tune, fine tune), wrapped into the loop for loop play modes,
+  handed to the audio engine at full 16-bit resolution through the Position FX path (`playerEngine::pendingSeqStart`), so a RANDOM_VALUE
+  FX cannot randomise it; slice, granular, reverse and wavetable instruments / steps are not touched.
+- MIDI / synth tracks: a gap is not retriggered when the previous note has a gate FX, reversed running is not a jump at every step.
+- Project load / new project posts SUB_RESET (all cut rows back to stock). CUT is still not saved.
+- **For the C1 merge:** a clip launch must call the track's `Playhead::restart()` (through a new `Cut` command; the playhead would otherwise
+  keep running the old pattern position), and **C1-STOP wins over CUT-STOP**: the track is silent and its playhead frozen until a clip is launched.

@@ -281,6 +281,7 @@ class playerEngine
                    uint8_t fx2_id,
                    uint8_t fx2_val); // tylko ten note on do nut w sequencerze
     void noteOff(int8_t option = -4);
+    int32_t pendingSeqStart = -1; // sequencer tracks mod: start point (0..65535) for the next sequencer noteOn, -1 = none
     void setStepVelocity(int8_t velocity);
     void clean();
 

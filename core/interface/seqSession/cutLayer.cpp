@@ -24,9 +24,36 @@ void init()
     seqCutInit();
 }
 
+// Releases (pad up, Rec up) that do not fit into the command queue are kept and retried: a lost release would leave a
+// loop or a take open for ever. Presses and the one-shot controls may be dropped.
+struct Pending
+{
+    uint8_t track, arg;
+};
+Pending s_pending[2 * kCutTracks + 8];
+uint8_t s_nPending = 0;
+
+void flushPending()
+{
+    uint8_t keep = 0;
+    for (uint8_t i = 0; i < s_nPending; i++)
+        if (!seqEngine.postCut(s_pending[i].track, s_pending[i].arg))
+            s_pending[keep++] = s_pending[i];
+    s_nPending = keep;
+}
+
 void post(uint8_t track, uint8_t sub, bool down, uint8_t col)
 {
-    seqEngine.postCut(track, packArg(sub, down, col));
+    flushPending();
+    uint8_t arg = packArg(sub, down, col);
+    if (s_nPending == 0 && seqEngine.postCut(track, arg))
+        return;
+    if (!down && (sub == SUB_PAD || sub == SUB_REC) && s_nPending < sizeof(s_pending) / sizeof(s_pending[0]))
+    {
+        s_pending[s_nPending].track = track; // keep the order: later commands wait behind it
+        s_pending[s_nPending].arg = arg;
+        s_nPending++;
+    }
 }
 } // namespace
 
@@ -98,6 +125,7 @@ void cutRec(bool down)
 void cutLeds(uint8_t* out48)
 {
     init();
+    flushPending(); // called on every redraw: also retries lost releases
     View views[kRows];
     Cut* c = seqEngine.cut();
     for (uint8_t r = 0; r < kRows; r++)

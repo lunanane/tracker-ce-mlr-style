@@ -11,7 +11,7 @@ enum { kCutTracks = 16, kRows = 4, kCols = 12, kCutPads = 48, kPosCols = 8 };
 enum PadCol : uint8_t { COL_STOP = 8, COL_REVERSE = 9, COL_RATE = 10, COL_RESYNC = 11 };
 
 // Commands main loop -> audio (Engine ring buffer, CMD_CUT). Packed in the ring's "a" byte: sub | down << 3 | col << 4.
-enum Sub : uint8_t { SUB_PAD = 0, SUB_REC = 1, SUB_STOP = 2, SUB_REVERSE = 3, SUB_RATE = 4, SUB_RESYNC = 5, SUB_COUNT = 6 };
+enum Sub : uint8_t { SUB_PAD = 0, SUB_REC = 1, SUB_STOP = 2, SUB_REVERSE = 3, SUB_RATE = 4, SUB_RESYNC = 5, SUB_RESET = 6, SUB_COUNT = 7 };
 inline uint8_t packArg(uint8_t sub, bool down, uint8_t col) { return (uint8_t)((sub & 7) | (down ? 8 : 0) | ((col & 15) << 4)); }
 inline uint8_t argSub(uint8_t a) { return (uint8_t)(a & 7); }
 inline bool argDown(uint8_t a) { return (a & 8) != 0; }
@@ -31,6 +31,39 @@ inline uint8_t columnOf(int pos, int length, int columns)
     while (c > 0 && (c * length) / columns > pos) c--;
     while (c < columns - 1 && ((c + 1) * length) / columns <= pos) c++;
     return (uint8_t)c;
+}
+
+// Start point (0..65535 of the whole sample, the unit of Instrument::startPoint) for a retrigger `elapsedSteps` pattern steps
+// after its note: the instrument's own start + elapsed time x pitch ratio, wrapped into the loop for loop play modes.
+//   startPoint16: instrument start (0..65535); sampleFrames at sampleRate; speed1000 = playback speed x 1000 (1000 = original)
+//   loop1/loop2: loop points (0..65535) when the play mode loops (loopOn), endPoint16: end point (0..65535)
+// Returns false when the position lies behind the end of a one-shot sample (nothing to play).
+inline bool startPoint16(uint32_t elapsedSteps, float stepMs, uint32_t sampleFrames, uint32_t sampleRate, uint32_t speed1000,
+                         uint16_t startPoint16, bool loopOn, uint16_t loop1, uint16_t loop2, uint16_t endPoint16, uint16_t& out)
+{
+    out = startPoint16;
+    if (sampleFrames == 0 || sampleRate == 0) return true;
+    const float f = 65535.0f;
+    float start = (float)startPoint16 * (float)sampleFrames / f;
+    float elapsed = (float)elapsedSteps * stepMs * 0.001f * (float)sampleRate * (float)speed1000 * 0.001f;
+    float pos = start + elapsed;
+    float end = (float)endPoint16 * (float)sampleFrames / f;
+    if (loopOn && loop2 > loop1)
+    {
+        float l1 = (float)loop1 * (float)sampleFrames / f, l2 = (float)loop2 * (float)sampleFrames / f;
+        if (pos >= l2)
+        {
+            float span = l2 - l1;
+            float k = (pos - l1) / span;
+            pos = l1 + (k - (float)(uint32_t)k) * span;
+        }
+    }
+    else if (pos >= end)
+        return false;
+    if (pos < 0.0f) pos = 0.0f;
+    float v = pos * f / (float)sampleFrames;
+    out = (uint16_t)(v >= f ? 65535.0f : v);
+    return true;
 }
 
 // Position FX value (0..100, the whole sample) for a retrigger `elapsedSteps` pattern steps after its note.

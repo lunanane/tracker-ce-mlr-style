@@ -12,7 +12,8 @@ struct FakePattern
     int steps;
     int pos; // actual_pos of the track
     int stops;
-    FakePattern() : steps(16), pos(0), stops(0) { memset(map, 0, sizeof(map)); }
+    bool sample;
+    FakePattern() : steps(16), pos(0), stops(0), sample(true) { memset(map, 0, sizeof(map)); }
 };
 void fpNoteMap(void* u, uint8_t, uint8_t steps, uint8_t* out)
 {
@@ -23,22 +24,25 @@ void fpNoteMap(void* u, uint8_t, uint8_t steps, uint8_t* out)
 int fpPos(void* u, uint8_t) { return ((FakePattern*)u)->pos; }
 int fpSteps(void* u, uint8_t) { return ((FakePattern*)u)->steps; }
 void fpStop(void* u, uint8_t) { ((FakePattern*)u)->stops++; }
+bool fpSample(void* u, uint8_t) { return ((FakePattern*)u)->sample; }
 
 void install(seqcut::Cut& c, FakePattern& f)
 {
-    seqcut::Hooks h = { &f, fpNoteMap, fpPos, fpSteps, fpStop };
+    seqcut::Hooks h = { &f, fpNoteMap, fpPos, fpSteps, fpStop, fpSample };
     c.setHooks(h);
 }
 
-// One step boundary of track 0 like Sequencer::inc_uStep does it: stock advance, then the hook.
-// `global` is the global step being left (globalPos in the firmware at that moment).
+// One step boundary of track 0 in the firmware's order: tick_uStep runs inc_uStepGlobal() BEFORE the track loop, so at the
+// boundary globalPos is already the step that plays next; the stock advance comes first, then the cut override.
+// `global` = globalPos (the step playing now before the call, the step that plays next after it).
 seqcut::StepPlan stepOnce(seqcut::Cut& c, FakePattern& f, int& global)
 {
     f.pos = (f.pos + 1) % f.steps;
+    global = (global + 1) % f.steps;
+    c.setStock(0, f.pos);
     seqcut::StepPlan p = c.boundary(0, f.steps, global);
     if (p.override)
         f.pos = p.pos;
-    global = (global + 1) % f.steps;
     return p;
 }
 } // namespace
@@ -244,13 +248,13 @@ static void test_cut_stop_resync_transport()
     for (int i = 0; i < 5; i++)
         stepOnce(c, f, g);
     c.apply(0, packArg(SUB_STOP, true, 0));
-    CHECK(c.holding(0) && f.stops == 1 && (c.view(0).flags & VF_STOPPED));
+    CHECK(c.stopped(0) && !c.holding(0) && f.stops == 1 && (c.view(0).flags & VF_STOPPED));
     StepPlan p = stepOnce(c, f, g);
-    CHECK(!p.override && p.hold && c.holding(0));
+    CHECK(!p.override && p.hold && c.stopped(0));
     // START: back on the global grid, then (nothing special left) the stock sequencer again
     c.apply(0, packArg(SUB_STOP, true, 0));
     p = stepOnce(c, f, g);
-    CHECK(p.override && !p.hold && !c.holding(0));
+    CHECK(p.override && !p.hold && !c.stopped(0));
     CHECK(c.activeMask() == 0); // plain again: stock
     // a jumped track is off the grid; resync brings it back and counts as a jump (retrigger as if at global)
     c.apply(0, packArg(SUB_PAD, true, 6)); // step 12
@@ -278,6 +282,79 @@ static void test_cut_stop_resync_transport()
     CHECK(p.override && p.pos == 9); // recorded steps were 8 9 10, restarted at index 1
 }
 
+static void test_cut_review_fixes()
+{
+    using namespace seqcut;
+    // startPoint16: 2 s loop (88200 frames), 125 ms steps, original speed
+    uint16_t sp = 0;
+    CHECK(startPoint16(8, 125.0f, 88200, 44100, 1000, 0, false, 0, 65535, 65535, sp) && sp >= 32760 && sp <= 32780); // 50%
+    CHECK(startPoint16(4, 125.0f, 88200, 44100, 2000, 0, false, 0, 65535, 65535, sp) && sp >= 32760 && sp <= 32780); // twice as fast
+    CHECK(startPoint16(2, 125.0f, 88200, 44100, 1000, 16384, false, 0, 65535, 65535, sp) && sp > 16384 + 8000);      // starts at the start point
+    CHECK(!startPoint16(20, 125.0f, 88200, 44100, 1000, 0, false, 0, 65535, 65535, sp));                              // behind a one-shot
+    CHECK(startPoint16(20, 125.0f, 88200, 44100, 1000, 0, true, 0, 32768, 65535, sp) && sp < 32768);                 // wrapped into the loop
+    // a stock position of its own: the real stock sequencer position does not follow the override
+    {
+        Cut c;
+        FakePattern f;
+        f.map[0] = 1;
+        install(c, f);
+        int g = 0;
+        stepOnce(c, f, g);
+        c.apply(0, packArg(SUB_PAD, true, 6)); // step 12
+        c.setStock(0, 1);
+        StepPlan p = stepOnce(c, f, g);
+        CHECK(p.pos == 12 && c.stock(0) == 2);
+        p = stepOnce(c, f, g); // stepOnce stores f.pos (the cut position + 1) as stock, as a real sequencer would not
+        CHECK(p.pos == 13);
+    }
+    // MIDI / synth tracks: reversed running is no jump at every step
+    {
+        Cut c;
+        FakePattern f;
+        f.sample = false;
+        f.map[0] = 1;
+        install(c, f);
+        int g = 0;
+        c.apply(0, packArg(SUB_PAD, true, 7)); // step 14
+        StepPlan p = stepOnce(c, f, g);
+        CHECK(p.pos == 14 && p.retrigger);
+        c.apply(0, packArg(SUB_PAD, false, 7));
+        c.apply(0, packArg(SUB_REVERSE, true, 0));
+        for (int i = 0; i < 4; i++)
+        {
+            p = stepOnce(c, f, g);
+            CHECK(!p.retrigger);
+        }
+    }
+    // second half-step is clamped to a shorter pattern
+    {
+        Cut c;
+        FakePattern f;
+        f.map[0] = 1;
+        install(c, f);
+        int g = 0;
+        c.apply(0, packArg(SUB_PAD, true, 7));
+        c.apply(0, packArg(SUB_RATE, true, 0));
+        stepOnce(c, f, g); // pos 14, pos2 15
+        StepPlan m;
+        CHECK(c.mid(0, 8, m) && m.pos < 8);
+    }
+    // transport start from a position, stop does not count as hold, reset all
+    {
+        Cut c;
+        FakePattern f;
+        f.map[0] = 1;
+        install(c, f);
+        c.apply(0, packArg(SUB_PAD, true, 2));
+        c.apply(1, packArg(SUB_STOP, true, 0));
+        CHECK(c.activeMask() == 3 && c.stopped(1) && !c.holding(1));
+        c.transportStart(5);
+        CHECK(c.stock(0) == 5);
+        c.apply(0, packArg(SUB_RESET, true, 0));
+        CHECK(c.activeMask() == 0 && !c.stopped(1) && !c.holding(0));
+    }
+}
+
 static void test_cut_engine_ring()
 {
     MockHost h;
@@ -301,6 +378,10 @@ static void test_cut_engine_ring()
     CHECK(e->active());
     playUSteps(*e, 1, u);
     CHECK(c.activeMask() == 1);
+    // project load: every cut row goes back to stock
+    e->resetState();
+    e->idleTick();
+    CHECK(c.activeMask() == 0 && !e->active());
     // without a Cut nothing breaks
     Engine* e2 = mk(h);
     CHECK(e2->postCut(0, seqcut::packArg(seqcut::SUB_PAD, true, 3)));
@@ -368,6 +449,21 @@ static void test_cut_layer()
     cutRec(false);
     seqEngine.idleTick();
     CHECK(!(c->view(0).flags & VF_REC) && (c->view(0).flags & VF_RECORDED));
+    // a release that does not fit into the queue is kept and retried
+    cutSetGroup(0);
+    cutReleaseAll();
+    seqEngine.idleTick();
+    cutPad(2, 0, true);
+    seqEngine.idleTick();
+    CHECK(c->playhead(0).heldCount() == 1);
+    for (int i = 0; i < 70; i++)
+        seqEngine.postCut(9, seqcut::packArg(seqcut::SUB_RESYNC, true, 0)); // fills the queue (inactive track: ignored)
+    cutPad(2, 0, false);
+    seqEngine.idleTick();
+    seqEngine.idleTick();
+    cutLeds(leds); // retries the lost release
+    seqEngine.idleTick();
+    CHECK(c->playhead(0).heldCount() == 0);
     // out of range pads are ignored
     cutPad(12, 0, true);
     cutPad(0, 4, true);

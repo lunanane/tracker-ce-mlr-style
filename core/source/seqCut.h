@@ -16,7 +16,8 @@ struct Hooks
     void (*noteMap)(void* user, uint8_t track, uint8_t steps, uint8_t* hasNote);
     int (*trackPos)(void* user, uint8_t track);   // current pattern position (actual_pos) of the track
     int (*trackSteps)(void* user, uint8_t track); // number of steps of the pattern (length + 1)
-    void (*stopNote)(void* user, uint8_t track);  // silence the sounding note of the track
+    void (*stopNote)(void* user, uint8_t track);  // silence the sounding note of the track (and drop its pending micromove / roll / arp)
+    bool (*sampleTrack)(void* user, uint8_t track); // optional: false = MIDI / synth track (default: sample track)
 };
 
 // Result of a step boundary (or the middle of a step at rate 2).
@@ -38,11 +39,16 @@ class Cut
 
     // ---- audio context ----
     void apply(uint8_t track, uint8_t arg);                       // arg = packArg(...)
-    StepPlan boundary(uint8_t track, int steps, int globalPos);   // after the stock step switch; steps = pattern length
+    // After the stock step switch of ALL tracks; globalPos = the global step that plays next (the global clock has already advanced).
+    StepPlan boundary(uint8_t track, int steps, int globalPos);
     bool mid(uint8_t track, int steps, StepPlan& out);            // µstep 25 of a rate-2 step: start the second half-step
     bool consumeRetrigger(uint8_t track, StepPlan& out);          // play_microStep, uStep == 1: pending retrigger
-    bool holding(uint8_t track) const { return track < kCutTracks && (((holdMask_ >> track) & 1u) != 0); }
-    void transportStart();                                        // Play pressed: playheads continue from step 1
+    bool holding(uint8_t track) const { return track < kCutTracks && (((holdMask_ >> track) & 1u) != 0); } // second half of a rate-1/2 position
+    bool stopped(uint8_t track) const { return track < kCutTracks && (((stopMask_ >> track) & 1u) != 0); } // STOP: nothing plays
+    void transportStart(int fromPos = 0);                         // Play pressed: playheads continue from step fromPos + 1
+    // The stock sequencer's own position of a cut track (what actual_pos would be without the override), kept by the glue.
+    int stock(uint8_t track) const { return track < kCutTracks ? stock_[track] : 0; }
+    void setStock(uint8_t track, int pos) { if (track < kCutTracks) stock_[track] = (int16_t)pos; }
     uint16_t activeMask() const { return activeMask_; }
 
     // ---- main loop ----
@@ -62,6 +68,7 @@ class Cut
     void planJump(uint8_t t, int steps, uint8_t pos, StepPlan& p);
     void publish(uint8_t t);
     void setHold(uint8_t t, bool h);
+    void setStopped(uint8_t t, bool s);
 
     seqgen::Playhead ph_[kCutTracks];
     Rt rt_[kCutTracks];
@@ -69,6 +76,8 @@ class Cut
     Hooks hooks_;
     volatile uint16_t activeMask_;
     volatile uint16_t holdMask_;
+    volatile uint16_t stopMask_;
+    int16_t stock_[kCutTracks];
     View views_[kCutTracks];
 };
 
