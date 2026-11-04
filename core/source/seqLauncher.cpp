@@ -1,5 +1,6 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 #include "seqLauncher.h"
+#include "seqTracks.h"
 #include "mtSequencer.h"
 #include "mtStructs.h"
 #include "fileManager.h"
@@ -202,6 +203,9 @@ void Sequencer::seqSessionApplyClip(uint8_t track, bool restart)
         player.track[track].actual_pos = (int16_t)(MINSTEP + ph);
         player.track[track].actual_pos_absolute = ph;
     }
+    // CUT layer: a cut track's playhead follows the clip (restart at the position the clip enters, stock position too)
+    if (seqcut::Cut* c = seqEngine.cut())
+        c->launched(track, seqCutSteps(track), player.track[track].actual_pos);
 }
 
 void Sequencer::seqSessionApplyStop(uint8_t track)

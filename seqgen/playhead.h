@@ -46,6 +46,10 @@ class Playhead {
   void recDown();         // start a take: records what is played on each following step()
   void recUp();           // close the take: recorded steps become a loop (a take with 0 steps clears the loop)
   void resync(uint32_t globalStep = 0);  // align to the global step counter; clears loop, queue, recording
+  // Continue as if step `nextStep` (global step counter) comes next: the next step() lands on nextStep % length without a
+  // jump flag. Keeps held pads, queued gestures, the take in progress and the recorded loop (which restarts at its
+  // index nextStep % recordedLength). For taking over a running track and for transport (re)start.
+  void restart(uint32_t nextStep);
 
   // ---- clock: call once per sequencer step boundary ----
   StepOut step();

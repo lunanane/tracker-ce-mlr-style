@@ -774,6 +774,21 @@ class Sequencer
     void seqTrackPos(uint8_t track, uint8_t& pos, uint8_t& uStep, uint8_t& last);
     bool seqRecMicrotiming() { return recMicrotiming() != 0; }
     bool seqRecVelocity() { return recVelocity() != 0; }
+    // CUT (MLR) layer glue (seqTracks.cpp)
+    void seqCutPreSwitch(uint8_t row);  // inc_uStep, before switchRowStep: restore the stock position of a cut track
+    void seqCutPostSwitch(uint8_t row); // inc_uStep, after switchRowStep: remember the stock position
+    void seqCutApply();                 // after the step switch of all tracks: the playheads decide the next positions
+    void seqCutMicroStep(int row);      // play_microStep, plus the second half-step of a rate-2 track
+    void seqCutRetrigger(uint8_t row, strPlayer::strPlayerTrack::strSendStep& step); // play_microStep, uStep == 1
+    int16_t seqCutStockPos(uint8_t row);
+    uint8_t seqCutLimit(uint8_t pos, int steps);
+    int seqCutSteps(uint8_t row);
+    int seqCutPos(uint8_t row) { return player.track[row].actual_pos; }
+    void seqCutNoteMap(uint8_t row, uint8_t steps, uint8_t* hasNote);
+    void seqCutStopNote(uint8_t row);
+    uint32_t seqCutStart[kAllTracks]; // start point + 1 for the next sample note of the track (0 = none), set by seqCutRetrigger
+    uint16_t seqCutPending;           // cut tracks that had a step boundary in this tick
+    bool seqCutMid;                   // play_microStep runs the second half-step of a rate-2 track
     void seqWriteStep(uint8_t track, uint8_t step, uint8_t kind, uint8_t note, uint8_t instrument, uint8_t chord, int8_t volume, int8_t micromove);
     // session clip launcher (seqLauncher.cpp)
     void seqSessionStep(uint8_t row);

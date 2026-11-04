@@ -21,6 +21,9 @@ inline void seqNoteOtherInput()
 bool seqPadPress(uint8_t track, uint8_t pad);   // false: dropped (queue full); a press may be lost
 void seqPadRelease(uint8_t track, uint8_t pad); // never lost: kept and retried from seqTracksUpdate until accepted
 
+// ---- CUT (MLR) layer (main loop) ----
+void seqCutInit(); // constructs the 16 playheads in external RAM (idempotent; also done when the workspace is loaded)
+
 // ---- record (main loop; Play mode screen calls these) ----
 bool seqRecStart(bool oneLoop, uint8_t track); // false: track is Off or already recording. Starts the transport if stopped.
 void seqRecStop();

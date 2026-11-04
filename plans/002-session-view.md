@@ -130,7 +130,7 @@ A clip = one track's part in one pattern; a scene = a whole pattern.
 - LEDs (PWM = level * 2): playing 15, queued blinks 15/0 (a pending stop blinks the playing clip), has notes 3, empty 0; the "has
   notes" cache of the window is read one row per main-loop pass (Workspace files; the loaded pattern from RAM).
 
-### Hook order (for the CUT merge)
+### Hook order (as merged)
 `inc_uStep(row)`: `switchRowStep(row)` -> `seqSessionStep(row)` (clip launch / stop at the quantise point) -> (CUT) `seqCutBoundary`.
 A clip launch must call the track's Playhead `restart()`. Session STOP wins over CUT: the track is silent (`play_microStep` returns) and
 the playhead is frozen while stopped.
@@ -152,7 +152,54 @@ struct SessionLayer {
   void info(char lines[4][48]);                   // four text lines under the title
 };
 ```
-The module owns the screen buttons (groups, 7 = CLIPS, 8 = CUT) and the Play button; every pad, the jog wheel and Rec go to the layer. Plug in with `seqSession.setCutLayer(&myLayer)` (default
-`CutStubLayer`: "CUT - coming"). A layer runs on the main loop only; the audio side is reached through the existing `seqEngine`
+The module owns the screen buttons (groups, 7 = CLIPS, 8 = CUT) and the Play button; every pad, the jog wheel and Rec go to the layer. Plug in with `seqSession.setCutLayer(&myLayer)` (the CUT adapter is the default since the integration). A layer runs on the main loop only; the audio side is reached through the existing `seqEngine`
 post calls or a new ring like `seqsession::Launcher`.
 
+## S2 CUT layer as built (c2-mlr, 2026-11-04, provisional where marked)
+- Code: `core/source/seqCut.*` (16 Playheads + per-track runtime, no Polyend includes), `seqCutLogic.h` (pure helpers: command packing,
+  group/column mapping, Position FX value, LED fill), `core/interface/seqSession/cutLayer.*` (pad layer: `cutPad`, `cutLeds`,
+  `cutSetGroup`, `cutRec`, `cutReleaseAll`), glue in `seqTracks.cpp` (`Sequencer::seqCut*`), hooks in `mtSequencer.cpp`. Tests: `core/seqtest`.
+- Hooks (mtSequencer.cpp): `inc_uStep` -> `seqCutBoundary(row)` after `switchRowStep` (Playhead decides `actual_pos`); tick loop ->
+  `seqCutMicroStep(row)` (rate 2: at uStep 25 the second half-step is played as a step of its own, uStep temporarily 1);
+  `play_microStep`: `holding(row)` early return (stopped track / second half of a rate-1/2 position, same place as the takeover
+  return), `seqCutRetrigger` after the step copy (replaces the step by the last note step before the position and adds the Position FX);
+  `play()` -> `cutPlayStarted()` (restart the playheads at step 1 on the first tick, recorded loops kept).
+- A track is "cut-active" from its first pad/Rec/STOP/REVERSE/RATE command; the playhead starts at the track's current position (no jump).
+  RESYNC (and START after STOP) aligns to the global position at the next step and, when nothing special is left (rate 1, forward,
+  no loop/recording), hands the track back to the stock sequencer.
+- Retrigger: sample tracks get `FX_TYPE_POSITION` = elapsed steps * step time / sample length (percent, 0..100), added to a Position FX the
+  note step already has; a free FX slot is used, else slot 2 is overwritten. Slice / beat-slice / granular / wavetable instruments and MIDI
+  tracks: the note is replayed without offset. Jump to a position behind a note-off or on a track without notes: the sounding note stops.
+- Threads: pads -> `Engine::postCut` -> ring (CMD_CUT) -> `Cut::apply` in `drain()`; every Playhead mutation is in audio context; views for the
+  LEDs are 4-byte snapshots read by the main loop. Playheads (5.8 KB) live in the OCRAM bss section (`OCRAM_BSS_SECTION`, like `mtProject`; Plus EXTERNAL_RAM has only ~5 KB left), constructed by `seqCutInit()`.
+- Saving: **not in v0.1.** `seqtracks.bin` (version 1, fixed `kSidecarMax` read buffer) is left alone; a separate optional `seqcut.bin`
+  (`Playhead::serialize`, 296 B x 16) can follow in v0.2.
+
+### CUT layer review fixes (c2-mlr, 2026-11-04)
+- Order inside a tick: `inc_uStepGlobal()` runs before the track loop, so at a step boundary `globalPos` is already the step that plays
+  next. RESYNC therefore aligns to `globalPos` (not +1), and the cut overrides are applied in one pass **after** the step switch of all
+  tracks (`seqCutApply`), so a song / pattern switch at the end of the pattern is already done.
+- Each cut track keeps a **shadow stock position** (`Cut::stock`): `inc_uStep` restores it into `actual_pos` before `switchRowStep` and saves
+  it afterwards, so wraps, `endOfPattern`, `passCount`, performance track switches and the row-0 duties (pattern preload, sequential
+  switch, metronome) follow the real pattern and not the cut position.
+- Rate 1/2: the held half does not start a step but the rest of `play_microStep` (micromove, roll, arp) keeps running. STOP drops
+  micromove / roll / arp and silences the note unless the user holds it while live-recording (`recOpen`).
+- Retrigger start: instrument start point + elapsed time x pitch ratio (note, tune, fine tune), wrapped into the loop for loop play modes,
+  handed to the audio engine at full 16-bit resolution through the Position FX path (`playerEngine::pendingSeqStart`), so a RANDOM_VALUE
+  FX cannot randomise it; slice, granular, reverse and wavetable instruments / steps are not touched.
+- MIDI / synth tracks: a gap is not retriggered when the previous note has a gate FX, reversed running is not a jump at every step.
+- Project load / new project posts SUB_RESET (all cut rows back to stock). CUT is still not saved.
+
+## Integration C1 + C2 (seq-tracks, 2026-11-04) - as built
+- `inc_uStep` order: `seqCutPreSwitch` -> `switchRowStep` -> `seqCutPostSwitch` -> `seqSessionStep` (clip launch / stop on the stock position),
+  and after the track loop `seqCutApply` (the playheads decide the next positions). `play_microStep`: return when taken over, **Session-stopped**
+  or CUT-stopped; the CUT rate-1/2 hold is not an early return.
+- Session STOP wins over CUT: `seqCutApply` / `seqCutMicroStep` pass `seqSessionStopped(row)` as `frozen` to `Cut::boundary` / `Cut::mid`: the playhead
+  does not advance, nothing triggers. A clip launch (`seqSessionApplyClip`) calls `Cut::launched(track, steps, pos)`: the playhead restarts at the
+  position the clip enters (`restart`), the shadow stock position follows, a CUT stop / queued retrigger / second half-step are dropped [decision: a
+  launch means "play this clip", so it also ends a CUT STOP].
+- `cutSessionLayer.h`: `seqsession::CutSessionLayer` adapts `cutPad / cutLeds / cutSetGroup / cutRec / cutReleaseAll`; `groupSize() = 4`, name "CUT",
+  `leave()` = `cutReleaseAll()`. It is the default `layers[1]` of `cSeqSession` (`setCutLayer` stays for replacing it); `CutStubLayer` is removed.
+  All 12 pad columns belong to the layer.
+- `seqActive()` (no CUT) is the "never used" predicate of the project save; `active()` (includes CUT) keeps the audio hooks running.
+- Memory: the Cut object moved from EXTERNAL_RAM to the OCRAM bss section (Plus EXTERNAL_RAM was over by 532 B with it).

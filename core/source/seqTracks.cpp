@@ -6,7 +6,12 @@
 #include "fileManagerDefs.h"
 #include "fileTransfer.h"
 #include "elapsedMillis.h"
+#include "config.h"
 #include <cr_section_macros.h>
+#include "seqCut.h"
+#include "seqLauncher.h"
+#include <math.h>
+#include <new>
 #include <stdio.h>
 
 extern Sequencer sequencer;
@@ -102,6 +107,202 @@ class SeqHost : public seqtracks::Host
 
 seqtracks::Engine seqEngine;
 static SeqHost s_host;
+
+// ---------------------------------------------------------------- CUT (MLR) layer glue
+// 16 playheads (5.8 KB): not in SRAM_DTC (Plus, 97 % full) and not in EXTERNAL_RAM (Plus, only ~5 KB left of 64 MB) but in the
+// OCRAM bss section like mtProject (Plus: SRAM_OC; MK66: ordinary RAM). Constructed when the workspace is loaded.
+OCRAM_BSS_SECTION static uint8_t s_cutMem[sizeof(seqcut::Cut)] __attribute__((aligned(8)));
+
+namespace
+{
+void cutNoteMap(void*, uint8_t track, uint8_t steps, uint8_t* hasNote) { sequencer.seqCutNoteMap(track, steps, hasNote); }
+int cutTrackPos(void*, uint8_t track) { return sequencer.seqCutPos(track); }
+int cutTrackSteps(void*, uint8_t track) { return sequencer.seqCutSteps(track); }
+void cutStopNote(void*, uint8_t track) { sequencer.seqCutStopNote(track); }
+bool cutSampleTrack(void*, uint8_t track) { return isSampleTrack(track); }
+} // namespace
+
+void seqCutInit()
+{
+    if (seqEngine.cut())
+        return;
+    seqcut::Cut* c = new (s_cutMem) seqcut::Cut();
+    seqcut::Hooks h = { 0, cutNoteMap, cutTrackPos, cutTrackSteps, cutStopNote, cutSampleTrack };
+    c->setHooks(h);
+    seqEngine.setCut(c); // published last (release)
+}
+
+// Steps the stock sequencer plays on this track (mirrors switchRowStep: last step index + 1).
+int Sequencer::seqCutSteps(uint8_t row)
+{
+    int len = currentPattern->track[0].length;
+    if (player.performanceMode && isPerformanceTrack(row))
+        len = player.performance.trackLength[row];
+    if (player.performance.patternLength > -1)
+        len = player.performance.patternLength;
+    int n = len + 1;
+    return n < 1 ? 1 : (n > (int)MAXSTEP + 1 ? (int)MAXSTEP + 1 : n);
+}
+
+// 1 = the step has a note, 2 = a note-off, 0 = nothing that sounds or ends a sound.
+void Sequencer::seqCutNoteMap(uint8_t row, uint8_t steps, uint8_t* hasNote)
+{
+    strPattern::strTrack& t = currentPattern->track[row];
+    for (uint8_t i = 0; i < steps && i <= MAXSTEP; i++)
+    {
+        int8_t n = t.step[i].note;
+        hasNote[i] = n >= 0 ? 1 : ((n == STEP_NOTE_OFF_FADE || n == STEP_NOTE_OFF_CUT || n == STEP_NOTE_OFF_DEFAULT) ? 2 : 0);
+    }
+}
+
+// Silence the track and drop what would still fire later (micromove, roll, arp). A note the user holds while live
+// recording (recOpen) is left alone: stopOpenNoteOnTrack would clear the recording state.
+void Sequencer::seqCutStopNote(uint8_t row)
+{
+    strPlayer::strPlayerTrack& p = player.track[row];
+    p.micromove.reset();
+    p.roll.reset();
+    p.arp.reset();
+    if (!p.recOpen)
+        stopOpenNoteOnTrack(row);
+}
+
+// The position the stock sequencer would have: row-0 duties (pattern preload, sequential switch, metronome) follow it.
+int16_t Sequencer::seqCutStockPos(uint8_t row)
+{
+    seqcut::Cut* c = seqEngine.cut();
+    if (c && row < seqlogic::kTracks && ((c->activeMask() >> row) & 1u))
+        return (int16_t)c->stock(row);
+    return player.track[row].actual_pos;
+}
+
+// inc_uStep, before switchRowStep: the stock sequencer advances its own position, not the cut one.
+void Sequencer::seqCutPreSwitch(uint8_t row)
+{
+    seqcut::Cut* c = seqEngine.cut();
+    if (!c || row >= seqlogic::kTracks || !((c->activeMask() >> row) & 1u))
+        return;
+    player.track[row].actual_pos = (int16_t)c->stock(row);
+    seqCutPending |= (uint16_t)(1u << row);
+}
+
+// inc_uStep, after switchRowStep: remember where the stock sequencer is now.
+void Sequencer::seqCutPostSwitch(uint8_t row)
+{
+    seqcut::Cut* c = seqEngine.cut();
+    if (c && ((seqCutPending >> row) & 1u))
+        c->setStock(row, player.track[row].actual_pos);
+}
+
+// A selection loop keeps the cut rows inside the selection.
+uint8_t Sequencer::seqCutLimit(uint8_t pos, int steps)
+{
+    if (pos >= steps)
+        pos = (uint8_t)(steps - 1);
+    if (player.selectionModeLooped)
+    {
+        int first = player.loopSelection.firstStep;
+        int last = player.loopSelection.lastStep < steps - 1 ? player.loopSelection.lastStep : steps - 1;
+        if (pos < first || pos > last)
+            pos = (uint8_t)(first <= last ? first : last);
+    }
+    return pos;
+}
+
+// After the step switch of ALL tracks (so a song / pattern switch at the end of the pattern is already done and
+// globalPos is the step that plays next): the playheads of the cut tracks decide the next positions.
+void Sequencer::seqCutApply()
+{
+    seqcut::Cut* c = seqEngine.cut();
+    uint16_t mask = seqCutPending;
+    seqCutPending = 0;
+    if (!c || !mask || !player.isPlay)
+        return;
+    for (uint8_t row = 0; row < seqlogic::kTracks; row++)
+    {
+        if (!((mask >> row) & 1u) || !((c->activeMask() >> row) & 1u))
+            continue;
+        int steps = seqCutSteps(row);
+        // Session STOP wins over CUT: a Session-stopped track is silent and its playhead frozen
+        seqcut::StepPlan p = c->boundary(row, steps, player.globalPos, seqSessionStopped(row));
+        if (p.override)
+            player.track[row].actual_pos = seqCutLimit(p.pos, steps);
+    }
+}
+
+// play_microStep, plus the second half-step of a track running at double rate (starts at uStep 25 as a step of its own).
+void Sequencer::seqCutMicroStep(int row)
+{
+    seqcut::Cut* c = seqEngine.cut();
+    strPlayer::strPlayerTrack& p = player.track[row];
+    seqcut::StepPlan plan;
+    if (c && row < seqlogic::kTracks && p.uStep == 25)
+    {
+        int steps = seqCutSteps((uint8_t)row);
+        if (c->mid((uint8_t)row, steps, plan, seqSessionStopped(row)))
+        {
+            uint8_t saved = p.uStep;
+            p.actual_pos = seqCutLimit(plan.pos, steps);
+            p.uStep = 1;
+            seqCutMid = true; // the row-0 duties of a step start (pattern preload, metronome) already ran at uStep 1
+            play_microStep(row);
+            seqCutMid = false;
+            p.uStep = saved;
+            return;
+        }
+    }
+    play_microStep(row);
+}
+
+// The track jumped to a position without a note: play the last note before it, that many steps late.
+void Sequencer::seqCutRetrigger(uint8_t row, strPlayer::strPlayerTrack::strSendStep& step)
+{
+    seqCutStart[row] = 0;
+    seqcut::Cut* c = seqEngine.cut();
+    seqcut::StepPlan plan;
+    if (!c || row >= seqlogic::kTracks || !c->consumeRetrigger(row, plan) || plan.noteStep > MAXSTEP)
+        return;
+    strPattern::strTrack::strStep& src = currentPattern->track[row].step[plan.noteStep];
+    const bool sample = isSampleTrack(row) && isSampleInstrument(src.instrument);
+    // MIDI / synth: a note is struck again only while it sustains; a gated note has ended in the gap by now
+    if (!sample && (src.fx[0].type == fx.FX_TYPE_GATE_LENGTH || src.fx[1].type == fx.FX_TYPE_GATE_LENGTH))
+        return;
+    memcpy((uint8_t*)&step, (uint8_t*)&src, sizeof(strPattern::strTrack::strStep));
+    step.micromove = -1; // the retrigger is not delayed
+    if (!sample || step.note < 0)
+        return;
+    const auto& instr = mtProject.instrument[step.instrument];
+    if (instr.playMode == playModeSlice || instr.playMode == playModeBeatSlice || instr.playMode == playModeGranular ||
+        instr.playMode == playModeWavetable)
+        return; // Position FX means something else in these modes: replay without offset
+
+    // The start point goes in through the Position FX path of the engine (full 16 bit) in a free FX slot; a busy slot is
+    // only given up when its FX is not one that changes how the sample plays.
+    int posSlot = -1, freeSlot = -1;
+    for (int i = 0; i < 2; i++)
+    {
+        if (step.fx[i].type == fx.FX_TYPE_POSITION)
+            posSlot = i;
+        else if (step.fx[i].type == fx.FX_TYPE_NONE && freeSlot < 0)
+            freeSlot = i;
+    }
+    if (posSlot < 0 && freeSlot < 0)
+    {
+        uint8_t t = step.fx[1].type;
+        if (t == fx.FX_TYPE_SAMPLE_SLICE || t == fx.FX_TYPE_REVERSE_PLAYBACK || t == fx.FX_TYPE_GRANULAR_LENGTH)
+            return;
+    }
+    uint16_t base = instr.startPoint;
+    if (posSlot >= 0)
+        base = (uint16_t)mapClamped<int>(step.fx[posSlot].value, getFxMin(fx.FX_TYPE_POSITION), getFxMax(fx.FX_TYPE_POSITION), 0, MAX_16BIT);
+    float semis = (float)(step.note - 60) + (float)instr.tune + (float)instr.fineTune / 100.0f;
+    uint32_t speed1000 = (uint32_t)(powf(2.0f, semis / 12.0f) * 1000.0f + 0.5f);
+    uint16_t start;
+    if (!seqcut::startPoint16(plan.elapsed, getStepPeriodMs(), instr.sample.length, 44100, speed1000, base,
+                              instr.playMode != playModeSingleShot, instr.loopPoint1, instr.loopPoint2, instr.endPoint, start))
+        return; // behind the end of a one-shot sample: the retrigger would be silent anyway, play it from the start
+    seqCutStart[row] = (uint32_t)start + 1;
+}
 
 // ---------------------------------------------------------------- Sequencer members used by the glue
 uint8_t Sequencer::seqPickInstrument(uint8_t track)
@@ -380,6 +581,7 @@ void seqTracksUpdate()
 // ---------------------------------------------------------------- sidecar files
 void seqTracksLoadWorkspace()
 {
+    seqCutInit();
     ReadResult r = readSidecar(kWorkspaceSidecar);
     s_hadSidecar = r == READ_VALID;
     s_loadedValid = r != READ_MISSING; // the file came from the project being opened
@@ -402,7 +604,7 @@ void seqTracksSaveProject(const char* path, const char* name)
     char file[PATCH_SIZE];
     projectSidecarPath(file, sizeof(file), path, name);
     uint32_t id = seqlogic::projectId(path, name);
-    switch (seqlogic::sidecarAction(s_hadSidecar || seqEngine.active(), s_loadedValid && s_loadedId == id))
+    switch (seqlogic::sidecarAction(s_hadSidecar || seqEngine.seqActive(), s_loadedValid && s_loadedId == id))
     {
         case seqlogic::SIDE_WRITE:
             if (writeSidecar(file))

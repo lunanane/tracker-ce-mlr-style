@@ -1,7 +1,7 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 // A pad layer of the Session view (plans/002-session-view.md). The Session module owns the screen buttons (group select
 // per layer, button 7 = CLIPS, button 8 = CUT) and the Play button; a layer gets all 48 pads, the jog wheel and Rec.
-//   CLIPS = clip launcher (clipsLayer.*)        CUT = MLR page (another component, default: CutStubLayer)
+//   CLIPS = clip launcher (clipsLayer.*)        CUT = MLR page (cutSessionLayer.h)
 //
 // Pad numbering: col 0..11, row 0..3 (0-based), pad index = row * 12 + col. LED levels 0..15.
 // A layer must not touch the audio side directly; use the main-loop API of seqLauncher.h / seqTracks.h.
@@ -26,31 +26,6 @@ struct SessionLayer
 
   protected:
     ~SessionLayer() {}
-};
-
-// Placeholder for the CUT layer until the MLR component is plugged in with cSeqSession::setCutLayer().
-struct CutStubLayer : SessionLayer
-{
-    const char* name() const override { return "CUT"; }
-    void setGroup(uint8_t) override {}
-    uint8_t groupSize() const override { return 4; }
-    void pad(uint8_t, uint8_t, bool) override {}
-    void leds(uint8_t out[48]) override
-    {
-        for (int i = 0; i < 48; i++)
-            out[i] = 0;
-    }
-    void info(char lines[4][48]) override
-    {
-        const char* t[4] = { "CUT - coming", "", "", "" };
-        for (int i = 0; i < 4; i++)
-        {
-            int j = 0;
-            for (; t[i][j] && j < 47; j++)
-                lines[i][j] = t[i][j];
-            lines[i][j] = 0;
-        }
-    }
 };
 
 } // namespace seqsession

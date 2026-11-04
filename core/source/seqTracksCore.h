@@ -8,6 +8,7 @@
 #include "mono.h"
 #include "seqTracksLogic.h"
 #include "seqTracksRec.h"
+#include "seqCut.h"
 
 namespace seqtracks {
 
@@ -54,6 +55,15 @@ class Engine
     void leds(uint8_t track, uint8_t out[seqlogic::kPads]) const;
     bool playing() const { return playing_; }
 
+    // ---- CUT (MLR) layer, see seqCut.h (the Cut object lives outside the engine: the glue places it in external RAM) ----
+    void setCut(seqcut::Cut* c) { __atomic_store_n(&cut_, c, __ATOMIC_RELEASE); } // the object is fully constructed first
+    seqcut::Cut* cut() const { return __atomic_load_n(&cut_, __ATOMIC_ACQUIRE); }
+    bool postCut(uint8_t track, uint8_t arg); // arg = seqcut::packArg(...); main loop
+    uint16_t cutMask() const { seqcut::Cut* c = cut(); return c ? c->activeMask() : 0; } // tracks driven by their playhead
+    // any context: Play was pressed, the transport restarts at step fromPos (playheads continue from fromPos + 1)
+    void cutPlayStarted(uint8_t fromPos = 0) { cutRestartPos_ = fromPos; cutRestart_ = true; }
+    bool seqActive() const { return !loading_ && (activeCount_ != 0 || head_ != tail_ || rec_.active()); } // without CUT
+
     // ---- record (main loop side) ----
     bool postRec(uint8_t track, uint8_t mode); // mode: REC_STOP / REC_PUNCH / REC_LOOP
     seqrec::Planner::State recState() const { return recState_; }
@@ -71,7 +81,7 @@ class Engine
     uint16_t stateHash() const;                       // CRC of the serialized settings (change detection; runtime-only fields masked)
 
     // ---- audio context ----
-    bool active() const { return !loading_ && (activeCount_ != 0 || head_ != tail_ || rec_.active()); }
+    bool active() const { return !loading_ && (activeCount_ != 0 || head_ != tail_ || rec_.active() || cutMask() != 0 || cutRestart_); }
     bool isTakenOver(int row) const { return (takenMask_ >> row) & 1u; }
     void stepClock(uint16_t trackUStep); // transport running: once per uStep of track 0, before play_microStep
     void idleTick();                     // transport stopped: once per nano tick (internal clock; external clock: only per clock pulse)
@@ -157,6 +167,9 @@ class Engine
     volatile seqrec::Planner::State recState_;
     volatile uint8_t recTrack_, recHints_, recEnds_;
     volatile bool loading_;
+    seqcut::Cut* cut_;
+    volatile bool cutRestart_;
+    volatile uint8_t cutRestartPos_;
 };
 
 } // namespace seqtracks

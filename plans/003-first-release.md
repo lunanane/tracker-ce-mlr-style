@@ -32,3 +32,14 @@ said CC BY-NC, then "Polyform is good"). Polyend relicensed CE upstream on 2026-
 with a "no wholesale commercial clones" restriction; edits inside Polyend files follow that. The release README
 states both. Push target: https://github.com/lunanane/tracker-ce-mlr-style (its `main` = upstream 9cc7aae, three
 commits ahead of our base 9b9a13b → merge mod/main into seq-tracks after step A, before the release build).
+
+## Integration result (2026-11-04): steps A+B+D + C1 (Session CLIPS) + C2 (CUT) on `seq-tracks`
+- Merged `c1-launcher` and `c2-mlr` into `seq-tracks`; CUT is wired into the Session view (`CutSessionLayer`, group of 4, all 12 pad columns).
+  Details in plans/002 ("Integration C1 + C2"). Session STOP wins over CUT; a clip launch restarts the CUT playhead.
+- Builds (Git Bash, `make original -j8` / `make plus -j8`): MK66 FLASH 946,440 B (90.26 %, ~102 KB free), RAM 150,092 B (57.26 %),
+  EXTERNAL_RAM 15,590,432 B (92.93 %). Plus: QSPI_FLASH 1,715,508 B (10.35 %), SRAM_DTC 350,936 B (97.36 %, 9.5 KB free; was 97.02 %),
+  SRAM_ITC 109,064 B (83.21 %), SRAM_OC 29,036 B (88.61 %, 3.7 KB free), EXTERNAL_RAM 67,103,572 B (99.99 %, 5.3 KB free).
+- The CUT object (5.8 KB) first overflowed the Plus EXTERNAL_RAM by 532 B; it now sits in the OCRAM bss section (`OCRAM_BSS_SECTION`).
+  Future additions to the mod must go into OCRAM (3.7 KB left) or shrink something: Plus has ~5 KB in EXTERNAL_RAM and 9.5 KB in SRAM_DTC.
+- Host tests: seqgen 101 tests / 4108 checks; core/seqtest 2336 checks (glue + session + cut) and 237 perform checks, all green.
+- Still to do on device: `docs/seq-tracks-test-list.md` (one list, sections 1-12; 10b is the new CLIPS + CUT interplay).

@@ -12,12 +12,13 @@ enum
 {
     CMD_PAD = 1,
     CMD_TYPE = 2,
-    CMD_REC = 3
+    CMD_REC = 3,
+    CMD_CUT = 4
 };
 
 Engine::Engine()
   : host_(0), head_(0), tail_(0), takenMask_(0), activeCount_(0), playing_(false), barPulse_(0), idleCount_(0), usAcc_(0), clockSilentUs_(0), epoch_(1),
-    rHead_(0), rTail_(0), recDrops_(0), recState_(seqrec::Planner::IDLE), recTrack_(0), recHints_(0), recEnds_(0), loading_(false)
+    rHead_(0), rTail_(0), recDrops_(0), recState_(seqrec::Planner::IDLE), recTrack_(0), recHints_(0), recEnds_(0), loading_(false), cut_(0), cutRestart_(false), cutRestartPos_(0)
 {
     memset(ring_, 0, sizeof(ring_));
     memset(recRing_, 0, sizeof(recRing_));
@@ -84,6 +85,14 @@ bool Engine::postRec(uint8_t track, uint8_t mode)
     return push(c);
 }
 
+bool Engine::postCut(uint8_t track, uint8_t arg)
+{
+    if (track >= kTracks || seqcut::argSub(arg) >= seqcut::SUB_COUNT)
+        return false;
+    Cmd c = { CMD_CUT, track, arg };
+    return push(c);
+}
+
 bool Engine::popRecOp(seqrec::Op& out)
 {
     uint8_t t = rTail_;
@@ -129,6 +138,11 @@ void Engine::drain()
         else if (c.kind == CMD_REC)
         {
             applyRec(c.track, c.a);
+        }
+        else if (c.kind == CMD_CUT)
+        {
+            if (seqcut::Cut* cu = cut())
+                cu->apply(c.track, c.a);
         }
     }
 }
@@ -396,6 +410,12 @@ void Engine::stepClock(uint16_t trackUStep)
     clockSilentUs_ = 0;
     if (activeCount_ == 0)
         playing_ = true; // keep the transport flag in step while no track runs
+    if (cutRestart_)
+    {
+        cutRestart_ = false;
+        if (seqcut::Cut* c = cut())
+            c->transportStart(cutRestartPos_);
+    }
     drain();
     if (activeCount_ == 0)
         return;
@@ -709,6 +729,8 @@ void Engine::resetState()
     activeCount_ = 0;
     takenMask_ = 0;
     recomputeContext();
+    if (cut())
+        postCut(0, seqcut::packArg(seqcut::SUB_RESET, true, 0)); // project load / new: every cut row back to stock
     SEQ_COMPILER_BARRIER();
     loading_ = false;
 }

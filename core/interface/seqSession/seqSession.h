@@ -6,6 +6,7 @@
 
 #include "core/modulesBase.h"
 #include "seqSession/clipsLayer.h"
+#include "seqSession/cutSessionLayer.h"
 #include "seqSession/sessionLayer.h"
 
 class cSeqSession : public ModuleBase
@@ -22,7 +23,7 @@ class cSeqSession : public ModuleBase
     ~cSeqSession() {}
 
     //----------------------------------
-    // Plug in the CUT layer (default: a stub that shows "CUT - coming"). Call before the Session view is first shown.
+    // Replace the CUT layer (default: the CUT/MLR adapter below). Call before the Session view is first shown.
     void setCutLayer(seqsession::SessionLayer* layer) { layers[1] = layer; }
 
     void selectGroup(uint8_t first);
@@ -35,10 +36,10 @@ class cSeqSession : public ModuleBase
 
     uint8_t groupFirst = 0; // first track of the 8 shown (0 or 8)
     uint8_t layerIndex = 0; // 0 = CLIPS, 1 = CUT
-    seqsession::SessionLayer* layers[2] = { &clips, &cutStub };
+    seqsession::SessionLayer* layers[2] = { &clips, &cut };
 
     seqsession::ClipsLayer clips;
-    seqsession::CutStubLayer cutStub;
+    seqsession::CutSessionLayer cut; // CUT (MLR) layer, registered as layers[1]
 
     uint8_t ledShown[48];
     bool padHeld[48];

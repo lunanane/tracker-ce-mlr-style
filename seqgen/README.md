@@ -165,6 +165,7 @@ p.setLength(1..256); p.setColumns(8|12); p.setQuantise(1..64 steps); p.setRate(R
 p.press(col); p.release(col);            // pads of this track's row, 0-based
 p.recDown(); p.recUp();                  // playhead recording
 p.resync(globalStep);                    // align to the global step counter
+p.restart(nextStep);                     // continue as if nextStep comes next (no jump flag, keeps gestures + recorded loop)
 Playhead::StepOut o = p.step();          // once per sequencer step boundary -> o.pos, o.jumped, o.hold, o.pos2/has2/jumped2
 Playhead::noteOffsetFor(pos, hasNote, length, noteStep, stepsSince)   // "replay as if at pos"
 p.serialize(buf, cap) / p.deserialize(buf, len)                       // kSerialSize = 296 B, version byte 1
@@ -203,6 +204,7 @@ Rules (all covered by tests):
   recording is **not** cleared by a press or a two-pad loop (this differs from the provisional wording in plan 002); it is
   cleared by `resync()`, `clearRecording()`, an empty take or `reset()`. Holding Rec while jamming records the overriding
   positions (that is how a take is made).
+- **`restart(nextStep)`:** the next `step()` lands on `nextStep % length`, **not** flagged `jumped`; held pads, queued gestures, a take in progress and the recorded loop are kept (the loop restarts at index `nextStep % recordedLength`). The glue uses it to take over a running track and for transport (re)start.
 - **`resync(globalStep)`:** next position = `globalStep % length`, `jumped` set, loop/queue/held pads/recording cleared (stray
   releases afterwards are ignored). Rate and reverse are kept.
 - **`noteOffsetFor`:** scans back from `position` (inclusive), wrapping to the end of the track; returns the step and the
