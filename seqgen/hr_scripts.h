@@ -7,3 +7,4 @@
 #include "hr_chordarp.h"
 #include "hr_bass.h"
 #include "hr_euclid.h"
+#include "hr_gridseq.h"

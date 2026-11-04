@@ -6,7 +6,7 @@
 #   make arm          compile the library for Cortex-M4F and print object sizes (needs arm-none-eabi-g++)
 CXX ?= g++
 CXXFLAGS ?= -std=c++11 -Wall -Wextra -Wdouble-promotion -O1
-SRC = chordarp.cpp mono.cpp playhead.cpp hr.cpp hr_stab.cpp hr_arpseq.cpp hr_chordarp.cpp hr_bass.cpp hr_euclid.cpp
+SRC = chordarp.cpp mono.cpp playhead.cpp hr.cpp hr_stab.cpp hr_arpseq.cpp hr_chordarp.cpp hr_bass.cpp hr_euclid.cpp hr_gridseq.cpp
 PYTHON ?= python
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
 LUA ?=   # path to monome_iii_c34.lua of the grid-composer (or monome_iii_c31.lua for the older script; the port follows c34, so it will differ); required for lua-compare
@@ -18,7 +18,7 @@ HR_SCRIPTS ?= E:/claude/_HYPER_RASP/scripts   # HYPER_RASP scripts directory (hr
 test: build/seqgen_tests$(EXE)
 	build/seqgen_tests$(EXE)
 
-build/seqgen_tests$(EXE): test/test_main.cpp test/test_cases2.inc test/test_cases3.inc test/test_pads.inc test/test_playhead.inc test/test_hr.inc $(SRC) seqgen.h chordarp.h mono.h playhead.h hr.h hr_scripts.h hr_stab.h hr_arpseq.h hr_chordarp.h hr_bass.h hr_euclid.h
+build/seqgen_tests$(EXE): test/test_main.cpp test/test_cases2.inc test/test_cases3.inc test/test_pads.inc test/test_playhead.inc test/test_hr.inc $(SRC) seqgen.h chordarp.h mono.h playhead.h hr.h hr_scripts.h hr_stab.h hr_arpseq.h hr_chordarp.h hr_bass.h hr_euclid.h hr_gridseq.h
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) test/test_main.cpp $(SRC) -o $@
 
@@ -29,7 +29,7 @@ build/lua_driver$(EXE): test/lua_driver.cpp $(SRC) seqgen.h chordarp.h mono.h
 lua-compare: build/lua_driver$(EXE)
 	$(if $(LUA),,$(error set LUA=path/to/monome_iii_c34.lua))$(PYTHON) -I test/lua_compare.py --lua $(LUA) --driver build/lua_driver$(EXE) --fuzz $(FUZZ) --seed 1 --script test/scripts/*.txt
 
-build/hr_driver$(EXE): test/hr_driver.cpp $(SRC) seqgen.h hr.h hr_scripts.h hr_stab.h hr_arpseq.h hr_chordarp.h hr_bass.h
+build/hr_driver$(EXE): test/hr_driver.cpp $(SRC) seqgen.h hr.h hr_scripts.h hr_stab.h hr_arpseq.h hr_chordarp.h hr_bass.h hr_euclid.h hr_gridseq.h
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) test/hr_driver.cpp $(SRC) -o $@
 

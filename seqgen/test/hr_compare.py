@@ -339,6 +339,31 @@ def gen_euclid(rng, n):
     return cmds
 
 
+def gen_gridseq(rng, n):
+    cmds, held = [], []
+    for _ in range(n):
+        r = rng.random()
+        if r < 0.20: cmds += tap(rng.randint(1, 8), rng.randint(1, 4))
+        elif r < 0.34:  # holds: one or several cells of a row, released in any order
+            y = rng.randint(1, 4); xs = rng.sample(range(1, 9), rng.randint(1, 3))
+            cmds += ["grid %d %d 1" % (x, y) for x in xs]
+            if rng.random() < 0.7: cmds.append("pulse %d" % rng.choice([1, 6, 12, 24, 30, 60]))
+            rel = xs[:]; rng.shuffle(rel); cmds += ["grid %d %d 0" % (x, y) for x in rel]
+        elif r < 0.37 and len(held) < 3: x, y = rng.randint(1, 8), rng.randint(1, 4); cmds.append("grid %d %d 1" % (x, y)); held.append((x, y))
+        elif r < 0.40 and held: cmds.append("grid %d %d 0" % held.pop(rng.randrange(len(held))))
+        elif r < 0.66: cmds.append("pulse %d" % rng.choice([1, 1, 2, 3, 5, 6, 6, 12, 24, 40, 100]))
+        elif r < 0.70: cmds.append("param grouping %d" % rng.randint(1, 8))
+        elif r < 0.74: cmds.append("param vel %d" % rng.randint(1, 127))
+        elif r < 0.79: cmds.append("param transp %d" % rng.randint(-12, 12))
+        elif r < 0.84: cmds.append("param div %d" % rng.choice([1, 2, 3, 4, 6, 8, 12, 24, rng.randint(1, 24)]))
+        elif r < 0.88: lo = rng.randint(1, 8); cmds.append("param range %d" % (lo * 10 + rng.randint(lo, 8)))
+        elif r < 0.90: cmds.append("param note%d %d" % (rng.randint(1, 4), rng.randint(24, 96)))
+        elif r < 0.96: cmds.append(rng.choice(["start", "start", "stop"]))
+        else: cmds.append("sync")
+    cmds.append("sync")
+    return cmds
+
+
 SCRIPTS = {
     "arp_lines": ("arp_lines.lua", lambda rng, n: gen_stab(rng, n, True)),
     "chord_stabs": ("chord_stabs.lua", lambda rng, n: gen_stab(rng, n, False)),
@@ -346,6 +371,7 @@ SCRIPTS = {
     "chord_arp": ("chord_arp.lua", gen_chordarp),
     "bassline_seq": ("bassline_seq.lua", gen_bass),
     "euclid_trigger": ("euclid_trigger.lua", gen_euclid),
+    "grid_seq": ("grid_seq.lua", gen_gridseq),
 }
 
 

@@ -26,6 +26,7 @@ static const Names kNames[] = {
     {"chord_arp", HR_CHORD_ARP, {"type", "size", "octave", "inv", "mode", "speed", "dir", "groove", "vel", "gate", "transp", "qstart", "keylock", "key", "scale", "latch", 0}},
     {"bassline_seq", HR_BASS, {"octave", "direction", "groove", 0}},
     {"euclid_trigger", HR_EUCLID, {"grouping", "vel", "swing", "chance", "note1", "note2", "note3", "note4", 0}},
+    {"grid_seq", HR_GRIDSEQ, {"grouping", "vel", "transp", "div", "range", "note1", "note2", "note3", "note4", 0}},
 };
 
 int main(int argc, char** argv) {

@@ -2,8 +2,8 @@
 # Host tests for the glue logic (no Polyend code). Needs a desktop g++.   make test
 CXX ?= g++
 CXXFLAGS ?= -std=c++11 -Wall -Wextra -O1 -I../source -I../../seqgen -I../interface/seqSession -I../libs/Audio/Polyverb
-SEQ = ../../seqgen/chordarp.cpp ../../seqgen/mono.cpp ../../seqgen/playhead.cpp ../../seqgen/hr.cpp ../../seqgen/hr_stab.cpp ../../seqgen/hr_arpseq.cpp ../../seqgen/hr_chordarp.cpp ../../seqgen/hr_bass.cpp ../../seqgen/hr_euclid.cpp
-HRSRC = ../../seqgen/hr.cpp ../../seqgen/hr_stab.cpp ../../seqgen/hr_arpseq.cpp ../../seqgen/hr_chordarp.cpp ../../seqgen/hr_bass.cpp ../../seqgen/hr_euclid.cpp
+SEQ = ../../seqgen/chordarp.cpp ../../seqgen/mono.cpp ../../seqgen/playhead.cpp ../../seqgen/hr.cpp ../../seqgen/hr_stab.cpp ../../seqgen/hr_arpseq.cpp ../../seqgen/hr_chordarp.cpp ../../seqgen/hr_bass.cpp ../../seqgen/hr_euclid.cpp ../../seqgen/hr_gridseq.cpp
+HRSRC = ../../seqgen/hr.cpp ../../seqgen/hr_stab.cpp ../../seqgen/hr_arpseq.cpp ../../seqgen/hr_chordarp.cpp ../../seqgen/hr_bass.cpp ../../seqgen/hr_euclid.cpp ../../seqgen/hr_gridseq.cpp
 GLUE = ../source/seqTracksCore.cpp ../source/seqCut.cpp ../interface/seqSession/cutLayer.cpp
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
 

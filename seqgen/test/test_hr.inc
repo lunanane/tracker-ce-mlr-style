@@ -476,6 +476,62 @@ TEST(hr_euclid_record_and_serialize_per_row) {
   CHECK(!b.s->deserialize(buf, n));
 }
 
+// ======================= Grid Seq =======================
+TEST(hr_gridseq_tap_toggles_steps_and_the_kit_plays_in_columns) {
+  HrRig r(HR_GRIDSEQ);
+  r.tap(0, 0); r.tap(0, 1); r.tap(2, 0);  // bass drum + snare on step 1, bass drum on step 3
+  CHECK_EQ(r.led(0, 0), 15); CHECK_EQ(r.led(1, 0), 1); CHECK_EQ(r.led(1, 1), 1);
+  r.s->start();
+  CHECK_EQ(countOn(), 2); CHECK_EQ(g_ev[0].note, 36); CHECK_EQ(g_ev[1].note, 38); CHECK_EQ(g_ev[0].vel, 100);
+  CHECK_EQ(r.led(0, 3), 4);  // the playhead marks the empty step it sits on
+  clearEv();
+  r.pulses(6);   // step 2: the notes end
+  CHECK_EQ(countOff(), 2); CHECK_EQ(countOn(), 0);
+  clearEv();
+  r.pulses(6);   // step 3: the bass drum
+  CHECK_EQ(countOn(), 1); CHECK_EQ(g_ev[g_nev - 1].note, 36);
+  r.tap(2, 0);   // the same cell again: step off
+  CHECK_EQ(r.led(2, 0), 4);
+  r.s->setParam(HrGridSeq::P_RANGE, 24);  // loop 2..4: the playhead moves in at once
+  CHECK_EQ(r.s->getParam(HrGridSeq::P_START), 2); CHECK_EQ(r.s->getParam(HrGridSeq::P_END), 4);
+  CHECK_EQ(r.led(0, 0), 15);  // a step outside the loop keeps its light
+  CHECK_EQ(r.led(7, 3), 0);
+}
+TEST(hr_gridseq_holding_a_cell_ratchets_the_row_and_does_not_edit) {
+  HrRig r(HR_GRIDSEQ);
+  r.tap(3, 0);                    // bass drum on step 4 (the loop is at step 1)
+  r.s->start();
+  clearEv();
+  r.s->pad(3, 0, true);           // hold it: after the one-quarter grace (24 pulses) the voice retriggers every 6 pulses
+  r.pulses(23);
+  int before = countOn();
+  CHECK_EQ(before, 1);            // only the sequencer's own hit when the loop passed step 4
+  r.pulses(1);                    // the grace ends: the first retrigger
+  CHECK_EQ(countOn(), before + 1);
+  r.pulses(6);
+  CHECK_EQ(countOn(), before + 2);
+  r.s->pad(3, 0, false);          // released after it ratcheted: the step is not toggled
+  CHECK_EQ(r.led(3, 0), 15);
+  r.s->pad(3, 0, true); r.s->pad(3, 0, false);  // a plain tap does
+  CHECK(r.led(3, 0) != 15);
+}
+TEST(hr_gridseq_serialize_keeps_the_pattern_and_settings) {
+  HrRig a(HR_GRIDSEQ), b(HR_GRIDSEQ);
+  a.tap(1, 2); a.tap(5, 3);
+  a.s->setParam(HrGridSeq::P_GROUPING, 4); a.s->setParam(HrGridSeq::P_TRANSP, -3); a.s->setParam(HrGridSeq::P_DIV, 3); a.s->setParam(HrGridSeq::P_RANGE, 27);
+  uint8_t buf[HrScript::kMaxSerial];
+  size_t n = a.s->serialize(buf, sizeof buf);
+  CHECK_EQ(n, HrGridSeq::kSerialSize);
+  CHECK(b.s->deserialize(buf, n));
+  CHECK_EQ(b.led(1, 2), 15); CHECK_EQ(b.led(5, 3), 15);
+  CHECK_EQ(b.s->getParam(HrGridSeq::P_GROUPING), 4); CHECK_EQ(b.s->getParam(HrGridSeq::P_DIV), 3); CHECK_EQ(b.s->getParam(HrGridSeq::P_NOTE2), 41 - 3);
+  uint8_t buf2[HrScript::kMaxSerial];
+  CHECK_EQ(b.s->serialize(buf2, sizeof buf2), n);
+  for (size_t i = 0; i < n; ++i) CHECK_EQ(buf[i], buf2[i]);
+  buf[4] = 0;
+  CHECK(!b.s->deserialize(buf, n));
+}
+
 // ======================= helpers, bus, slots, legends =======================
 TEST(hr_euclid_and_velocity_helpers) {
   uint8_t o[16];
