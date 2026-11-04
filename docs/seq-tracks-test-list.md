@@ -18,6 +18,10 @@ and flash a known-good `.ptf` from `/Firmware/`.
 | Press | Expected |
 |---|---|
 | On the Pattern page tap **Pattern** (press and release, nothing else) | Title bar "Play mode". Middle of the screen: "Track N: Off" and three hint lines. The 8 bottom labels show `[1 -]` `2 -` ... (track number, type letter, `[ ]` around the current track). |
+| Hold **Pattern** for about half a second, release (nothing else) | Stays on the pattern editor: only a quick tap (up to 400 ms) opens Play mode. |
+| Open a note / FX / instrument popup on a step, then tap **Pattern** | The popup closes (as before); Play mode does NOT open. Tap **Pattern** once more: Play mode opens. |
+| Reach the Pattern page without pressing Pattern (e.g. close a menu / come back from Song with another button), then tap **Pattern** once | Play mode opens at the first tap. |
+| Pattern + arrow keys / Pattern held with other buttons | Same as stock, never Play mode. |
 | Tap **Pattern** again | Back to the normal pattern editor, as before (cursor, view). Tap again: Play mode again. |
 | In Play mode press Params / Song / File ... | The module opens as usual. Pattern from there: pattern editor (not Play mode). |
 | Leave Play mode while a chord pad is held | The chord stops (no hanging note). |

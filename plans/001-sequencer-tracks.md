@@ -145,6 +145,8 @@ Built around immediate playability; no separate Seq page, no Off/Live/Rec modes.
   `seqTracks.*` (glue: instrument pick, note send), hooks in `mtSequencer.cpp`, Play mode = its own module
   `core/interface/seqPlay/` (not a flag inside the pattern editor: the pattern editor is untouched except `functPattern`).
 - Pattern tap: armed on press when no other button is held; any other button/pad/jog input before the release cancels it.
+  A tap lasts at most 400 ms, a press that closed a step popup is not a tap, and the first release after arriving on the page by another
+  route (`patternButtonReleaseActive == 0`) also counts if the press was made on the page.
   Pattern again inside Play mode switches back to the editor on press (like every other module button).
 - Clock: pulses at the start of every 8th uStep of track 0 while playing; **free-running** (96 nano ticks) while the transport
   is stopped, so Chord/Arp can be played without Play. Mono only runs with the transport. [provisional]

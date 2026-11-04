@@ -93,17 +93,26 @@ static void idle(Engine& e, int ticks)
 static void test_tap()
 {
     TapDetector t;
-    t.down(true);
-    CHECK(t.up());
-    t.down(true);
+    t.down(true, 1000);
+    CHECK(t.up(1100));
+    t.down(true, 1000);
     t.other();
-    CHECK(!t.up()); // Pattern + arrow
-    t.down(false);
-    CHECK(!t.up()); // another button was already held
-    CHECK(!t.up()); // release without press
+    CHECK(!t.up(1100)); // Pattern + arrow
+    t.down(false, 1000);
+    CHECK(!t.up(1100)); // another button was already held / the press closed a popup
+    CHECK(!t.up(1100)); // release without press
     t.other();
-    t.down(true);
-    CHECK(t.up()); // activity before the press does not matter
+    t.down(true, 1000);
+    CHECK(t.up(1100)); // activity before the press does not matter
+    // a long hold is not a tap (400 ms at most), also across the 32-bit wrap
+    t.down(true, 1000);
+    CHECK(t.up(1400));
+    t.down(true, 1000);
+    CHECK(!t.up(1401));
+    t.down(true, 0xFFFFFF00u);
+    CHECK(t.up(0x40u));
+    t.down(true, 0xFFFFFF00u);
+    CHECK(!t.up(0x300u));
 }
 
 static void test_logic()

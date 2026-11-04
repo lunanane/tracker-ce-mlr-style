@@ -14,6 +14,12 @@ extern strMtProject mtProject;
 
 seqlogic::TapDetector seqPatternTap;
 
+uint32_t seqNowMs()
+{
+    static elapsedMillis clk;
+    return (uint32_t)clk;
+}
+
 namespace
 {
 // Instrument used for a taken-over track while it plays (chosen when the takeover begins).

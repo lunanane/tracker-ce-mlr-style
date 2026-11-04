@@ -8,22 +8,26 @@ namespace seqlogic {
 enum TrackType : uint8_t { TYPE_OFF = 0, TYPE_CHORDARP = 1, TYPE_MONO = 2, TYPE_COUNT = 3 };
 enum { kTracks = 16, kPads = 48, kPadCols = 12 };
 
-// Pattern button tap: press and release with no other input in between (buttons, pad presses, jog wheel).
-// The caller counts other input with other(); down() is armed only when no other button was held on press.
+// Pattern button tap: press and release with no other input in between (buttons, pad presses, jog wheel), held for at most
+// kTapMaxMs. The caller counts other input with other(); down() is armed only when no other button was held on press and the
+// press did not just close a popup.
 struct TapDetector
 {
+    enum { kTapMaxMs = 400 };
     bool armed = false;
     uint32_t activity = 0;
     uint32_t atDown = 0;
+    uint32_t t0 = 0;
     void other() { activity++; }
-    void down(bool nothingElseHeld)
+    void down(bool plainPress, uint32_t nowMs)
     {
-        armed = nothingElseHeld;
+        armed = plainPress;
         atDown = activity;
+        t0 = nowMs;
     }
-    bool up()
+    bool up(uint32_t nowMs)
     {
-        bool tap = armed && activity == atDown;
+        bool tap = armed && activity == atDown && (uint32_t)(nowMs - t0) <= (uint32_t)kTapMaxMs;
         armed = false;
         return tap;
     }

@@ -2850,6 +2850,8 @@ static void functPattern(uint8_t state)
             return;
         }
 
+        // a press that closes a popup is not a tap (it must not switch to Play mode)
+        bool closedPopup = mtPopups.getStepPopupState() != stepPopupNone;
         PTE->cancelPopups();
 
         // sequencer tracks mod: arm the tap detector when no other button is held
@@ -2862,11 +2864,11 @@ static void functPattern(uint8_t state)
                 break;
             }
         }
-        seqPatternTap.down(!othersHeld);
+        seqPatternTap.down(!othersHeld && !closedPopup, seqNowMs());
     }
     else if (state == buttonRelease && PTE->patternButtonReleaseActive)
     {
-        bool tap = seqPatternTap.up();
+        bool tap = seqPatternTap.up(seqNowMs());
         PTE->setPatternViewMode(0);
         if (sequencer.sequencialSwitch_GetNext() > 0)
         {
@@ -2884,12 +2886,22 @@ static void functPattern(uint8_t state)
     }
     else if (state == buttonRelease)
     {
-        seqPatternTap.up();
+        // first release after arriving on the page by another route: stock behaviour unchanged, but a press that was made here
+        // (the tap detector is armed only by the press handler above) still counts as a tap
+        bool tap = seqPatternTap.up(seqNowMs());
         PTE->patternButtonReleaseActive = 1;
         if (sequencer.sequencialSwitch_GetNext() > 0)
         {
             sequencer.sequencialSwitch_SetReady();
         }
+#ifndef TRACKER_MINI
+        if (tap)
+        {
+            PTE->eventFunct(eventActivateSeqPlay, PTE, 0, 0);
+        }
+#else
+        (void)tap;
+#endif
     }
 }
 

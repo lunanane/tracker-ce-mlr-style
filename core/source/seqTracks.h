@@ -6,6 +6,8 @@
 extern seqtracks::Engine seqEngine;
 extern seqlogic::TapDetector seqPatternTap; // Pattern button tap detection (interface inputs + pattern editor)
 
+uint32_t seqNowMs(); // free-running milliseconds (Pattern tap timing)
+
 // Any button / pad / jog input other than the Pattern button itself (breaks a Pattern tap).
 inline void seqNoteOtherInput()
 {
