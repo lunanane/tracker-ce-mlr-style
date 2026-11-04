@@ -6,6 +6,17 @@ any project, and go through the list in order. Write down anything that differs.
 and flash a known-good `.ptf` from `/Firmware/`. Section 12 (stock behaviour) is the regression check: run it last, and again after
 any change.
 
+## Start here: the highest-value on-device tests
+Do these first (the full list below is the detail):
+1. Shift+Rec a loop in Play mode, Stop, go to Performance, then Pattern, reopen the project: the whole recording is there.
+2. Record on track 3, go to Session, launch another clip on track 3, then launch the own scene: the recording is intact.
+3. Launch clips, wait 15 s, Save, Save As, power cycle: the original pattern files are unchanged and edits on other tracks are kept; also in song mode.
+4. A project that never used the mod behaves like stock CE (section 12).
+5. CUT jumps on track 1 while Chord/Arp runs elsewhere: the arp stays on the bar.
+6. External MIDI clock start / stop / cable pull with Chord/Arp + Mono: no hung notes, a recording ends.
+7. Clips running, visit Master, come back: the clips keep playing.
+8. Reflash the stock .ptf to confirm the recovery path.
+
 Contents: 1-6 Play mode | 7 Record | 8 save / load | 9 Session CLIPS | 10 Session CUT | 11 alt Performance page | 12 stock-behaviour checks.
 
 ## 1. Enter / leave Play mode
@@ -173,6 +184,8 @@ column 10 row 1 = STOP-T, row 4 = STOP-A; column 12 row 1 = QUANT. Screen button
 | Chord/Arp or Mono track taken over (Play mode) and a clip is launched on that track | The sequencer keeps priority while it takes over; the clip plays once it ends. |
 | Busy messages | "Busy - try again" appears when a pattern load / queued pattern switch is in progress. Tap again. |
 
+Behaviour since the review fixes (M2, M3, S3, S6): a clip launch first writes the loaded pattern's unsaved edits to its file ("Busy" and no launch when the file manager cannot do that now); a pattern file that cannot be read aborts the save (the changed flag stays, nothing is overwritten) and the launched tracks are never cleared by a read error; Pattern + arrows and scene launch refuse with "Busy" while clips run and the save did not happen; leaving Play mode or Session view and the end of a recording ask for the project autosave (like leaving the stock editor); leaving to Master or Instrument keeps the Session clips playing (no turn-off of performance mode), and entering the stock Performance page while clips run keeps their lengths; undo history is cleared when the last launched clip goes away.
+
 Known limits of C1: undo snapshots hold the RAM pattern; the "has notes" LEDs read the Workspace pattern files (an unsaved edit on a non-loaded pattern is not visible); clips
 are copied into the loaded pattern in RAM (stock Performance mechanism); saving writes those tracks from the pattern file, so edits to a launched clip are lost.
 
@@ -208,6 +221,8 @@ Pad grid of the layer (all 12 columns, none reserved): 4 rows = 4 tracks of the 
 | Long sample streamed from the SD card (>= 256 KB, original Tracker) | Jumping past the first ~0.7 s may start late or with a short gap (the stream buffer refills on the main loop). Note how long the gap is and whether the main-loop redraws make it worse (listen on the loop track while a screen redraws). |
 | Pad jumps + an FX-heavy step (note step with 2 FX in use) | The retriggered note loses its second FX unless that is Slice / Reverse / Granular length (then it is replayed without offset). |
 | Save the project, reload | CUT state is NOT saved (v0.1): all rows are stock after loading. Recorded playhead loops are lost with the power-off. |
+
+Known limits (S8, S9): recording on a CUT-active or launched track is not supported in v0.1 (a launched track refuses Rec with "Clip launched - not recorded"; on a CUT-active track the written steps are odd); a CUT release (pad up) that was lost because the queue was full is retried only while the Session view is visible.
 
 Known limits of the CUT layer v0.1: the offset assumes the sample plays at its original speed; the offset has full 16-bit resolution and follows the note pitch / tune;
 reverse reverses the playhead order only (samples still play forward); a pattern switch (song mode / pattern chain) does not reset a cut row;

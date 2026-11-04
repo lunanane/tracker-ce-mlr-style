@@ -12,6 +12,32 @@ This unified codebase powers all three hardware instruments in the Tracker famil
 See [`CHANGELOG.md`](CHANGELOG.md) for the full list of new features and improvements.
 
 
+## Sequencer tracks mod (MLR style)
+
+This branch adds sequencers per track and a clip launcher on top of Tracker CE. It is a mod by a community member, not Polyend software.
+
+**What it is**
+* **Play mode**: every track gets a sequencer type, **Chord/Arp** or **Mono**, played from the pads, with **Record** (punch-in or one loop) into the track's tracker steps.
+* **Session view**: an Ableton-style **clip launcher** (CLIPS: a clip is one track of another pattern; scene launch, stop) and an **MLR CUT layer** (a playhead per track that jumps through the pattern, with playhead recording).
+* **Alt Performance page**: a fader page for the perform FX.
+
+**How to enter**
+* Pattern page: tap **Pattern** to cycle Editor > Play mode > Session view > Editor.
+* Performance: **double tap** Performance for the fader page.
+
+**Install and recovery**
+1. Build (`make original`, `make plus`, `make mini`) or take a release: `PolyendTracker_SEQ_0.1.ptf`, `TrackerPlus_SEQ_0.1.ptf`, `TrackerMini_SEQ_0.1.ptf` (the device shows the version as `1.0.0 CE-SEQ0.1`).
+2. Copy the `.ptf` to `/Firmware/` on the microSD card and run **Config > Firmware > Firmware update** (see [Flashing on Hardware & Emergency Recovery](#4-flashing-on-hardware--emergency-recovery)).
+3. Recovery: keep the stock CE `.ptf` for your device on the card. If the mod misbehaves, flash the stock `.ptf` the same way; if it does not boot, use the reset pinhole procedure described in the Emergency Recovery note linked above.
+
+**Status**: v0.1, **untested on hardware**. Use at your own risk and **back up your projects** first. Test plan: [`docs/seq-tracks-test-list.md`](docs/seq-tracks-test-list.md) (start with its "Start here" section); design plans: [`plans/`](plans/).
+
+**Known limits (v0.1)**: the CUT state is not saved with the project; on the original Tracker, jumps in long SD-streamed samples may start late; MIDI perform CCs are ignored on the fader page; the delay time click is not fixed; recording on a track that holds a launched clip or is CUT-active is not supported.
+
+**License**: the mod files (`seqgen/`, and the new `seq*` files and their headers) are **PolyForm Noncommercial 1.0.0** (see [`seqgen/LICENSE.md`](seqgen/LICENSE.md)). The Polyend files stay under Polyend's [`LICENSE`](LICENSE) (MIT with the CE restrictions).
+
+---
+
 ## Notice: Official Support, Warranty & Hardware Disclaimer
 
 > **A Quick Note Before Flashing or Modifying Firmware**
