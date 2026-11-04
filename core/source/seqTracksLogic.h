@@ -32,6 +32,16 @@ struct TapDetector
 inline uint8_t padCol(uint8_t pad) { return (uint8_t)(pad % kPadCols); }
 inline uint8_t padRow(uint8_t pad) { return (uint8_t)(pad / kPadCols); }
 
+// Pads that count as "played" for a takeover: the note grid only. Chord/Arp: the root grid (columns 0..5). Mono: the step grid
+// (columns 0..7). Panel / control pads (types, settings, loop, page ...) never start or keep a takeover.
+inline bool isNotePad(uint8_t type, uint8_t pad)
+{
+    uint8_t col = padCol(pad);
+    if (type == TYPE_CHORDARP) return col <= 5;
+    if (type == TYPE_MONO) return col < 8;
+    return false;
+}
+
 // Screen button 0..7 -> track 0..7, with Shift 8..15.
 inline uint8_t trackFromScreenButton(uint8_t button, bool shift) { return (uint8_t)((button & 7) + (shift ? 8 : 0)); }
 

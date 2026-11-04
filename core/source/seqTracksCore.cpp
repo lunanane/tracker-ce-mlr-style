@@ -178,10 +178,17 @@ void Engine::recPulseEnd()
 
 int Engine::heldPads(const Track& t) const
 {
+    // grid pads only: holding a panel / control pad does not take the track over
     int n = 0;
     for (unsigned i = 0; i < sizeof(t.padBits); i++)
         for (uint8_t b = t.padBits[i]; b; b = (uint8_t)(b & (b - 1)))
-            n++;
+        {
+            unsigned bit = 0;
+            while (!((b >> bit) & 1u))
+                bit++;
+            if (isNotePad(t.type, (uint8_t)(i * 8 + bit)))
+                n++;
+        }
     return n;
 }
 

@@ -148,7 +148,7 @@ Built around immediate playability; no separate Seq page, no Off/Live/Rec modes.
   Pattern again inside Play mode switches back to the editor on press (like every other module button).
 - Clock: pulses at the start of every 8th uStep of track 0 while playing; **free-running** (96 nano ticks) while the transport
   is stopped, so Chord/Arp can be played without Play. Mono only runs with the transport. [provisional]
-- Takeover: Chord/Arp from the first note until all pads are released and nothing sounds; Mono while playing and the sequence has
+- Takeover: Chord/Arp from the first note (only grid pads count as held: root columns 0-5; panel / control pads never take over) until all pads are released and nothing sounds; Mono while playing and the sequence has
   at least one step. The pattern resumes at the **next step** boundary, not mid-step. [provisional]
 - Instrument of a taken-over track = last used instrument (as pads do), picked when the takeover begins. Sample tracks are
   monophonic (last chord note wins); MIDI tracks get every note. [provisional]

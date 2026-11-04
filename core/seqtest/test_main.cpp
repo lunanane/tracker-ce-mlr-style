@@ -155,6 +155,31 @@ static void test_pending_release_retry()
     delete e;
 }
 
+static void test_panel_pads_do_not_take_over()
+{
+    CHECK(isNotePad(TYPE_CHORDARP, 0) && isNotePad(TYPE_CHORDARP, 5 + 12 * 3) && !isNotePad(TYPE_CHORDARP, 6) && !isNotePad(TYPE_CHORDARP, 11));
+    CHECK(isNotePad(TYPE_MONO, 7 + 12) && !isNotePad(TYPE_MONO, 8) && !isNotePad(TYPE_OFF, 0));
+    MockHost h;
+    Engine* e = mk(h);
+    e->postType(2, TYPE_CHORDARP);
+    e->idleTick();
+    e->postPad(2, 6, true);  // panel pad (types)
+    e->postPad(2, 10, true); // control pad
+    idle(*e, 96 * 8);
+    CHECK(!e->takenOver(2) && h.count('B', 2) == 0);
+    e->postPad(2, 0, true); // a root pad takes over; the panel pad does not keep it
+    idle(*e, 96 * 8);
+    CHECK(e->takenOver(2));
+    e->postPad(2, 0, false);
+    idle(*e, 96 * 72);
+    CHECK(!e->takenOver(2)); // panel pads are still held
+    e->postPad(2, 6, false);
+    e->postPad(2, 10, false);
+    idle(*e, 2);
+    CHECK(h.count('+', 2) == h.count('-', 2));
+    delete e;
+}
+
 static void test_off_is_inert()
 {
     MockHost h;
@@ -1062,6 +1087,7 @@ int main()
     test_logic();
     test_sidecar_policy();
     test_pending_release_retry();
+    test_panel_pads_do_not_take_over();
     test_off_is_inert();
     test_chord_takeover_stopped();
     test_chord_takeover_playing_and_pattern_returns();
