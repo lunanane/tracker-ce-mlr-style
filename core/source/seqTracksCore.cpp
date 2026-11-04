@@ -79,7 +79,7 @@ bool Engine::postType(uint8_t track, uint8_t type)
 
 bool Engine::postRec(uint8_t track, uint8_t mode)
 {
-    if (track >= kTracks || mode > REC_LOOP)
+    if (track >= kTracks || mode > REC_STOP_PATTERN)
         return false;
     Cmd c = { CMD_REC, track, mode };
     return push(c);
@@ -178,9 +178,9 @@ void Engine::recPublish()
 
 void Engine::applyRec(uint8_t track, uint8_t mode)
 {
-    if (mode == REC_STOP || track >= kTracks || !host_)
+    if (mode == REC_STOP || mode == REC_STOP_PATTERN || track >= kTracks || !host_)
     {
-        rec_.stop();
+        rec_.stop(mode == REC_STOP_PATTERN ? 5 : 0);
     }
     else if (t_[track].type != TYPE_OFF)
     {
@@ -426,7 +426,7 @@ void Engine::stepClock(uint16_t trackUStep)
         seqrec::TrackPos p;
         host_->trackPos(rec_.track(), p);
         if (p.uStep == 1)
-            rec_.enter(p.pos);
+            rec_.enter(p.pos, recLive(rec_.track()));
     }
     if (((trackUStep - 1) % 8) == 0)
         pulseAll();
@@ -557,7 +557,10 @@ void Engine::onEvent(const seqgen::Event& e)
     if (e.kind == seqgen::EV_NOTE_ON)
     {
         if (host_->muted(track))
+        {
+            recFeedOn(track, e); // muting is a monitoring choice: the take still records what the pads play
             return;
+        }
         if (!((takenMask_ >> track) & 1u))
         {
             takenMask_ = (uint16_t)(takenMask_ | (1u << track));
@@ -599,27 +602,39 @@ void Engine::onEvent(const seqgen::Event& e)
             }
             host_->noteOn(track, e.note, velocityToVolume(e.vel));
         }
-        if (rec_.active() && rec_.track() == track)
-        {
-            seqrec::TrackPos p;
-            host_->trackPos(track, p);
-            rec_.setTrackInfo(host_->sampleTrack(track), host_->instrument(track));
-            rec_.noteOn(e.note, velocityToVolume(e.vel), p, host_->recParams());
-        }
+        recFeedOn(track, e);
+    }
+    else if (!(byte & bit) && host_->muted(track))
+    {
+        recFeedOff(track); // a muted track sounds nothing, its take still gets the gate ends
     }
     else if (byte & bit)
     {
         byte = (uint8_t)(byte & ~bit);
         t.nSounding--;
         host_->noteOff(track, e.note);
-        if (rec_.active() && rec_.track() == track)
-        {
-            seqrec::TrackPos p;
-            host_->trackPos(track, p);
-            rec_.setTrackInfo(host_->sampleTrack(track), host_->instrument(track));
-            rec_.noteOff(p, host_->recParams());
-        }
+        recFeedOff(track);
     }
+}
+
+void Engine::recFeedOn(uint8_t track, const seqgen::Event& e)
+{
+    if (!rec_.active() || rec_.track() != track)
+        return;
+    seqrec::TrackPos p;
+    host_->trackPos(track, p);
+    rec_.setTrackInfo(host_->sampleTrack(track), host_->instrument(track));
+    rec_.noteOn(e.note, velocityToVolume(e.vel), p, host_->recParams());
+}
+
+void Engine::recFeedOff(uint8_t track)
+{
+    if (!rec_.active() || rec_.track() != track)
+        return;
+    seqrec::TrackPos p;
+    host_->trackPos(track, p);
+    rec_.setTrackInfo(host_->sampleTrack(track), host_->instrument(track));
+    rec_.noteOff(p, host_->recParams());
 }
 
 // ------------------------------------------------------------------ project sidecar

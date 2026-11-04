@@ -42,7 +42,9 @@ class Cut
     // After the stock step switch of ALL tracks; globalPos = the global step that plays next (the global clock has already advanced).
     // frozen = the Session view stopped the track: nothing advances, nothing triggers (Session STOP wins over CUT).
     StepPlan boundary(uint8_t track, int steps, int globalPos, bool frozen = false);
-    bool mid(uint8_t track, int steps, StepPlan& out, bool frozen = false);            // µstep 25 of a rate-2 step: start the second half-step
+    bool mid(uint8_t track, int steps, StepPlan& out, bool frozen = false);
+    // Quantise "off": a pad gesture is played at the next audio tick, between two step boundaries (uStep != 1). true = jump now.
+    bool now(uint8_t track, int steps, StepPlan& out, bool frozen = false);            // µstep 25 of a rate-2 step: start the second half-step
     bool consumeRetrigger(uint8_t track, StepPlan& out);          // play_microStep, uStep == 1: pending retrigger
     bool holding(uint8_t track) const { return track < kCutTracks && (((holdMask_ >> track) & 1u) != 0); } // second half of a rate-1/2 position
     bool stopped(uint8_t track) const { return track < kCutTracks && (((stopMask_ >> track) & 1u) != 0); } // STOP: nothing plays

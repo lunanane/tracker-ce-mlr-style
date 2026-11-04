@@ -207,6 +207,12 @@ static void test_cut_loop_reverse_rate()
     c.apply(0, packArg(SUB_PAD, false, 2));
     p = stepOnce(c, f, g);
     v = c.view(0);
+    CHECK(v.loopLo == 2 && v.loopHi == 3); // plan 008: the loop latches, it stays after the pads are released
+    c.apply(0, packArg(SUB_PAD, true, 6)); // a single pad in the row jumps and ends it
+    c.apply(0, packArg(SUB_PAD, false, 6));
+    p = stepOnce(c, f, g);
+    v = c.view(0);
+    CHECK(p.override && p.pos == 12);
     CHECK(v.loopLo > v.loopHi); // no loop range any more
     // reverse
     Cut r;
@@ -284,6 +290,7 @@ static void test_cut_stop_resync_transport()
     CHECK(p.override && p.pos == expect && p.retrigger);
     CHECK(c.activeMask() == 0);
     // transport start keeps recorded loops active and restarts them
+    const int startG = f.pos + 1; // the playhead counter when the track becomes cut-active; the take starts at its first step
     c.apply(0, packArg(SUB_REC, true, 0));
     c.apply(0, packArg(SUB_PAD, true, 4));
     stepOnce(c, f, g);
@@ -296,7 +303,7 @@ static void test_cut_stop_resync_transport()
     CHECK(c.activeMask() == 1);
     f.pos = 0;
     p = stepOnce(c, f, g);
-    CHECK(p.override && p.pos == 9); // recorded steps were 8 9 10, restarted at index 1
+    CHECK(p.override && p.pos == 8 + (((1 - startG) % 3) + 3) % 3); // recorded steps were 8 9 10, restarted at index (1 - start of the take) mod 3 (plan 008: in phase with the take)
 }
 
 static void test_cut_review_fixes()
@@ -420,6 +427,9 @@ static void test_cut_layer()
     f.map[0] = 1;
     install(*c, f);
     uint8_t leds[kCutPads];
+    cutQuantSet(Q_STEP); // (plan 008: a take starts with its first gesture on the grid; this test steps two steps only)
+    cutUpdate();
+    seqEngine.idleTick();
     cutSetGroup(4); // tracks 4..7
     cutLeds(leds);
     CHECK(leds[0] == LED_BRIGHT && leds[1] == LED_DIM); // idle: playhead shown at column 0
@@ -935,6 +945,9 @@ static void test_survival_and_panic()
     if (!c)
         return;
 
+    cutQuantSet(Q_STEP); // (plan 008: a take starts with its first gesture on the grid; this test steps single boundaries)
+    cutUpdate();
+    seqEngine.idleTick();
     seqsession::CutSessionLayer a;
     a.enter(0);
     a.pad(5, 0, true);  a.pad(5, 0, false);                    // row 0: a jam at column 5

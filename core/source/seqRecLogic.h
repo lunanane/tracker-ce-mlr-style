@@ -90,7 +90,8 @@ enum EndWhy : uint8_t
     END_LOOP = 1,  // Shift + Rec: the loop is complete
     END_STOPPED = 2, // the transport stopped or the clock went silent
     END_OFF = 3,   // the recorded track was set to Off
-    END_RESET = 4  // the mod's state was reset (project load)
+    END_RESET = 4, // the mod's state was reset (project load)
+    END_PATTERN = 5 // the pattern changed under the take (song mode, scene, pattern queue)
 };
 inline const char* endText(uint8_t why)
 {
@@ -99,6 +100,7 @@ inline const char* endText(uint8_t why)
         case END_STOPPED: return "rec: transport stopped";
         case END_OFF: return "rec: track set Off";
         case END_RESET: return "rec: reset";
+        case END_PATTERN: return "rec: pattern changed";
         default: return 0; // expected endings are silent
     }
 }

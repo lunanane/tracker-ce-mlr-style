@@ -98,7 +98,7 @@ class Engine
     void applyPad(uint8_t track, uint8_t pad, bool down);
     void applyType(uint8_t track, uint8_t type);
     void drain();
-    enum { REC_STOP = 0, REC_PUNCH = 1, REC_LOOP = 2 };
+    enum { REC_STOP = 0, REC_PUNCH = 1, REC_LOOP = 2, REC_STOP_PATTERN = 3 }; // REC_STOP_PATTERN: ends the take, the reason is "pattern changed"
     void applyRec(uint8_t track, uint8_t mode);
 
     seqgen::SeqContext& context() { return ctx_; }
@@ -140,8 +140,11 @@ class Engine
     void recSink(const seqrec::Op& op);
     static void recSinkThunk(void* user, const seqrec::Op& op);
     void recPulseEnd();
+    void recFeedOn(uint8_t track, const seqgen::Event& e);
+    void recFeedOff(uint8_t track);
     void recPublish();
     int heldPads(const Track& t) const;
+    bool recLive(uint8_t track) const { return ((takenMask_ >> track) & 1u) || heldPads(t_[track]) > 0; } // the sequencer is played on the track (also while it is muted)
     void scanMono(Track& t);
     static void sink(void* user, const seqgen::Event& e);
     void onEvent(const seqgen::Event& e);
