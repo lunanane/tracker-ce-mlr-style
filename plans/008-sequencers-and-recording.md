@@ -56,12 +56,12 @@ said TYP SET GRV PRM / I+ O- / HLF CLR LP. The new map keeps c34's regions and g
 
 Pads are `(col,row)`, row 0 = top; the root grid is on every page. Full per-pad table: `seqgen/README.md`, "Pad layouts".
 
-**Chord/Arp** (cols 6-11 show one page; `Page` pad `(0,11)` on Play, tab column `(11,0..3)` on the others)
+**Chord/Arp** (cols 6-11 show one page; `Page` pad `(11,0)` on Play, tab column `(11,0..3)` on the others)
 
 | Pad(s) | Page | Function | c34 region |
 |---|---|---|---|
 | cols 0-5 × rows 0-3 | all | 24 roots (rows 0/2 major, 1/3 minor) held = chord/arp; Grid mode = scale degrees | x1-4, y1-6 |
-| cols 6-7 × rows 0-3 | Play | chord types Root Sus2 Triad Sus4 / 5th 6th 7th 9th; hold Root + type = Dom7 Maj7 Dim Aug 7b5 7#5 b9 | x1-4, y7-8 (mod_held) |
+| cols 6-7 × rows 0-3 | Play | chord types Root Sus2 Triad Sus4 / 5th 6th 7th 9th; hold Root + type = Dom7 Maj7 Dim Aug 7b5 7#5 b9 (as in c34, pressing Root selects type 1 at once; checked against the Lua by lua_compare) | x1-4, y7-8 (mod_held) |
 | (8..10,0) | Play | Chord / Arp / ArpOct (queued to the bar) | x5-7, y1 |
 | (8..11,1) | Play | speed 1/8 1/8T 1/16 1/16T, two fingers = the 6 extra speeds | x5-8, y2 |
 | (8..11,2) | Play | direction Up Down UpDn Zigzag, two fingers = the 6 extra | x5-8, y3 |

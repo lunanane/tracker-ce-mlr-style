@@ -26,9 +26,33 @@ inline uint8_t argCol(uint8_t a) { return (uint8_t)(a >> 4); }
 inline uint8_t packSyncAll() { return packArg(SUB_RESET, false, 1); }
 inline bool argIsSyncAll(uint8_t a) { return argSub(a) == SUB_RESET && argCol(a) == 1; }
 
+// Jump quantise (plan 008 A): when a pad gesture (jump, loop) takes effect. One setting for all tracks, shared slot of SUB_RESET:
+// col 2 + mode. step = the next step, off = at once (the next audio tick, in the middle of the step if need be),
+// beat = the next beat (4 steps), bar = the next bar (16 steps, or the whole pattern when its length is not a multiple of 16). Default
+// beat. The grid is counted in steps from the pattern start (the track's own stock position, Cut::boundary).
+enum Quant : uint8_t { Q_OFF = 0, Q_STEP = 1, Q_BEAT = 2, Q_BAR = 3, Q_COUNT = 4, Q_DEFAULT = Q_BEAT };
+inline uint8_t packQuant(uint8_t mode) { return packArg(SUB_RESET, false, (uint8_t)(2 + (mode % Q_COUNT))); }
+inline bool argIsQuant(uint8_t a) { return argSub(a) == SUB_RESET && argCol(a) >= 2 && argCol(a) < 2 + Q_COUNT; }
+inline uint8_t argQuant(uint8_t a) { return (uint8_t)(argCol(a) - 2); }
+inline uint8_t quantSteps(uint8_t mode) { return mode == Q_BAR ? 16 : (mode == Q_BEAT ? 4 : 1); }
+// The grid of a track of `steps` steps: beat = 4, bar = 16 when the pattern is a whole number of bars; otherwise a bar is the whole
+// pattern (so the grid never drifts against the pattern start; patterns longer than 64 steps that are not a multiple of 16 use 64).
+inline uint8_t quantStepsFor(uint8_t mode, int steps)
+{
+    if (mode != Q_BAR) return quantSteps(mode);
+    if (steps % 16 == 0) return 16;
+    return (uint8_t)(steps < 1 ? 1 : (steps > 64 ? 64 : steps));
+}
+inline uint8_t quantNext(uint8_t mode) { return (uint8_t)((mode + 1) % Q_COUNT); }
+inline const char* quantName(uint8_t mode)
+{
+    return mode == Q_OFF ? "off" : (mode == Q_STEP ? "step" : (mode == Q_BEAT ? "beat" : "bar"));
+}
+
 // Screen button (0-based) of SYNC ALL in the CUT layer: button 6 = seqsession::kButtonLayer (the layer's own button; static_assert in
 // cutSessionLayer.h); 7 is an empty gap and 8 switches CLIPS <-> CUT (both owned by the host).
-enum { kScreenButtonSyncAll = 5 };
+enum { kScreenButtonSyncAll = 5, kScreenButtonQuant = 4, kScreenButtonRec = 6 };
+// Button 5 (index 4) = jump quantise (tap cycles off / step / beat / bar, its label shows the value); button 7 (index 6) shows [REC] while a take is armed.
 
 // Group of 4 tracks: firstTrack is clamped to 0, 4, 8, 12 (anything in between rounds down).
 inline uint8_t groupFirst(uint8_t firstTrack) { return (uint8_t)((firstTrack > 15 ? 12 : firstTrack) & ~3); }

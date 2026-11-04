@@ -882,6 +882,7 @@ static void test_rec_queue_overflow_hint()
     e->postType(2, TYPE_CHORDARP);
     e->idleTick();
     e->postRec(2, Engine::REC_PUNCH);
+    e->postPad(2, 0, true); // (plan 008: only steps that pass while the pad is played are written, so a pad is held)
     int u = 1;
     playUSteps(*e, 3, u);
     CHECK(e->recState() == seqrec::Planner::PUNCH && !(e->recHints() & seqrec::HINT_OVERFLOW));
@@ -901,13 +902,15 @@ static void test_rec_queue_overflow_hint()
     delete e;
 }
 
-// Rec from a stopped transport: step 0 is part of the pass (cleared); Rec while playing leaves the playing step alone.
+// Rec from a stopped transport: step 0 is part of the pass (cleared) when a pad is played; Rec while playing leaves the playing
+// step alone. Plan 008: an idle take (no pad) writes nothing at all.
 static void test_rec_from_stop_clears_step0()
 {
     MockHost h;
     Engine* e = mk(h);
     e->postType(2, TYPE_CHORDARP);
     e->blockTick(false, 3000);
+    e->postPad(2, 0, true);
     e->postRec(2, Engine::REC_PUNCH); // the main loop starts the transport and posts Rec
     long u = 0;
     playPos(*e, h, 2, u);
@@ -915,14 +918,28 @@ static void test_rec_from_stop_clears_step0()
     CHECK(!ops.empty() && ops[0].kind == seqrec::OP_CLEAR && ops[0].step == 0);
     delete e;
 
+    MockHost h3;
+    Engine* e3 = mk(h3);
+    e3->postType(2, TYPE_CHORDARP);
+    e3->blockTick(false, 3000);
+    e3->postRec(2, Engine::REC_PUNCH);
+    long u3 = 0;
+    playPos(*e3, h3, 48 * 20, u3); // more than a lap, nothing played
+    CHECK(e3->recState() == seqrec::Planner::PUNCH);
+    CHECK(drainOps(*e3).empty()); // an idle take changes nothing
+    delete e3;
+
     MockHost h2;
     Engine* e2 = mk(h2);
     e2->postType(2, TYPE_CHORDARP);
     long u2 = 3 * 48 + 10;
     playPos(*e2, h2, 1, u2);
     e2->postRec(2, Engine::REC_PUNCH);
-    playPos(*e2, h2, 5, u2);
+    playPos(*e2, h2, 30, u2);
+    e2->postPad(2, 0, true); // played from the second half of step 3 on
+    playPos(*e2, h2, 12, u2); // step 4 starts (uStep 1 of step 4 is 38 uSteps after uStep 11 of step 3)
     ops = drainOps(*e2);
+    CHECK(!ops.empty());
     for (size_t i = 0; i < ops.size(); i++)
         CHECK(ops[i].step != 3); // mid-step punch-in: the playing step is not cleared
     delete e2;
@@ -1353,6 +1370,7 @@ static void test_save_uses_critical_sections()
 }
 int sessionTests(int& checks);
 #include "test_cut.inc"
+#include "test_rec.inc"
 
 int main()
 {
@@ -1424,6 +1442,27 @@ int main()
     test_lane_palette();
     test_lane_draw_budget_and_bounds();
     test_r4_handback_retrigger_and_stock_phase();
+    test_rec_toggle_logic();
+    test_keys_driver_model();
+    test_mlr_rec_v024_bug_reproduced();
+    test_mlr_rec_toggle_keys_driver();
+    test_mlr_rec_takes_in_any_group();
+    test_mlr_gestures_through_layer();
+    test_mlr_quantise_screen_button();
+    test_mlr_quantise_grid();
+    test_mlr_loop_latches();
+    test_mlr_take_snaps_to_the_grid();
+    test_mlr_quantise_off_is_at_once();
+    test_mlr_bar_follows_the_pattern();
+    test_play_rec_key_flow();
+    test_play_rec_idle_take_changes_nothing();
+    test_play_rec_wrap_keeps_lap1();
+    test_play_rec_live_gap_replaced();
+    test_play_rec_muted_track_records();
+    test_play_rec_pattern_changed_reason();
+    test_play_rec_bounce_and_transport();
+    test_play_rec_shift_loop();
+    test_rec_end_reasons();
     printf("%d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

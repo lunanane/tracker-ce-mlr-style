@@ -34,6 +34,8 @@ class Playhead {
   void setQuantise(int steps);     // 1 = next step, 4 = next beat (steps; 1..64)
   void setRate(Rate r);
   void setReverse(bool rev);
+  void setImmediate(bool on);      // gestures take effect at once (applyNow) instead of at the next step boundary
+  void setGridPos(uint32_t pos);   // the position the quantise grid is counted in (default: the step counter); call before step()
   int length() const { return length_; }
   int columns() const { return columns_; }
   int quantise() const { return quant_; }
@@ -54,13 +56,18 @@ class Playhead {
 
   // ---- clock: call once per sequencer step boundary ----
   StepOut step();
+  // Immediate mode only (setImmediate): apply the queued jump / loop now, between two step() calls. Fills `o` (pos = where to play,
+  // jumped = true) and returns true when something was applied. The next step() carries on from there.
+  bool applyNow(StepOut& o);
 
   // ---- state ----
   int position() const { return pos_; }            // last played position
   bool recording() const { return recording_; }
   bool recorded() const { return recActive_; }     // a recorded playhead loop is replaying
   int recordedLength() const { return recActive_ ? recLen_ : 0; }
-  bool looping() const { return loopActive_; }     // a two-pad loop range is active
+  bool looping() const { return loopActive_; }     // a two-pad loop range is active (it stays after the pads are released)
+  int loopLo() const { return loA_; }              // its columns, inclusive (valid while looping())
+  int loopHi() const { return loB_; }
   int heldCount() const;
   bool pending() const { return pendLoop_ || pendJump_ >= 0; }  // a jump/loop is queued for the next boundary
   void clearRecording() { recActive_ = false; recording_ = false; recCount_ = 0; }
@@ -97,9 +104,14 @@ class Playhead {
   uint8_t holdLeft_;                 // rate half: steps left to hold the current position
   bool forceJump_;
   bool recording_, recActive_;
+  bool recWait_, recClosing_;        // a take waits for its first applied gesture / closes at the next grid boundary
+  bool pendClr_, immediate_, gridSet_;
+  uint32_t recStart_, gridG_;        // step counter value the take started at / grid position given by setGridPos
   uint32_t gstep_;                   // index of the next step() (quantise boundaries)
   uint8_t recBuf_[kMaxRec];
   uint8_t recHold_[kMaxRec / 8];
+  uint8_t recHas2_[kMaxRec / 8];     // rate x2 take: the step had a second half-step ...
+  uint8_t recBack2_[kMaxRec / 8];    // ... and it went backwards (reverse)
 };
 
 }  // namespace seqgen

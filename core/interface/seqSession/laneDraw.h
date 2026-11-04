@@ -200,6 +200,13 @@ template <class C> void drawLanes(C& c, const LaneModel& m, const Palette& p)
         c.color(p.recText);
         c.disc(360, mid, 6);
         c.text(374, mid, 4, TX_CENTERY, "REC");
+        c.text(440, mid, 3, TX_CENTERY, "play, press Rec again to loop it");
+    }
+    else
+    {
+        // what the pads do (the owner found only the jumps): columns 1-8 jump, two together loop, 9-12 are the controls
+        c.color(p.textDim);
+        c.text(140, mid, 3, TX_CENTERY, "2 pads = loop  9 stop 10 rev 11 speed 12 resync  Rec = rec");
     }
     for (int i = 0; i < kRows; i++)
         draw::lane(c, m.lane[i], i, p);

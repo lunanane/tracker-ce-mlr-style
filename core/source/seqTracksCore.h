@@ -72,6 +72,7 @@ class Engine
     uint8_t recTrack() const { return recTrack_; }
     uint8_t recHints() const { return recHints_; }
     uint8_t recEnds() const { return recEnds_; }
+    uint8_t recWhy() const { return recWhy_; } // why the last take ended (seqrecui::EndWhy)
     bool popRecOp(seqrec::Op& out); // ops from the audio side, in order
 
     // ---- project sidecar (main loop, with the audio engine idle or stopped) ----
@@ -99,7 +100,7 @@ class Engine
     void applyPad(uint8_t track, uint8_t pad, bool down);
     void applyType(uint8_t track, uint8_t type);
     void drain();
-    enum { REC_STOP = 0, REC_PUNCH = 1, REC_LOOP = 2 };
+    enum { REC_STOP = 0, REC_PUNCH = 1, REC_LOOP = 2, REC_STOP_PATTERN = 3 }; // REC_STOP_PATTERN: ends the take, the reason is "pattern changed"
     void applyRec(uint8_t track, uint8_t mode);
 
     seqgen::SeqContext& context() { return ctx_; }
@@ -145,8 +146,11 @@ class Engine
     void recSink(const seqrec::Op& op);
     static void recSinkThunk(void* user, const seqrec::Op& op);
     void recPulseEnd();
+    void recFeedOn(uint8_t track, const seqgen::Event& e);
+    void recFeedOff(uint8_t track);
     void recPublish();
     int heldPads(const Track& t) const;
+    bool recLive(uint8_t track) const { return ((takenMask_ >> track) & 1u) || heldPads(t_[track]) > 0; } // the sequencer is played on the track (also while it is muted)
     void scanMono(Track& t);
     void createHr(uint8_t track, uint8_t type);
     static void sink(void* user, const seqgen::Event& e);
@@ -174,7 +178,7 @@ class Engine
     volatile uint8_t rHead_, rTail_;
     volatile uint8_t recDrops_; // operations dropped because the queue was full (this recording)
     volatile seqrec::Planner::State recState_;
-    volatile uint8_t recTrack_, recHints_, recEnds_;
+    volatile uint8_t recTrack_, recHints_, recEnds_, recWhy_;
     volatile bool loading_;
     seqcut::Cut* cut_;
     volatile bool cutRestart_;

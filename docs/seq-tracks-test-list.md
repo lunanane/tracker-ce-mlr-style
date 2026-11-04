@@ -142,7 +142,11 @@ Then hold a root pad in columns 1-6. The selection stays when you release (it is
 |---|---|
 | Rec on a track whose type is Off | The selected strip cell shows `pick a type` for two seconds. Nothing records, the transport does not start. |
 | Transport stopped, Chord/Arp track: press **Rec** | The transport starts at step 1 and recording starts at once. The recorded track's cell turns red and shows `REC`. After it ends the cell shows `rec overflow` / `MIDI only` / `reduced` while the last recording had that hint. |
-| (Triad chosen, see 7a) Hold a root pad for a few steps, release | The chord keeps sounding while held (Live). Press **Rec** again: the red `REC` goes. Leave Play mode (tap Pattern): the pattern page shows a note with the chord FX (`MIDI chord`) on the first step of the chord, steps you passed with no chord are empty, **even where the pattern had notes before** (replace). |
+| **Rec is a toggle** (plan 008 A): press **Rec** and let go, keep playing for several steps, then press **Rec** again | The first press starts the take (red `REC` in the cell), it keeps running after you let go of the key, also while the key is held for a second or more; the second press ends it. Holding the key does nothing (the keys driver sends hold events, they are ignored). A bounce (two presses within 60 ms) counts once. |
+| **Punch region**: Chord/Arp track, pattern with notes on every step. Press Rec at step 5, wait, play a chord from step 7 to step 9, let go, press Rec at step 12 | Only the steps that passed **while the chord was played** (7-9; a step already playing when a note starts may get the note) are replaced by what the sequencer played; everything else, including the idle steps 5-6 and 10-12 of the take, keeps its old notes. A take in which you play nothing, even over several laps, changes nothing. A second lap only rewrites steps that get new playing; a chord that crosses the loop end keeps its notes when the next lap is idle. A new take never wipes the track. |
+| Mute the recorded track (Shift + its screen button), take as above | Silent, but the take records what the pads play. |
+| A take that ends by itself (transport Stop, track set Off, project load) | The cell shows for two seconds why: `rec: Stop event` (Stop), `rec: transport stopped`, `rec: track set Off`, `rec: reset`, `rec: pattern changed`. A loop that is complete (Shift + Rec) and your own Rec press show nothing. If a take ever ends by itself without a reason you caused, note the text: it names the cause. |
+| (Triad chosen, see 7a) Hold a root pad for a few steps, release | The chord keeps sounding while held (Live). Press **Rec** again: the red `REC` goes. Leave Play mode (tap Pattern): the pattern page shows a note with the chord FX (`MIDI chord`) on the first step of the chord; steps that passed **while the chord was played** are replaced (a gap in the arp is an empty step), steps that passed while nothing was played keep their old notes. |
 | Quantise | A note that starts in the first half of a step (before the middle) lands on that step, in the second half on the next step (like stock live record). With rec microtiming ON in the Config the note stays on its step and gets a micromove value instead. |
 | Velocity | With rec velocity ON in the Config the step volume follows the sequencer velocity (the c31 groove), otherwise the volume stays default. |
 | Undo | In the pattern editor press the stock **Undo**: the whole recording disappears in **one** step and the previous pattern is back. Redo brings it back. |
@@ -152,7 +156,7 @@ Then hold a root pad in columns 1-6. The selection stays when you release (it is
 | Record a very busy arp (fastest speed, 1/32) for a long time | Normally nothing special. If steps are missing in a long busy recording, note what you did (it means the main loop was too slow to take the steps). |
 | Stop the transport while recording | Recording ends by itself. Steps written so far stay, one undo step. |
 | End of a recording (Rec, loop end, stop) while the last note is still held/open | A note-off is written on the next step that holds no note, so the last note does not ring into the old pattern content; a step that already has a note is left alone. |
-| Change the pattern (Song mode) while recording | Recording ends; nothing is written into the new pattern. |
+| Change the pattern (Song mode, scene, queue) while recording | Recording ends at once (also if nothing was played), the cell shows `rec: pattern changed` for two seconds; the few steps still in the queue at the switch are dropped, nothing is written into the new pattern. |
 | Set the recorded track to Off (screen button + wheel) while recording | Recording ends when the change applies (next bar). |
 | Rec held in other pages | Outside Play mode Rec is the stock Rec (edit mode). Leaving Play mode (tap Pattern, any other module button) ends a running recording (punch-out note-off as usual); the pattern is not touched while you edit it. |
 
@@ -163,7 +167,7 @@ Then hold a root pad in columns 1-6. The selection stays when you release (it is
 | Wait for the wrap | At step 1 the sequencer's notes replace every step of the loop. |
 | At the next wrap | Recording stops by itself, the red `REC` goes. The whole loop is one undo step. A note near the end of the last step that would quantise to step 1 is NOT written to step 1. |
 | Transport stopped: **Shift + Rec** | The transport starts at step 1 and the loop starts at once. |
-| Press **Rec** twice quickly (double tap) | Recording starts and ends again (toggle); it does not restart. |
+| Press **Rec** twice quickly (double tap, 0.1 s or more apart) | Recording starts and ends again (toggle); it does not restart. |
 | **Rec** (without Shift) while armed or recording | Ends it at once (what was written stays). |
 
 ## 8. Save / load with the project
@@ -301,13 +305,15 @@ Pad grid of the layer (all 12 columns, none reserved): 4 rows = 4 tracks of the 
 | Press pads 1, 3, 5, 7 one after the other | The sample is cut to the matching positions each time. |
 | Press a pad on the drum row | The drum pattern jumps to that position; a drum hit on the target step plays, otherwise the drum track sounds like the stock pattern would at that point (the last note before the position is retriggered with the offset, so a long kick tail is cut in). |
 | Jump on the MIDI row to a step without a note | The last MIDI note before that position is played again (no offset). Jump to a position after a note-off: silence. |
-| Hold two pads of a row (e.g. 2 and 4) | A loop over positions 2..4 starts at the next step; the pads between are lit as loop. Release one pad: the loop ends and the row runs on from where it is. |
-| Hold three pads | The loop covers the outer pads. |
+| Press two pads of a row (e.g. 2 and 4) | A loop over positions 2..4 starts at the next grid point (see Q); the pads between are lit as loop. **The loop latches (MLR style):** let go of the pads and it keeps turning. Tapping **one** pad in that row jumps there and ends the loop (so do RESYNC and SYNC ALL). Releasing both pads before the grid point still starts the loop. |
+| Press three pads | The loop covers the outer pads. |
 | STOP pad (9) of a row | The row goes silent at once (sounding note stops); the pad LED is bright, the row's position pads go dark. The other rows keep playing. Press again: the row starts again at the global position (RESYNC). |
 | REVERSE pad | The row plays its positions backwards (each step replays the sample from the matching offset, forward). Press again: forward. LED bright while reversed. |
 | RATE pad | 1 press = double (the row steps through the pattern at 2x; two triggers per step), 2 presses = half (each position lasts 2 steps, nothing triggers on the second), 3 = normal again. |
 | Jump around, then RESYNC pad | The row snaps back to the global position (retriggering the sample at that offset); loops, reverse, rate, stopped state and a recorded loop of the row are cleared; the row is stock again (RESYNC LED dim). |
-| Hold Rec, jam jumps on row 1, release Rec | While Rec is held the RESYNC pad of the touched row blinks (recording). On release the row repeats the jumped sequence, step for step, forever; RESYNC LED bright = a recorded loop replays. Rows you did not touch while Rec was held are not changed. |
+| **Rec toggle** (plan 008 A): press Rec once and let go (the key may be held for seconds, it does not matter), jam jumps / loops / reverse / rate on row 1, press Rec again | Screen button 7 shows `[REC]` while the take is armed (the header turns red). The first pad of a row starts that row's take (RESYNC pad blinks); with Q beat / bar the take starts at the beat where that first gesture takes effect, not at the press. Letting go of Rec does not end anything. The second Rec press closes all takes on the next grid point (the length is a whole number of beats / bars): the row repeats what you played during the take, step for step (also rate x2 with its second half-steps, reverse), forever (RESYNC LED bright = a recorded loop replays). Rows you did not touch during the take are not changed. A take in a group you are not looking at is closed by the same press. |
+| **Jump quantise** (screen button 5, label `Q beat`): tap it | The label cycles `Q bar`, `Q off`, `Q step`, `Q beat` (default beat). With beat a pad jump (and the start of a two-pad loop) waits for the next beat (4 steps), with bar for the next bar (16 steps; a pattern that is not a whole number of bars uses its own length as the bar), with `step` for the very next step, with `off` it is played at once (the next audio tick, even in the middle of a step). A pad released before the grid still jumps. STOP / REVERSE / RATE / RESYNC pads act at the next step, not on the grid. Counting is from the pattern start. |
+| Header of the lane screen (no take armed) | Shows the pad functions: `2 pads = loop  9 stop 10 rev 11 speed 12 resync  Rec = rec`; while Rec is armed it reads `REC  play, press Rec again to loop it`. |
 | With a recorded loop running: switch the group (rows show other tracks), switch layers / pages | The recorded loop keeps playing. Switch back: LEDs show it. |
 | Press a pad on a row with a recorded loop | The pad overrides the recording while it is held (jump, loop); on release the row returns to the recorded loop in phase. |
 | Stop and start the transport | Stop is the panic: SYNC ALL ends everything CUT (jumps, loops, reverse, rate, recorded loops); Play gives the stock pattern. |
@@ -336,14 +342,14 @@ Setup: patterns 1-4 with different notes on tracks 1-3 (CLIPS needs them), track
 | Then CLIPS: tap any clip on track 2 | Track 2 plays the clip again; the CUT position follows the clip's step 1. |
 | CUT row with a recorded loop, CLIPS: STOP-A, then launch clips | While stopped all tracks are silent and the CUT loops do not run on; after a launch the track plays again. |
 | CLIPS: launch a scene while CUT rows are active | At the pattern end the new pattern plays; CUT rows keep their settings (position inside the new pattern, clamped). |
-| In CUT hold two pads (loop), then press screen button 8 (CLIPS) | The loop ends at once (pads are released by the layer switch). Rec held while switching: the take is closed. |
-| Leave the Session view (any module button) while a CUT pad is held / Rec is held | Nothing hangs: loop ends, take closed. |
+| In CUT hold two pads (loop), then press screen button 8 (CLIPS) | The loop ends at once (pads are released by the layer switch). Rec armed while switching: the take is closed. |
+| Leave the Session view (any module button) while a CUT pad is held / Rec is armed | Nothing hangs: loop ends, take closed. |
 
 ### 10c. CUT lane screen, SYNC ALL, survival and panic (plan 005 R4, v0.2)
 The CUT layer draws its own screen: header (y 32-62) "CUT 1-4", **four lanes** (one per pad row), each split into the 8 pad segments (alternating shade), note marks, beat / bar ticks on the lower edge, a thin **playhead line** that moves smoothly (not
 per segment) and the segment it is in lightly filled, a cyan **grid ghost** (small pin) where the track would be without the jam, an orange **loop bracket** over the held loop, and the right block (two by two cells = pad columns 9-12: STOP, REVERSE, RATE, RESYNC).
-Left of a lane: the track number and what makes it special (`OFF GRID`, `LOOP`, `REPLAY`, `STOP`, `REC`, `REV`, `1/2 speed`, `2x speed`). Nothing is drawn over the stock title bar. Bottom labels in CUT: `1-4 | 5-8 | 9-12 | 13-16 | | SYNC ALL | (empty) | CLIPS`
-(SYNC ALL on screen button 6, button 7 is empty, button 8 switches back to CLIPS).
+Left of a lane: the track number and what makes it special (`OFF GRID`, `LOOP`, `REPLAY`, `STOP`, `REC`, `REV`, `1/2 speed`, `2x speed`). Nothing is drawn over the stock title bar. Bottom labels in CUT: `1-4 | 5-8 | 9-12 | 13-16 | Q beat | SYNC ALL | (empty or [REC]) | CLIPS`
+(jump quantise on screen button 5, SYNC ALL on button 6, button 7 shows `[REC]` while a take is armed, button 8 switches back to CLIPS).
 Use the project of section 10 (track 1 loop sample, track 2 drums, track 3 MIDI) and a second group with a few more tracks.
 
 | Press | Expected |
@@ -353,14 +359,14 @@ Use the project of section 10 (track 1 loop sample, track 2 drums, track 3 MIDI)
 | Jam: press pad 5 on lane 1 | The line jumps to segment 5; label `OFF GRID`; a cyan ghost keeps running where the stock pattern would be; the RESYNC cell fills. Press RESYNC: line and ghost meet again, label gone. |
 | Hold two pads | Orange bracket over the loop segments, label `LOOP`; release: bracket gone. |
 | Reverse / rate / STOP | The matching right-block cell lights (reverse triangle points backwards, 2x / 1/2 text bright, STOP = square and the lane dimmed, line dim); labels `REV`, `1/2 speed`, `2x speed`, `STOP`. |
-| Hold Rec, jam | Header turns red with `REC`, the touched lanes get a red edge and a red RESYNC disc; release Rec: header normal, the lane shows `REPLAY` and a ring in the RESYNC cell while the recorded loop runs. |
+| Press Rec (toggle), jam | Header turns red with `REC` and screen button 7 shows `[REC]`; the touched lanes get a red edge and a red RESYNC disc; press Rec again: header normal, the lane shows `REPLAY` and a ring in the RESYNC cell while the recorded loop runs. |
 | Pattern edit (another view) and back | Note marks follow the notes (they are re-read about every 100 ms, redraw only when they changed). |
 | Group 5-8 (button 2 or Right), 13-16, Left | Header and lanes show the group; Left / Right page the groups, nothing happens past the ends. Jams of other groups keep running. |
 | Playhead smoothness / sequencer timing | While the transport runs, the line moves smoothly (about 25 frames per second) and pads, arps, Mono and the pattern stay on time. Listen for audible stalls with long SD-streamed samples (the main loop also refills the streams): note them. |
 | **SYNC ALL** (screen button 6) with several lanes jammed, reversed, 2x, looped, one recorded, one stopped | Within one step (next step boundary, never mid-note) every track is back on the stock position: lines on the ghost, all labels gone, all right-block cells normal, the bracket gone, the stopped lane plays again. The label of button 6 shows `[SYNC ALL]` only while some track is off the grid. Check by ear: all tracks play exactly the stock pattern. |
 | Same with a track of another group (open 9-12 first, jam, go back to 1-4, press SYNC ALL, open 9-12 again) | That track was synced too (SYNC ALL covers all 16 tracks). |
 | Shift + RESYNC pad of any row | Same as SYNC ALL (all tracks, not only that row). RESYNC without Shift: that row only. |
-| SYNC ALL while holding a pad / while Rec is held | The held pads and the open take are dropped; letting go afterwards does nothing (no stray loop, no late take). Pressing a pad again starts a new jam. |
+| SYNC ALL while holding a pad / while a take is open | The held pads and the open take are dropped; letting go afterwards does nothing (no stray loop, no late take). Pressing a pad again starts a new jam. |
 | SYNC ALL with the transport stopped, then Play | Every track starts on the grid (no jam left over). |
 | SYNC ALL while a Session STOP (clip launcher) holds a track | That track stays silent until a clip is launched; the snap waits for it (Session STOP wins). |
 | Jam on rows with CUT, switch to CLIPS (screen button 8) and launch clips, switch back | **M5:** the jams, reverse, rate, STOP and recorded loops of the CUT tracks kept running while CLIPS was shown (only a pad held in your hand is released and an open take closed). The lanes show them again. |

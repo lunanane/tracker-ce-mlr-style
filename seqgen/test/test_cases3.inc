@@ -11,8 +11,10 @@ TEST(mono_velocity_pattern_per_instance) {
   r.press(11, 2); r.press(11, 2); CHECK_EQ(r.m.getParam(Mono::P_VG), 4);   // VEL+
   r.press(10, 2); CHECK_EQ(r.m.getParam(Mono::P_VG), 3);                   // VEL-
   for (int i = 0; i < 20; ++i) r.press(11, 2);
-  CHECK_EQ(r.m.getParam(Mono::P_VG), 8);
-  r.m.setParam(Mono::P_VG, 9); r.press(10, 2); CHECK_EQ(r.m.getParam(Mono::P_VG), 9);  // blend 1+8*1: a=1 stays
+  CHECK_EQ(r.m.getParam(Mono::P_VG), 12);                                  // walks on through the blends 9..12 (menu row 2), then stops
+  r.press(10, 2); CHECK_EQ(r.m.getParam(Mono::P_VG), 11);                  // and back down: not stuck in a blend
+  for (int i = 0; i < 20; ++i) r.press(10, 2);
+  CHECK_EQ(r.m.getParam(Mono::P_VG), 1);
 }
 TEST(mono_pattern_8_follows_shared_bar_counter) {
   MRig r; r.m.setStep(1, 0); r.m.setParam(Mono::P_VG, 8);

@@ -13,6 +13,9 @@ bool s_rec = false;
 uint16_t s_recTracks = 0; // tracks whose take was started while Rec was held
 int8_t s_heldTrack[kCutPads];
 bool s_init = false;
+// The jump quantise setting (plan 008 A): the mode is kept here, the audio side learns it with one command (kept until accepted).
+uint8_t s_quant = Q_DEFAULT;
+bool s_quantPending = false;
 uint8_t s_blink = 0;
 
 void init()
@@ -22,6 +25,7 @@ void init()
     s_init = true;
     memset(s_heldTrack, -1, sizeof(s_heldTrack));
     seqCutInit();
+    s_quantPending = true; // the default (beat) goes to the audio side with the first use of the layer
 }
 
 // Releases (pad up, Rec up) that do not fit into the command queue are kept and retried: a lost release would leave a
@@ -50,6 +54,8 @@ void trySync()
     flushPending();
     if (s_syncPending && s_nPending == 0 && seqEngine.postCut(0, packSyncAll()))
         s_syncPending = false;
+    if (s_quantPending && seqEngine.postCut(0, packQuant(s_quant)))
+        s_quantPending = false;
 }
 
 void post(uint8_t track, uint8_t sub, bool down, uint8_t col)
@@ -175,7 +181,27 @@ void cutUpdate()
     trySync();
 }
 
+// Rec is a toggle (plan 008 A): a press arms the take (the first pad on a row starts that row's take), the next press closes all
+// takes, which the tracks then replay. cutRec() sets the state directly (leaving the layer, panic, tests).
+void cutRecToggle()
+{
+    init();
+    cutRec(!s_rec);
+}
+
 bool cutRecHeld() { return s_rec; }
+
+uint8_t cutQuantMode() { return s_quant; }
+
+void cutQuantSet(uint8_t mode)
+{
+    init();
+    s_quant = (uint8_t)(mode % Q_COUNT);
+    s_quantPending = true;
+    trySync();
+}
+
+void cutQuantCycle() { cutQuantSet(quantNext(s_quant)); }
 bool cutSyncPending() { return s_syncPending; }
 
 void cutPanic()

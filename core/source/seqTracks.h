@@ -55,7 +55,8 @@ void seqCutInit(); // constructs the 16 playheads in external RAM (idempotent; a
 bool seqRecTrackLaunched(uint8_t track); // the track holds a launched Session clip: it is not recorded
 void seqTracksViewLeft();                // Play / Session view closed: asks for the project autosave
 bool seqRecStart(bool oneLoop, uint8_t track); // false: track is Off or already recording. Starts the transport if stopped.
-void seqRecStop();
+bool seqRecStopPatternChanged(); // like seqRecStop, the end is reported as "pattern changed"
+bool seqRecStop(); // false: the command did not fit into the queue (the caller retries)
 void seqTracksUpdate(); // once per main loop pass (Tracker::update): applies recorded steps, watches the state
 
 // ---- project sidecar "seqtracks.bin" (main loop, file manager steps) ----

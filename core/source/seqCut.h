@@ -42,7 +42,9 @@ class Cut
     // After the stock step switch of ALL tracks; globalPos = the global step that plays next (the global clock has already advanced).
     // frozen = the Session view stopped the track: nothing advances, nothing triggers (Session STOP wins over CUT).
     StepPlan boundary(uint8_t track, int steps, int globalPos, bool frozen = false);
-    bool mid(uint8_t track, int steps, StepPlan& out, bool frozen = false);            // µstep 25 of a rate-2 step: start the second half-step
+    bool mid(uint8_t track, int steps, StepPlan& out, bool frozen = false);
+    // Quantise "off": a pad gesture is played at the next audio tick, between two step boundaries (uStep != 1). true = jump now.
+    bool now(uint8_t track, int steps, StepPlan& out, bool frozen = false);            // µstep 25 of a rate-2 step: start the second half-step
     bool consumeRetrigger(uint8_t track, StepPlan& out);          // play_microStep, uStep == 1: pending retrigger
     bool holding(uint8_t track) const { return track < kCutTracks && (((holdMask_ >> track) & 1u) != 0); } // second half of a rate-1/2 position
     bool stopped(uint8_t track) const { return track < kCutTracks && (((stopMask_ >> track) & 1u) != 0); } // STOP: nothing plays
@@ -54,6 +56,7 @@ class Cut
     int stock(uint8_t track) const { return track < kCutTracks ? stock_[track] : 0; }
     void setStock(uint8_t track, int pos) { if (track < kCutTracks) stock_[track] = (int16_t)pos; }
     uint16_t activeMask() const { return activeMask_; }
+    uint8_t quant() const { return quant_; } // jump quantise mode (seqcut::Quant), audio context writes it, any context may read it
     // Mask for the audio hooks: driven tracks plus tracks whose hand-back retrigger is still to be played (see consumeRetrigger).
     uint16_t hookMask() const { return (uint16_t)(activeMask_ | handMask_); }
     // Tracks that really are off the grid: driven and not already snapped by SYNC ALL (UI, R1 strip).
@@ -91,6 +94,7 @@ class Cut
     volatile uint16_t handMask_; // retrigger of a track that was just handed back to the stock sequencer
     struct Hand { uint8_t noteStep, elapsed; } hand_[kCutTracks];
     int16_t stock_[kCutTracks];
+    volatile uint8_t quant_; // the engine starts on every step; the CUT layer (cutLayer.cpp) sets the user's default (beat) when it is first used
     View views_[kCutTracks];
 };
 

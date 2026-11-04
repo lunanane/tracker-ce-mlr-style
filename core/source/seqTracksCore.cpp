@@ -20,7 +20,7 @@ enum
 
 Engine::Engine()
   : host_(0), head_(0), tail_(0), takenMask_(0), activeCount_(0), playing_(false), barPulse_(0), idleCount_(0), usAcc_(0), clockSilentUs_(0), epoch_(1),
-    rHead_(0), rTail_(0), recDrops_(0), recState_(seqrec::Planner::IDLE), recTrack_(0), recHints_(0), recEnds_(0), loading_(false), cut_(0), cutRestart_(false), cutRestartPos_(0)
+    rHead_(0), rTail_(0), recDrops_(0), recState_(seqrec::Planner::IDLE), recTrack_(0), recHints_(0), recEnds_(0), recWhy_(0), loading_(false), cut_(0), cutRestart_(false), cutRestartPos_(0)
 {
     memset(ring_, 0, sizeof(ring_));
     memset(recRing_, 0, sizeof(recRing_));
@@ -82,7 +82,7 @@ bool Engine::postType(uint8_t track, uint8_t type)
 
 bool Engine::postRec(uint8_t track, uint8_t mode)
 {
-    if (track >= kTracks || mode > REC_LOOP)
+    if (track >= kTracks || mode > REC_STOP_PATTERN)
         return false;
     Cmd c = { CMD_REC, track, mode };
     return push(c);
@@ -189,13 +189,14 @@ void Engine::recPublish()
     recTrack_ = rec_.track();
     recHints_ = (uint8_t)(rec_.hints() | (recDrops_ ? seqrec::HINT_OVERFLOW : 0));
     recEnds_ = rec_.ends();
+    recWhy_ = rec_.why();
 }
 
 void Engine::applyRec(uint8_t track, uint8_t mode)
 {
-    if (mode == REC_STOP || track >= kTracks || !host_)
+    if (mode == REC_STOP || mode == REC_STOP_PATTERN || track >= kTracks || !host_)
     {
-        rec_.stop();
+        rec_.stop(mode == REC_STOP_PATTERN ? 5 : 0);
     }
     else if (t_[track].type != TYPE_OFF)
     {
@@ -333,7 +334,7 @@ void Engine::applyType(uint8_t track, uint8_t type)
         activeCount_--;
         if (rec_.active() && rec_.track() == track)
         {
-            rec_.stop();
+            rec_.stop(3); // the track was set Off
             recPublish();
         }
     }
@@ -469,7 +470,7 @@ void Engine::stepClock(uint16_t trackUStep)
         seqrec::TrackPos p;
         host_->trackPos(rec_.track(), p);
         if (p.uStep == 1)
-            rec_.enter(p.pos);
+            rec_.enter(p.pos, recLive(rec_.track()));
     }
     if (((trackUStep - 1) % 8) == 0)
         pulseAll();
@@ -483,7 +484,7 @@ void Engine::idleLogic()
     drain();
     if (rec_.active())
     {
-        rec_.stop(); // the transport stopped: recording ends
+        rec_.stop(2); // the transport stopped: recording ends
         recPublish();
     }
     if (activeCount_ == 0)
@@ -607,7 +608,10 @@ void Engine::onEvent(const seqgen::Event& e)
     if (e.kind == seqgen::EV_NOTE_ON)
     {
         if (host_->muted(track))
+        {
+            recFeedOn(track, e); // muting is a monitoring choice: the take still records what the pads play
             return;
+        }
         if (!((takenMask_ >> track) & 1u))
         {
             takenMask_ = (uint16_t)(takenMask_ | (1u << track));
@@ -649,27 +653,39 @@ void Engine::onEvent(const seqgen::Event& e)
             }
             host_->noteOn(track, e.note, velocityToVolume(e.vel));
         }
-        if (rec_.active() && rec_.track() == track)
-        {
-            seqrec::TrackPos p;
-            host_->trackPos(track, p);
-            rec_.setTrackInfo(host_->sampleTrack(track), host_->instrument(track));
-            rec_.noteOn(e.note, velocityToVolume(e.vel), p, host_->recParams());
-        }
+        recFeedOn(track, e);
+    }
+    else if (!(byte & bit) && host_->muted(track))
+    {
+        recFeedOff(track); // a muted track sounds nothing, its take still gets the gate ends
     }
     else if (byte & bit)
     {
         byte = (uint8_t)(byte & ~bit);
         t.nSounding--;
         host_->noteOff(track, e.note);
-        if (rec_.active() && rec_.track() == track)
-        {
-            seqrec::TrackPos p;
-            host_->trackPos(track, p);
-            rec_.setTrackInfo(host_->sampleTrack(track), host_->instrument(track));
-            rec_.noteOff(p, host_->recParams());
-        }
+        recFeedOff(track);
     }
+}
+
+void Engine::recFeedOn(uint8_t track, const seqgen::Event& e)
+{
+    if (!rec_.active() || rec_.track() != track)
+        return;
+    seqrec::TrackPos p;
+    host_->trackPos(track, p);
+    rec_.setTrackInfo(host_->sampleTrack(track), host_->instrument(track));
+    rec_.noteOn(e.note, velocityToVolume(e.vel), p, host_->recParams());
+}
+
+void Engine::recFeedOff(uint8_t track)
+{
+    if (!rec_.active() || rec_.track() != track)
+        return;
+    seqrec::TrackPos p;
+    host_->trackPos(track, p);
+    rec_.setTrackInfo(host_->sampleTrack(track), host_->instrument(track));
+    rec_.noteOff(p, host_->recParams());
 }
 
 // ------------------------------------------------------------------ project sidecar
@@ -786,6 +802,7 @@ void Engine::resetState()
 {
     loading_ = true;
     SEQ_COMPILER_BARRIER(); // t_ / activeCount_ are plain variables: do not let the compiler move their writes out of the guard
+    rec_.stop(4); // (before the tracks go Off: the reason of the end is the reset)
     for (uint8_t i = 0; i < kTracks; i++)
     {
         if (t_[i].type != TYPE_OFF)
@@ -793,7 +810,7 @@ void Engine::resetState()
         initTrack(i);
     }
     hrBus_.reset();
-    rec_.stop();
+    rec_.stop(4);
     recPublish();
     tail_ = head_;
     activeCount_ = 0;

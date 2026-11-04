@@ -9,6 +9,7 @@
 
 #include "displayControls.h"
 #include "seqPlayLogic.h"
+#include "seqRecLogic.h"
 
 // What the overlay control draws (written by the overlay, read by the control on the display refresh).
 struct SeqPlayViewData
@@ -109,6 +110,8 @@ class SeqPlayOverlay
     uint32_t cellKey_[8];
     bool stripKeyValid_ = false;
     seqplay::LateRelease late_;
+    seqrecui::RecToggle recKey_; // the Rec key: a toggle on the press (hold / release mean nothing), plan 008 A
+    bool recStopPending_ = false; // a Rec stop that did not fit into the command queue: retried every pass
     const char* msg_ = nullptr;
     uint32_t msgUntil_ = 0;
     uint32_t ledTime_ = 0;

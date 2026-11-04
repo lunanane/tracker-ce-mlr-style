@@ -76,12 +76,20 @@ TEST(playhead_two_pad_loop_both_press_orders) {
     o = stp(p); CHECK_EQ(o.pos, 16); CHECK(o.jumped);  // wrap inside the loop: the engine would have gone on to 48
     steps(p, 10);   // 17..26
     p.release(order == 0 ? 2 : 5);
-    CHECK(!p.looping());
-    o = stp(p); CHECK_EQ(o.pos, 27); CHECK(!o.jumped);  // free running from the current position
+    CHECK(p.looping());  // plan 008 (MLR style): the loop latches, it stays after a pad is released
+    o = stp(p); CHECK_EQ(o.pos, 27); CHECK(!o.jumped);
     steps(p, 19);   // 28..46
     o = stp(p); CHECK_EQ(o.pos, 47);
-    o = stp(p); CHECK_EQ(o.pos, 48); CHECK(!o.jumped);  // no loop wall any more
+    o = stp(p); CHECK_EQ(o.pos, 16); CHECK(o.jumped);  // the loop wall is still there
     p.release(order == 0 ? 5 : 2);
+    CHECK(p.looping() && p.loopLo() == 2 && p.loopHi() == 5);  // all pads up: still latched
+    steps(p, 40);
+    CHECK(p.position() >= 16 && p.position() <= 47);
+    // a single pad in the row jumps and ends the loop
+    p.press(0); o = stp(p); CHECK_EQ(o.pos, 0); CHECK(o.jumped); CHECK(!p.looping());
+    o = stp(p); CHECK_EQ(o.pos, 1); CHECK(!o.jumped);
+    p.release(0);
+    o = stp(p); CHECK_EQ(o.pos, 2);
   }
 }
 
@@ -109,25 +117,29 @@ TEST(playhead_loop_one_column_when_track_is_shorter_than_columns) {
   CHECK_EQ(stp(q).pos, 2); CHECK_EQ(stp(q).pos, 2); CHECK_EQ(stp(q).pos, 2);
 }
 
-// Records `n` steps: the recorded jumps are col 6 at step 8, col 1 at step 14 and col 4 at step 25 (len 16 = 2 bars of 16).
+// Rec armed, then 32 steps of free running with the jumps col 6 at step 8, col 1 at step 14 and col 4 at step 25 (len 16). The take
+// starts with the first applied gesture (step 8, plan 008): it holds the 24 steps from there, exp[0..23] (exp[0] = 12 = column 6).
 static int takeThreeJumps(Playhead& p, uint8_t* exp, bool withHolds = false) {
   (void)withHolds;
   p.recDown();
+  int n = 0;
   for (int i = 0; i < 32; ++i) {
     if (i == 8) { p.press(6); p.release(6); }
     if (i == 14) { p.press(1); p.release(1); }
     if (i == 25) { p.press(4); p.release(4); }
-    exp[i] = p.step().pos;
+    uint8_t pos = p.step().pos;
+    if (i >= 8) exp[n++] = pos;
   }
   p.recUp();
-  return 32;
+  return n;
 }
 
 TEST(playhead_recording_three_jumps_replays_identically) {
   Playhead p;  // length 16, 8 columns
   uint8_t exp[32]; int n = takeThreeJumps(p, exp);
   CHECK(p.recorded()); CHECK_EQ(p.recordedLength(), n); CHECK(!p.recording());
-  CHECK_EQ(exp[7], 7); CHECK_EQ(exp[8], 12); CHECK_EQ(exp[9], 13); CHECK_EQ(exp[14], 2); CHECK_EQ(exp[25], 8);
+  CHECK_EQ(n, 24);
+  CHECK_EQ(exp[0], 12); CHECK_EQ(exp[1], 13); CHECK_EQ(exp[6], 2); CHECK_EQ(exp[17], 8);
   for (int loop = 0; loop < 5; ++loop) for (int i = 0; i < n; ++i) {
     Playhead::StepOut o = stp(p);
     CHECK_EQ(o.pos, exp[i]);
@@ -184,19 +196,20 @@ TEST(playhead_clear_recording_by_resync_and_by_an_empty_take) {
   takeThreeJumps(p, exp); CHECK(p.recorded());
   p.resync(0); CHECK(!p.recorded());
   takeThreeJumps(p, exp); CHECK(p.recorded());
-  p.recDown(); p.recUp();  // empty take = clear
-  CHECK(!p.recorded());
+  p.recDown(); steps(p, 5); p.recUp();  // plan 008: a take in which no gesture was played changes nothing, the old loop stays
+  CHECK(p.recorded()); CHECK(!p.recording()); CHECK_EQ(p.recordedLength(), 24);
+  p.clearRecording(); CHECK(!p.recorded());
   takeThreeJumps(p, exp);
   p.clearRecording(); CHECK(!p.recorded());
-  // a new take replaces the old one
+  // a new take replaces the old one (it starts with its first gesture)
   takeThreeJumps(p, exp);
-  p.recDown(); steps(p, 3); p.recUp();
+  p.recDown(); p.press(2); p.release(2); steps(p, 3); p.recUp();
   CHECK_EQ(p.recordedLength(), 3);
 }
 
 TEST(playhead_full_take_closes_itself_at_256_steps) {
   Playhead p; p.setLength(256);
-  p.recDown(); steps(p, 255); CHECK(p.recording());
+  p.recDown(); p.press(0); p.release(0); steps(p, 255); CHECK(p.recording());
   p.step();
   CHECK(!p.recording()); CHECK_EQ(p.recordedLength(), 256);
   p.recUp();  // no-op
@@ -302,6 +315,8 @@ TEST(playhead_serialize_round_trip) {
   Playhead p; p.setLength(100); p.setColumns(12); p.setQuantise(4); p.setRate(Playhead::RATE_HALF); p.setReverse(true);
   p.setRate(Playhead::RATE_NORMAL);
   p.recDown(); p.press(3); steps(p, 5); p.release(3); steps(p, 6); p.recUp();
+  for (int i = 0; i < 4 && p.recording(); ++i) p.step();  // quantise 4: Rec off closes the take on the next grid boundary
+  CHECK(!p.recording());
   CHECK(p.recorded());
   uint8_t buf[Playhead::kSerialSize + 4];
   CHECK_EQ(p.serialize(buf, sizeof buf), Playhead::kSerialSize);
@@ -348,7 +363,78 @@ TEST(playhead_restart_keeps_recorded_loop_and_rewinds_it) {
   p.recDown(); p.press(4); steps(p, 3); p.recUp();  // take of 3 steps: 8 9 10
   CHECK(p.recorded());
   p.release(4);
-  p.restart(1);                                      // loop index 1 % 3
+  p.restart(3);                                      // the take began at step 2: loop index (3 - 2) % 3 = 1
   Playhead::StepOut o = stp(p); CHECK_EQ(o.pos, 9);
   o = stp(p); CHECK_EQ(o.pos, 10); CHECK(p.recorded());
+  p.restart(1);                                      // before the take's start: (1 - 2) mod 3 = 2
+  o = stp(p); CHECK_EQ(o.pos, 10);
+}
+
+// ---- plan 008 A (owner review): latched loops, takes on the grid, immediate mode, x2 takes ----
+TEST(playhead_pending_loop_survives_release_before_the_grid) {
+  Playhead p; p.setLength(64); p.setQuantise(4); steps(p, 1);  // the next step has index 1, the grid is at 4
+  p.press(2); p.press(5); p.release(2); p.release(5);
+  CHECK(p.pending()); CHECK_EQ(p.heldCount(), 0);
+  steps(p, 3);
+  Playhead::StepOut o = stp(p);
+  CHECK(p.looping()); CHECK_EQ(o.pos, 16); CHECK(o.jumped);
+  for (int i = 17; i <= 47; ++i) CHECK_EQ(stp(p).pos, i);
+  CHECK_EQ(stp(p).pos, 16);  // latched: no pad is down and the loop still turns
+}
+
+TEST(playhead_take_starts_on_the_grid_and_closes_on_it) {
+  Playhead p; p.setLength(16); p.setQuantise(4); steps(p, 1);
+  p.recDown(); p.press(6); p.release(6);   // the jump waits for index 4
+  steps(p, 3);
+  CHECK(p.recording()); CHECK(!p.recorded());
+  Playhead::StepOut o = stp(p);            // index 4: the gesture is applied, the take starts here
+  CHECK_EQ(o.pos, 12);
+  steps(p, 2);                             // 13, 14
+  p.recUp();                               // not on the grid: the take runs on to it
+  CHECK(p.recording());
+  steps(p, 1);                             // 15, then index 8 is the grid
+  CHECK(!p.recording()); CHECK(p.recorded()); CHECK_EQ(p.recordedLength(), 4);
+  for (int lap = 0; lap < 3; ++lap) for (int i = 0; i < 4; ++i) CHECK_EQ(stp(p).pos, 12 + i);
+  // Rec off before any gesture was applied: nothing recorded, the loop that replays stays
+  p.recDown(); p.recUp(); CHECK(!p.recording()); CHECK(p.recorded());
+}
+
+TEST(playhead_rate_double_take_keeps_its_second_half_steps) {
+  for (int rev = 0; rev < 2; ++rev) {
+    Playhead p; p.setLength(16); p.setRate(Playhead::RATE_DOUBLE); p.setReverse(rev != 0);
+    p.recDown(); p.press(4); p.release(4);  // position 8
+    uint8_t pos[4], pos2[4];
+    for (int i = 0; i < 4; ++i) { Playhead::StepOut o = stp(p); CHECK(o.has2); pos[i] = o.pos; pos2[i] = o.pos2; }
+    p.recUp();
+    CHECK(p.recorded());
+    for (int lap = 0; lap < 3; ++lap) for (int i = 0; i < 4; ++i) {
+      Playhead::StepOut o = stp(p);
+      CHECK(o.has2); CHECK_EQ(o.pos, pos[i]); CHECK_EQ(o.pos2, pos2[i]);
+    }
+  }
+}
+
+TEST(playhead_immediate_mode_applies_between_steps) {
+  Playhead p; p.setLength(16); p.setImmediate(true); steps(p, 3);
+  Playhead::StepOut o;
+  CHECK(!p.applyNow(o));
+  p.press(6);
+  CHECK(p.applyNow(o)); CHECK_EQ(o.pos, 12); CHECK(o.jumped);
+  CHECK(!p.applyNow(o));  // consumed: the next boundary does not jump again
+  o = stp(p); CHECK_EQ(o.pos, 13); CHECK(!o.jumped);
+  Playhead q; q.press(6); CHECK(!q.applyNow(o)); CHECK_EQ(stp(q).pos, 12);  // not immediate: waits for the boundary
+  Playhead r; r.setLength(64); r.setImmediate(true); r.press(2); r.press(5);
+  CHECK(r.applyNow(o)); CHECK_EQ(o.pos, 16); CHECK(r.looping()); CHECK_EQ(r.loopLo(), 2); CHECK_EQ(r.loopHi(), 5);
+  // while a take waits for its first gesture the immediate jump starts it
+  Playhead t; t.setLength(16); t.setImmediate(true); t.recDown(); t.press(3);
+  CHECK(t.applyNow(o)); stp(t); stp(t); t.recUp();
+  CHECK(t.recorded()); CHECK_EQ(t.recordedLength(), 2);
+}
+
+TEST(playhead_grid_position_decides_the_quantise_boundary) {
+  Playhead p; p.setLength(8); p.setQuantise(8);  // a bar of an 8 step pattern
+  p.setGridPos(5); p.press(4);
+  Playhead::StepOut o = stp(p); CHECK_EQ(o.pos, 0); CHECK(p.pending());   // not on the grid (and no jump yet)
+  p.setGridPos(6); o = stp(p); CHECK_EQ(o.pos, 1);
+  p.setGridPos(0); o = stp(p); CHECK_EQ(o.pos, 4); CHECK(o.jumped);       // the pattern start is the grid
 }

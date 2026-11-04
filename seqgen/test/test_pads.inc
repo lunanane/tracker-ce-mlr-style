@@ -40,7 +40,7 @@ TEST(pads_chord_type_changes_the_sounding_chord_at_once) {
 TEST(pads_play_page_type_speed_direction_rows) {
   Rig r;
   for (int v = 1; v <= 3; ++v) { r.press(7 + v, 0); CHECK_EQ(r.ca.getParam(ChordArp::P_Q_TYPE), v); }
-  r.press(11, 0); r.press(11, 0);                      // (0,11) is the page pad, not a 4th type: out and back, the queue is unchanged
+  r.press(11, 0); r.press(11, 0);                      // (11,0) is the page pad, not a 4th type: out and back, the queue is unchanged
   CHECK_EQ(r.ca.getParam(ChordArp::P_Q_TYPE), 3);
   for (int v = 1; v <= 4; ++v) { r.press(7 + v, 1); CHECK_EQ(r.ca.getParam(ChordArp::P_Q_SPEED), v); }
   for (int v = 1; v <= 4; ++v) { r.press(7 + v, 2); CHECK_EQ(r.ca.getParam(ChordArp::P_Q_DIR), v); }
