@@ -6,6 +6,7 @@
 #include "mtMidi.h"
 #include "mtStructs.h"
 #include "scales.h"
+#include "seqModLogic.h"
 #include "util_math.h"
 #include <stdint.h>
 
@@ -712,6 +713,17 @@ class Sequencer
         player.performanceMode = 0;
         player.performance.patternLength = -1;
     }
+
+    // sequencer tracks mod (plan 005 C1): the clip launcher and the perform FX both own the performance-mode flag. An owner lets
+    // go with this; the flag is only switched off when no owner remains. true: it was switched off.
+    bool releasePerformanceMode(uint8_t owner)
+    {
+        if (!seqPerfOwners.release(owner))
+            return false;
+        exitPerformanceMode();
+        return true;
+    }
+    static seqlogic::PerfOwners seqPerfOwners;
 
     bool isPerformancePatternChanged()
     {

@@ -1,3 +1,4 @@
+#include "seqTracks.h"
 #include "core/interface.h"
 
 #include "projectEditor/projectEditor.h"
@@ -325,6 +326,8 @@ void Interface::commonThingsUpdate()
         songTimer.refresh();
     }
 
+    if (seqTapRefusedTake())
+        titleBar.flashRefused();
     titleBar.refresh();
 
     if (fileManagerPopupEnabled)

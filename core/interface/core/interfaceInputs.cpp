@@ -3,6 +3,7 @@
 
 #include "Platform.h"
 #include "seqTracks.h"
+#include "seqHooks.h"
 
 #ifdef TRACKER_MINI
 bool fnButtonShiftPressed[4] = { false, false, false, false };
@@ -20,25 +21,20 @@ static inline bool isNavButton(uint8_t b)
 //=======================================================================
 void Interface::potChange(uint8_t n, int16_t value)
 {
-    seqNoteOtherInput();
+    // the jog wheel does not break a mode-button tap (plan 005 M4)
+    if (seqPlayRoutePot(n, value))
+        return;
     ip->processPotsInput(n, value);
 }
 
 //=======================================================================
 void Interface::buttonChange(uint8_t n, uint8_t value)
 {
-    if (n != interfaceButtonPattern && n != interfaceButtonPerformance)
-    {
-        seqNoteOtherInput(); // breaks a Pattern / Performance tap
-    }
-    else if (n == interfaceButtonPattern)
-    {
-        seqPerformTap.other(); // Pattern pressed while Performance is held
-    }
-    else
-    {
-        seqPatternTap.other(); // Performance pressed while Pattern is held
-    }
+    // only buttons break a mode-button tap; a mode button does not break its own tap
+    seqNoteButtonInput(n == interfaceButtonPattern, n == interfaceButtonPerformance, n == interfaceButtonSong);
+
+    if (seqPlayRouteButton(n, value))
+        return; // consumed by the Play overlay (R1)
 
 #ifdef TRACKER_MINI
     if (isNavButton(n))
@@ -92,9 +88,10 @@ bool Interface::powerButtonChange(uint8_t state)
 //=======================================================================
 void Interface::padPressed(uint8_t n, int8_t, int8_t, uint8_t velo)
 {
-    seqNoteOtherInput();
     if (seqPadsHeld < 255)
         seqPadsHeld++;
+    if (seqPlayRoutePad(n, 1, velo))
+        return;
     ip->processPadsInput(n, 1, velo);
 }
 
@@ -103,12 +100,16 @@ void Interface::padReleased(uint8_t n)
 {
     if (seqPadsHeld > 0)
         seqPadsHeld--;
+    if (seqPlayRoutePad(n, 0, 0))
+        return;
     ip->processPadsInput(n, 0, 0);
 }
 
 //=======================================================================
 void Interface::padHold(uint8_t n)
 {
+    if (seqPlayRoutePad(n, 2, 0))
+        return;
     ip->processPadsInput(n, 2, 0);
 }
 

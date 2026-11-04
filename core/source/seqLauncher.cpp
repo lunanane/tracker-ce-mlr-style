@@ -115,6 +115,7 @@ void restoreLaunched()
     seqLauncher.onPatternSwitched();
     ENABLE_AUDIO_INTERRUPTS();
     s_ownsPerf = false;
+    Sequencer::seqPerfOwners.release(seqlogic::PERF_OWNER_LAUNCHER); // the clips are gone; the flag itself was handled by the one who switched it off
 }
 
 void scanOneRow()
@@ -262,7 +263,8 @@ void Sequencer::seqSessionPatternSwitched()
     if (s_ownsPerf)
     {
         s_ownsPerf = false;
-        exitPerformanceMode(); // performance mode only carried the per-track clip lengths
+        // performance mode only carried the per-track clip lengths; it stays on while the perform FX still own it
+        releasePerformanceMode(seqlogic::PERF_OWNER_LAUNCHER);
     }
     if (!irq)
         ENABLE_AUDIO_INTERRUPTS();
@@ -272,7 +274,14 @@ void Sequencer::seqSessionPatternSwitched()
 void Sequencer::seqSessionEnterPerformance()
 {
     if (player.performanceMode)
-        return; // somebody else (Performance screen) has it on: it stays theirs
+    {
+        // the perform FX have it on: the clips claim it too, so leaving the Performance page does not end them (C1). The
+        // per-track lengths are those of the pattern already.
+        seqPerfOwners.claim(seqlogic::PERF_OWNER_LAUNCHER);
+        s_ownsPerf = true;
+        return;
+    }
+    seqPerfOwners.claim(seqlogic::PERF_OWNER_LAUNCHER);
     for (uint8_t a = 0; a < kAllTracks; a++)
         player.performance.trackLength[a] = getActualPattern()->track[0].length;
     __asm__ __volatile__("" ::: "memory");

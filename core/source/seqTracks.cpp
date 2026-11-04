@@ -10,6 +10,9 @@
 #include <cr_section_macros.h>
 #include "seqCut.h"
 #include "seqLauncher.h"
+#include "seqSidecar.h"
+#include "seqClips.h"
+#include "seqHooks.h"
 #include <math.h>
 #include <new>
 #include <stdio.h>
@@ -19,6 +22,8 @@ extern strMtProject mtProject;
 
 seqlogic::TapDetector seqPatternTap;
 seqlogic::TapDetector seqPerformTap;
+seqlogic::TapDetector seqSongTap;
+volatile bool seqTapRefusedFlag = false;
 uint8_t seqPadsHeld = 0;
 
 uint32_t seqNowMs()
@@ -408,46 +413,20 @@ const char kSidecarName[] = "seqtracks.bin";
 
 void projectSidecarPath(char* out, size_t cap, const char* path, const char* name)
 {
-    snprintf(out, cap, "%s/%s/%s", path, name, kSidecarName);
+    seqsidecar::projectFilePath(out, cap, path, name, kSidecarName);
 }
 
-// One shared buffer for all sidecar file steps (main thread, one at a time). Kept in external RAM: the MK66 stack is only
-// 4 KB and on the Plus SRAM_DTC is nearly full.
-__NOINIT(EXTERNAL_RAM) uint8_t s_io[seqtracks::Engine::kSidecarMax];
-
-// Writes <path>.tmp completely, then replaces <path> (remove + rename: a half-written file never takes the place of the old one;
-// the FAT API has no atomic replace, so a power loss between remove and rename leaves only the .tmp file, which nothing reads).
+// Serializes the engine into the shared I/O buffer and writes it (safe tmp + rename write, see seqSidecar.h).
 // On success s_savedHash = hash of what was written; on failure it stays, so the next change check retries.
 bool writeSidecar(const char* path)
 {
-    uint8_t* buf = s_io;
+    uint8_t* buf = seqsidecar::ioBuffer();
     uint16_t h = seqEngine.stateHash();
     size_t n = seqEngine.saveState(buf, seqtracks::Engine::kSidecarMax);
-    if (!n)
+    if (!n || !seqsidecar::writeFile(path, buf, n))
         return false;
-    FileSystem* fs = newFileManager.getFileSystem();
-    char tmp[PATCH_SIZE + 8];
-    int len = snprintf(tmp, sizeof(tmp), "%s.tmp", path);
-    bool ok;
-    if (fs && len > 0 && (size_t)len < sizeof(tmp))
-    {
-        ok = fileTransfer.saveMemoryToFile(buf, tmp, (uint32_t)n) == fileTransferEnd;
-        if (ok)
-        {
-            if (fs->exists(path))
-                fs->remove(path);
-            ok = fs->rename(tmp, path);
-        }
-        if (!ok && fs->exists(tmp))
-            fs->remove(tmp);
-    }
-    else
-    {
-        ok = fileTransfer.saveMemoryToFile(buf, path, (uint32_t)n) == fileTransferEnd;
-    }
-    if (ok)
-        s_savedHash = h;
-    return ok;
+    s_savedHash = h;
+    return true;
 }
 
 enum ReadResult { READ_MISSING, READ_VALID, READ_INVALID };
@@ -455,19 +434,14 @@ enum ReadResult { READ_MISSING, READ_VALID, READ_INVALID };
 // Reads a sidecar into the engine. Missing or invalid file: every track Off (stock behaviour).
 ReadResult readSidecar(const char* path)
 {
-    FileSystem* fs = newFileManager.getFileSystem();
-    if (!fs || !fs->exists(path))
+    if (!seqsidecar::exists(path))
     {
         seqEngine.resetState();
         return READ_MISSING;
     }
-    // the real file length goes to loadState: bytes left in the shared buffer by an earlier file must not complete a short file
-    size_t sz = fs->getFileSize(path);
-    if (sz > seqtracks::Engine::kSidecarMax)
-        sz = seqtracks::Engine::kSidecarMax;
-    uint8_t* buf = s_io;
-    if (sz && fileTransfer.loadFileToMemory(path, buf, (uint32_t)sz, fileWholeOnce) == fileTransferEnd &&
-        seqEngine.loadState(buf, sz))
+    uint8_t* buf = seqsidecar::ioBuffer();
+    size_t sz = seqsidecar::readFile(path, buf, seqtracks::Engine::kSidecarMax);
+    if (sz && seqEngine.loadState(buf, sz))
         return READ_VALID;
     seqEngine.resetState();
     return READ_INVALID;
@@ -477,12 +451,6 @@ ReadResult readSidecar(const char* path)
 uint32_t s_loadedId = 0;
 bool s_loadedValid = false;
 
-void removeIfExists(const char* path)
-{
-    FileSystem* fs = newFileManager.getFileSystem();
-    if (fs && fs->exists(path))
-        fs->remove(path);
-}
 } // namespace
 
 namespace
@@ -512,10 +480,28 @@ bool seqRecTrackLaunched(uint8_t track)
     return track < seqsession::kTracks && ((seqLauncher.launchedMask(seqSessionOwnPattern()) >> track) & 1u);
 }
 
+namespace
+{
+seqlogic::DirtyGate s_autosaveGate; // plan 005 M2: no autosave (SD writes) while the transport plays
+seqlogic::PanicLatch s_panic;
+void requestAutosave()
+{
+    if (sequencer.isPlay())
+        s_autosaveGate.mark(); // written once the transport stopped (seqTracksUpdate)
+    else
+        newFileManager.autosaveProjectStruct_ASAP();
+}
+} // namespace
+
 void seqTracksViewLeft()
 {
     // like the stock editor's stop(): the project state (and the pattern changed by a recording) is written soon
-    newFileManager.autosaveProjectStruct_ASAP();
+    requestAutosave();
+}
+
+void seqPanicRequest()
+{
+    s_panic.request();
 }
 
 bool seqRecStart(bool oneLoop, uint8_t track)
@@ -552,6 +538,13 @@ bool anySequencerSet()
 
 void seqTracksUpdate()
 {
+    // transport Stop = panic of the whole mod: every module ends its own held / running state (plan 005 M6)
+    if (s_panic.take())
+        seqPanic();
+    if (s_autosaveGate.take(sequencer.isPlay()))
+        newFileManager.autosaveProjectStruct_ASAP();
+    seqClipsUpdate();
+
     if (s_pendingRel.any())
         s_pendingRel.retry([](uint8_t t, uint8_t p) { return seqEngine.postPad(t, p, false); });
 
@@ -589,7 +582,7 @@ void seqTracksUpdate()
         if (s_rec.dirty && mtProject.values.actualPattern == s_rec.pattern)
             newFileManager.setPatternStructChanged(s_rec.pattern);
         if (s_rec.dirty)
-            newFileManager.autosaveProjectStruct_ASAP();
+            requestAutosave();
         s_rec.dirty = false;
         s_rec.endsSeen = ends;
         s_rec.undoDone = false;
@@ -597,7 +590,7 @@ void seqTracksUpdate()
     }
 
     // 2. sequencer state changed -> let the workspace autosave write the sidecar (checked about once a second)
-    if (s_hashTimer > 1000)
+    if (s_hashTimer > 1000 && !sequencer.isPlay()) // while playing the change check waits: the state stays dirty (hash)
     {
         s_hashTimer = 0;
         if (!s_hadSidecar && !anySequencerSet())
@@ -636,6 +629,8 @@ void seqTracksSaveWorkspace()
     if (!s_wsWritePending)
         return;
     s_wsWritePending = false;
+    if (sequencer.isPlay())
+        return; // no SD write while playing: the change check flags it again after the stop (hash still differs)
     writeSidecar(kWorkspaceSidecar); // on failure s_savedHash stays: the next change check (<= 1 s) flags it again
 }
 
@@ -657,8 +652,8 @@ void seqTracksSaveProject(const char* path, const char* name)
             break;
         case seqlogic::SIDE_REMOVE:
             // never used in this project: no stale file of an overwritten project (nor in the Workspace mirror)
-            removeIfExists(file);
-            removeIfExists(kWorkspaceSidecar);
+            seqsidecar::removeIfExists(file);
+            seqsidecar::removeIfExists(kWorkspaceSidecar);
             break;
         case seqlogic::SIDE_KEEP: break; // leave the folder as stock firmware writes it
     }
@@ -666,15 +661,8 @@ void seqTracksSaveProject(const char* path, const char* name)
 
 void seqTracksImportProject(const char* path, const char* name)
 {
-    FileSystem* fs = newFileManager.getFileSystem();
     char file[PATCH_SIZE];
     projectSidecarPath(file, sizeof(file), path, name);
-    if (!fs || !fs->exists(file))
-        return;
-    size_t sz = fs->getFileSize(file);
-    if (sz > seqtracks::Engine::kSidecarMax)
-        sz = seqtracks::Engine::kSidecarMax;
-    uint8_t* buf = s_io;
-    if (sz && fileTransfer.loadFileToMemory(file, buf, (uint32_t)sz, fileWholeOnce) == fileTransferEnd)
-        fileTransfer.saveMemoryToFile(buf, kWorkspaceSidecar, (uint32_t)sz);
+    if (seqsidecar::exists(file))
+        seqsidecar::importToWorkspace(file, kWorkspaceSidecar);
 }

@@ -8,13 +8,17 @@ namespace seqlogic {
 enum TrackType : uint8_t { TYPE_OFF = 0, TYPE_CHORDARP = 1, TYPE_MONO = 2, TYPE_COUNT = 3 };
 enum { kTracks = 16, kPads = 48, kPadCols = 12 };
 
-// Pattern button tap: press and release with no other input in between (buttons, pad presses, jog wheel), held for at most
-// kTapMaxMs. The caller counts other input with other(); down() is armed only when no other button was held on press and the
-// press did not just close a popup.
+// Mode button tap (Pattern / Performance / Song): press and release with no other BUTTON in between, held for at most
+// kTapMaxMs. Only buttons break a tap (plan 005 M4): the caller counts them with other(); pads and the jog wheel do not count, so
+// a performer with a hand on the pads can still tap. down() is armed only when no other button was held on press and the press
+// did not just close a popup. A quick press that did not become a tap is "refused" (refusedLast() after up()), so the screen can
+// flash.
 struct TapDetector
 {
     enum { kTapMaxMs = 400 };
     bool armed = false;
+    bool pressed = false;
+    bool refused = false;
     uint32_t activity = 0;
     uint32_t atDown = 0;
     uint32_t t0 = 0;
@@ -22,15 +26,20 @@ struct TapDetector
     void down(bool plainPress, uint32_t nowMs)
     {
         armed = plainPress;
+        pressed = true;
         atDown = activity;
         t0 = nowMs;
     }
     bool up(uint32_t nowMs)
     {
-        bool tap = armed && activity == atDown && (uint32_t)(nowMs - t0) <= (uint32_t)kTapMaxMs;
+        bool quick = (uint32_t)(nowMs - t0) <= (uint32_t)kTapMaxMs;
+        bool tap = armed && activity == atDown && quick;
+        refused = pressed && !tap && quick;
         armed = false;
+        pressed = false;
         return tap;
     }
+    bool refusedLast() const { return refused; } // the last up() was a quick press that is not a tap
 };
 
 inline uint8_t padCol(uint8_t pad) { return (uint8_t)(pad % kPadCols); }

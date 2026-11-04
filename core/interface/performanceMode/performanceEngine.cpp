@@ -70,9 +70,12 @@ cPerformFx::cPerformFx(uint8_t fxId,
 bool cPerformEngine::turnOff()
 {
     bool wasPerformanceMode = sequencer.isPerformanceMode();
+    bool switchedOff = false;
     if (wasPerformanceMode)
     {
-        sequencer.exitPerformanceMode();
+        // plan 005 C1: the perform FX let go; performance mode itself stays on while the clip launcher still owns it, and the
+        // caller must not reload the pattern then (that would end the launched clips)
+        switchedOff = sequencer.releasePerformanceMode(seqlogic::PERF_OWNER_FX);
         engine.performanceModeEndAll();
     }
 
@@ -83,7 +86,7 @@ bool cPerformEngine::turnOff()
 
     resetAllFx();
 
-    return wasPerformanceMode;
+    return switchedOff;
 }
 
 void cPerformEngine::forceSaveConfig()

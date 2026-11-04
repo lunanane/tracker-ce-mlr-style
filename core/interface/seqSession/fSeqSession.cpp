@@ -21,6 +21,10 @@ static void functPads(uint8_t pad, uint8_t state, int16_t velo);
 static void functEncoder(int16_t value);
 static void functPlayAction();
 static void functRecButton(uint8_t state);
+static void functLeft(uint8_t state);
+static void functRight(uint8_t state);
+static void functUp(uint8_t state);
+static void functDown(uint8_t state);
 
 //----------------------------------------------------------------------------------------------
 void cSeqSession::start(uint32_t options)
@@ -44,6 +48,11 @@ void cSeqSession::start(uint32_t options)
     ip->setButtonObj(interfaceButtonPlay, buttonPress, functPlayAction);
     ip->setButtonObj(interfaceButtonRec, functRecButton); // forwarded to the active layer (press and release)
 
+    ip->setButtonObj(interfaceButtonLeft, functLeft);
+    ip->setButtonObj(interfaceButtonRight, functRight);
+    ip->setButtonObj(interfaceButtonUp, functUp);
+    ip->setButtonObj(interfaceButtonDown, functDown);
+
     ip->setButtonObj(interfaceButton0, functActionButton);
     ip->setButtonObj(interfaceButton1, functActionButton);
     ip->setButtonObj(interfaceButton2, functActionButton);
@@ -64,6 +73,7 @@ void cSeqSession::start(uint32_t options)
     memset(shownInfo, 0xFF, sizeof(shownInfo));
     shownTitle[0] = 0;
     memset(shownButtons, 0xFF, sizeof(shownButtons));
+    hostTextHidden = false;
 
     titleBar->show();
     titleBar->setTitle("Session view");
@@ -160,6 +170,29 @@ void cSeqSession::jog(int16_t value)
     layers[layerIndex]->jog(value, buttons->isButtonPressed(interfaceButtonShift));
 }
 
+void cSeqSession::screenButton(uint8_t button, bool down)
+{
+    if (layers[layerIndex]->button(button, down))
+        return; // the layer owns this button now (hold gestures, quantise ...)
+    if (!down)
+        return;
+    if (button == seqsession::kButtonClips)
+        selectLayer(0);
+    else if (button == seqsession::kButtonCut)
+        selectLayer(1);
+    else
+    {
+        uint8_t first = seqsession::groupFromButton(button, layers[layerIndex]->groupSize());
+        if (first != 0xFF)
+            selectGroup(first);
+    }
+}
+
+void cSeqSession::arrowKey(seqsession::ArrowDir dir)
+{
+    layers[layerIndex]->arrow(dir, buttons->isButtonPressed(interfaceButtonShift));
+}
+
 //----------------------------------------------------------------------------------------------
 void cSeqSession::refreshPads()
 {
@@ -181,6 +214,26 @@ void cSeqSession::refreshScreen(bool force)
 {
     bool changed = force;
 
+    bool own = layers[layerIndex]->drawsOwnScreen();
+    if (own != hostTextHidden)
+    {
+        hostTextHidden = own;
+        if (own)
+            display.setControlHide(titleLabel);
+        else
+            display.setControlShow(titleLabel);
+        display.refreshControl(titleLabel);
+        for (int i = 0; i < 4; i++)
+        {
+            if (own)
+                display.setControlHide(infoLabel[i]);
+            else
+                display.setControlShow(infoLabel[i]);
+            display.refreshControl(infoLabel[i]);
+        }
+        changed = true;
+    }
+
     uint8_t gs = layers[layerIndex]->groupSize();
     snprintf(titleText, sizeof(titleText), "Session: %s   tracks %d-%d", layers[layerIndex]->name(), groupFirst + 1, groupFirst + gs);
     if (strcmp(titleText, shownTitle) != 0)
@@ -194,7 +247,11 @@ void cSeqSession::refreshScreen(bool force)
     // screen buttons: group choice (1-2 for 8 tracks, 1-4 for 4 tracks), 7 = CLIPS, 8 = CUT
     for (uint8_t i = 0; i < 8; i++)
     {
-        if (i < seqsession::kTracks / gs)
+        if (layers[layerIndex]->buttonLabel(i, buttonText[i]))
+        {
+            // the layer labels this button itself
+        }
+        else if (i < seqsession::kTracks / gs)
         {
             bool sel = groupFirst == i * gs;
             snprintf(buttonText[i], sizeof(buttonText[i]), "%s%d-%d%s", sel ? "[" : "", i * gs + 1, i * gs + gs, sel ? "]" : "");
@@ -230,6 +287,8 @@ void cSeqSession::refreshScreen(bool force)
             changed = true;
         }
     }
+    if (layers[layerIndex]->refresh(force))
+        changed = true;
     if (changed)
         display.synchronizeRefresh();
 }
@@ -243,18 +302,33 @@ static void functSwitchModule(uint8_t button)
 static void functActionButton(uint8_t button, uint8_t state)
 {
     if (state == buttonPress)
-    {
-        if (button == seqsession::kButtonClips)
-            SS->selectLayer(0);
-        else if (button == seqsession::kButtonCut)
-            SS->selectLayer(1);
-        else
-        {
-            uint8_t first = seqsession::groupFromButton(button, SS->layers[SS->layerIndex]->groupSize());
-            if (first != 0xFF)
-                SS->selectGroup(first);
-        }
-    }
+        SS->screenButton(button, true);
+    else if (state == buttonRelease)
+        SS->screenButton(button, false);
+}
+
+static void functLeft(uint8_t state)
+{
+    if (state == buttonPress)
+        SS->arrowKey(seqsession::ARROW_LEFT);
+}
+
+static void functRight(uint8_t state)
+{
+    if (state == buttonPress)
+        SS->arrowKey(seqsession::ARROW_RIGHT);
+}
+
+static void functUp(uint8_t state)
+{
+    if (state == buttonPress)
+        SS->arrowKey(seqsession::ARROW_UP);
+}
+
+static void functDown(uint8_t state)
+{
+    if (state == buttonPress)
+        SS->arrowKey(seqsession::ARROW_DOWN);
 }
 
 static void functPads(uint8_t pad, uint8_t state, [[maybe_unused]] int16_t velo)

@@ -3,7 +3,7 @@
 #include "fileManager.h"
 #include "fileManagerDefs.h"
 #include "fileTransfer.h"
-#include "seqTracks.h"
+#include "seqSidecar.h"
 
 #if FILEMANAGER_HANDLE_SYNTH == 1
 #include "Synth.h"
@@ -364,7 +364,7 @@ void ProjectOpen::openProjectFinish()
     newFileManager.setStatus(fmIdle);
     newFileManager.setCurrentOperation(fmNoOperation);
 
-    seqTracksImportProject(newFileManager.getCurrentProjectPath(), newFileManager.getCurrentProjectName());
+    seqSidecarsImportProject(newFileManager.getCurrentProjectPath(), newFileManager.getCurrentProjectName());
 
     if (!newFileManager.openProjectFromWorkspace())
     {

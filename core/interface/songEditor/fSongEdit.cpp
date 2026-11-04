@@ -6,6 +6,8 @@
 #include "padToBeatNoteConverter.h"
 #include "patternEditor/patternEditor.h" // todo zrobic cos z tym
 #include "performanceMode/performanceMode.h"
+#include "seqTracks.h"
+#include "seqHooks.h"
 
 #include "Platform.h"
 #include "mtPadBoard.h"
@@ -1450,6 +1452,17 @@ static void functSwitchModeSong(uint8_t state)
         {
             return;
         }
+        // sequencer tracks mod: arm the Song tap (plain press, no other button held) for the clip launcher (plan 005 R2)
+        bool othersHeld = false;
+        for (int b = 0; b < interfaceButtonsCount; b++)
+        {
+            if (b != interfaceButtonSong && SE->buttons->isButtonPressed(b))
+            {
+                othersHeld = true;
+                break;
+            }
+        }
+        seqSongTap.down(!othersHeld, seqNowMs());
         SE->pressedSongButton = true;
         SE->lastSelectedPlace = SE->selectedPlace;
         SE->selectedPlace = 2;
@@ -1466,6 +1479,7 @@ static void functSwitchModeSong(uint8_t state)
     }
     else if (state == buttonRelease)
     {
+        bool tap = seqTapUp(seqSongTap);
         if (SE->pressedSongButton)
         {
             SE->selectedPlace = SE->lastSelectedPlace;
@@ -1475,6 +1489,11 @@ static void functSwitchModeSong(uint8_t state)
         if (SE->exitOnButtonRelease)
         {
             SE->eventFunct(eventSwitchToPreviousModule, SE, 0, 0);
+        }
+        else if (tap && seqClipsSongTap())
+        {
+            SE->activateLabelsBorder();
+            SE->eventFunct(eventActivateSeqSession, SE, 0, 0); // clip launcher (R2)
         }
         else
         {

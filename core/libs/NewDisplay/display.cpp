@@ -1193,6 +1193,12 @@ void cDisplay::controlIdToString(uint8_t id, char* string)
         case controlIdTracker: strcpy(string, "tracker"); break;
         case controlIdWtProgress: strcpy(string, "progress"); break;
         case controlIdNotesKeyboardLabel: strcpy(string, "notesKeyboard"); break;
+        case controlIdSeqPlayLegend: strcpy(string, "seqPlayLegend"); break;
+        case controlIdSeqClipGrid: strcpy(string, "seqClipGrid"); break;
+        case controlIdSeqClipMarks: strcpy(string, "seqClipMarks"); break;
+        case controlIdSeqFaderView: strcpy(string, "seqFaderView"); break;
+        case controlIdSeqLanes: strcpy(string, "seqLanes"); break;
+        case controlIdSeqPlayheads: strcpy(string, "seqPlayheads"); break;
         default: strcpy(string, "undefined"); break;
     }
 }

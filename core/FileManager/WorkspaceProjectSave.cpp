@@ -3,7 +3,7 @@
 #include "fileManager.h"
 #include "fileManagerDefs.h"
 #include "fileTransfer.h"
-#include "seqTracks.h"
+#include "seqSidecar.h"
 #include "log.h"
 
 #if FILEMANAGER_HANDLE_SYNTH == 1
@@ -119,7 +119,7 @@ void WorkspaceProjectSave::saveProjectToWorkspaceInit()
 
 void WorkspaceProjectSave::saveProjectToWorkspaceFinish()
 {
-    seqTracksSaveWorkspace();
+    seqSidecarsSaveWorkspace();
 
 #if FILEMANAGER_HANDLE_SYNTH == 1
     newFileManager.getSynth()->saveDirtyWorkspacePatches();

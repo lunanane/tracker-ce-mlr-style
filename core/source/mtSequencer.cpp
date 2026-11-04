@@ -1584,6 +1584,7 @@ AUDIO_CORE_RAM void Sequencer::stopManualNotes(void)
 
 void Sequencer::stop(void)
 {
+    seqPanicRequest(); // plan 005 M6: transport Stop is the panic of the mod (the main loop runs the module hooks)
     songTimer.stop();
     stopAllOpenNotes();
     cancelFxes();
@@ -3190,8 +3191,13 @@ AUDIO_CORE_RAM void Sequencer::killFxOnSlot(uint8_t row, uint8_t slot)
     }
 }
 
+seqlogic::PerfOwners Sequencer::seqPerfOwners;
+
 void Sequencer::enterPerformanceMode()
 {
+    // the perform FX (stock Performance page, alt fader page, per-track pattern loads) own performance mode; the clip launcher
+    // claims its own bit in seqSessionEnterPerformance
+    seqPerfOwners.claim(seqlogic::PERF_OWNER_FX);
     player.performanceMode = 1;
 
     // sequencer tracks mod: while Session clips run, the per-track lengths are the clips' lengths (keep them)

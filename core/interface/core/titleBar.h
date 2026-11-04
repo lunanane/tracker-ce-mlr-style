@@ -28,6 +28,9 @@ class TitleBar
 
     void refresh();
 
+    // sequencer tracks mod: brief red flash of the bar (a mode-button tap was refused, plan 005 M4)
+    void flashRefused();
+
     friend Interface;
 
   private:
@@ -57,6 +60,7 @@ class TitleBar
 
     uint32_t boxLastColor = 0;
     uint8_t boxShowLoopCount = 0;
+    bool flashActive = false;
 };
 
 extern TitleBar titleBar;

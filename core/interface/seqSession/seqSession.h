@@ -17,7 +17,7 @@ class cSeqSession : public ModuleBase
     virtual void stop();
 
     virtual void initDisplayControls();
-    virtual void destroyDisplayControls() {}
+    virtual void destroyDisplayControls();
 
     cSeqSession() {}
     ~cSeqSession() {}
@@ -31,6 +31,8 @@ class cSeqSession : public ModuleBase
     void selectLayer(uint8_t index);
     void padEvent(uint8_t pad, uint8_t state);
     void jog(int16_t value);
+    void screenButton(uint8_t button, bool down);
+    void arrowKey(seqsession::ArrowDir dir);
     void refreshScreen(bool force);
     void refreshPads();
 
@@ -41,6 +43,7 @@ class cSeqSession : public ModuleBase
     seqsession::ClipsLayer clips;
     seqsession::CutSessionLayer cut; // CUT (MLR) layer, registered as layers[1]
 
+    bool hostTextHidden = false; // the active layer draws its own screen: title and info lines are hidden
     uint8_t ledShown[48];
     bool padHeld[48];
 

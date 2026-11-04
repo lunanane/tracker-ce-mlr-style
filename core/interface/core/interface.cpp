@@ -16,6 +16,7 @@
 #include "seqPlay/seqPlay.h"
 #include "seqPerform/seqPerform.h"
 #include "seqSession/seqSession.h"
+#include "seqHooks.h"
 #include "performanceMode/performanceMode.h"
 #include "projectEditor/projectEditor.h"
 #include "sampleEditor/sampleEditor.h"
@@ -464,6 +465,16 @@ void Interface::switchModuleByButton(hModule module, uint8_t button, uint32_t op
         return;
     if (modules[modulesButtons[index][1]] == module)
         return;
+
+    // sequencer tracks mod: Shift + Performance opens the alt fader page. The check runs before deactivateModule, which fakes a
+    // Shift release (plan 005 R3).
+    if (button == interfaceButtonPerformance && getPlatform()->getButtons()->isButtonPressed(interfaceButtonShift) &&
+        seqFaderShiftFromElsewhere(isSeqPerformScreenActive()))
+    {
+        deactivateModule(module);
+        activateModule(&seqPerform, 0);
+        return;
+    }
 
     uint32_t localOptions = options > 0 ? options : modulesButtons[index][2];
 
