@@ -36,4 +36,7 @@ class cPerformFx
     const fxSetup* setup;
 };
 
+// sequencer tracks mod: send of the selected tracks (alt Performance page); value 0 clears
+void perfApplySend(bool reverb, int16_t value);
+
 #endif /* INTERFACE_PERFORMANCEMODE_PERFORMANCEFX_H_ */

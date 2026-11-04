@@ -12,6 +12,7 @@ extern Sequencer sequencer;
 extern strMtProject mtProject;
 
 seqlogic::TapDetector seqPatternTap;
+seqlogic::TapDetector seqPerformTap;
 
 namespace
 {

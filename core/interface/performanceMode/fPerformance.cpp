@@ -8,6 +8,7 @@
 #include "mtSequencer.h"
 
 #include "performanceMode.h"
+#include "seqTracks.h"
 
 #include "Platform.h"
 #include "performanceEngine.h"
@@ -32,6 +33,7 @@ static void functEncoder(int16_t value, uint8_t state);
 
 static void functSwitchModule(uint8_t button);
 static void functSwitchTracksPage();
+static void functPerformanceButton(uint8_t state);
 
 static void functActionButton(uint8_t button, uint8_t state);
 
@@ -128,7 +130,7 @@ void cPerformanceMode::start(uint32_t options)
     dontClearPerformanceMode = 0;
 
     // ustawienie funkcji
-    ip->setButtonObj(interfaceButtonPerformance, buttonPress, functSwitchTracksPage);
+    ip->setButtonObj(interfaceButtonPerformance, functPerformanceButton);
     ip->setButtonObj(interfaceButtonParams, buttonPress, functSwitchModule);
     ip->setButtonObj(interfaceButtonFile, buttonPress, functSwitchModule);
     ip->setButtonObj(interfaceButtonConfig, buttonPress, functSwitchModule);
@@ -677,6 +679,39 @@ static void functSwitchTracksPage()
         {
             PM->blinkTrackUntilSwitch();
         }
+    }
+}
+
+// Performance button: press = stock behaviour (tracks page / Shift = mute view); a plain tap (press and
+// release, nothing else touched) additionally opens the alt fader page (sequencer tracks mod, plan 004)
+static void functPerformanceButton(uint8_t state)
+{
+    if (state == buttonPress)
+    {
+        bool othersHeld = false;
+        for (int b = 0; b < interfaceButtonsCount; b++)
+        {
+            if (b != interfaceButtonPerformance && PM->buttons->isButtonPressed(b))
+            {
+                othersHeld = true;
+                break;
+            }
+        }
+        seqPerformTap.down(!othersHeld);
+        functSwitchTracksPage();
+    }
+    else if (state == buttonRelease)
+    {
+#ifndef TRACKER_MINI
+        if (seqPerformTap.up())
+        {
+            PM->tracksPage = !PM->tracksPage; // undo the page flip of this tap
+            PM->dontClearPerformanceMode = 1; // the perform FX state moves over to the fader page
+            PM->eventFunct(eventActivateSeqPerform, PM, 0, 0);
+        }
+#else
+        seqPerformTap.up();
+#endif
     }
 }
 

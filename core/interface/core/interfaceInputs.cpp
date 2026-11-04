@@ -27,9 +27,17 @@ void Interface::potChange(uint8_t n, int16_t value)
 //=======================================================================
 void Interface::buttonChange(uint8_t n, uint8_t value)
 {
-    if (n != interfaceButtonPattern)
+    if (n != interfaceButtonPattern && n != interfaceButtonPerformance)
     {
-        seqNoteOtherInput(); // breaks a Pattern tap
+        seqNoteOtherInput(); // breaks a Pattern / Performance tap
+    }
+    else if (n == interfaceButtonPattern)
+    {
+        seqPerformTap.other(); // Pattern pressed while Performance is held
+    }
+    else
+    {
+        seqPatternTap.other(); // Performance pressed while Pattern is held
     }
 
 #ifdef TRACKER_MINI

@@ -83,6 +83,11 @@ class cPerformEngine
 
     void changeSlotFxValue(uint8_t slot, int16_t value);
 
+    // sequencer tracks mod, alt Performance page (fader pads): set / release a slot at an absolute value
+    bool getSlotRange(uint8_t slot, int16_t& mn, int16_t& mx); // false: empty slot
+    void setSlotValueDirect(uint8_t slot, int16_t value);
+    void releaseSlotDirect(uint8_t slot);
+
     void readPerfData(uint8_t source_index)
     {
         if (source_index >= dataSourcesCount)

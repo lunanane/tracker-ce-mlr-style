@@ -5,11 +5,13 @@
 
 extern seqtracks::Engine seqEngine;
 extern seqlogic::TapDetector seqPatternTap; // Pattern button tap detection (interface inputs + pattern editor)
+extern seqlogic::TapDetector seqPerformTap; // Performance button tap detection (interface inputs + Performance pages)
 
 // Any button / pad / jog input other than the Pattern button itself (breaks a Pattern tap).
 inline void seqNoteOtherInput()
 {
     seqPatternTap.other();
+    seqPerformTap.other();
 }
 
 // ---- record (main loop; Play mode screen calls these) ----

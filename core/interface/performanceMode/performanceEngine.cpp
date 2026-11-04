@@ -603,6 +603,60 @@ void cPerformEngine::pasteSlotFx(uint8_t slot)
         sourceDataSaveFunct();
 }
 
+// ---- sequencer tracks mod: alt Performance page ----
+bool cPerformEngine::getSlotRange(uint8_t slot, int16_t& mn, int16_t& mx)
+{
+    if (slot >= 12 || slotToFx[slot] == 0)
+        return false;
+    const fxSetup* s = fxList[slotToFx[slot]]->setup;
+    mn = s->min;
+    mx = s->max;
+    return true;
+}
+
+// Like a pad press in the slot, but at an absolute value (momentary until releaseSlotDirect)
+void cPerformEngine::setSlotValueDirect(uint8_t slot, int16_t value)
+{
+    if (slot >= 12 || slotToFx[slot] == 0)
+        return;
+    uint8_t fxIdx = slotToFx[slot];
+    const fxSetup* s = fxList[fxIdx]->setup;
+    if (value > s->max)
+        value = s->max;
+    if (value < s->min)
+        value = s->min;
+
+    slotsState[slot] = 1;
+    resetOtherSlotsWithSameFx(slot);
+    resetSlotsWithBlockedFx(slot);
+    slotsState[slot] = 1;
+    slotChangeFlag[slot] = 1;
+    slotsTempValues[slot] = value;
+
+    if (s->isGlobalFx)
+    {
+        loadGlobalFxValue(fxIdx, value);
+    }
+    else
+    {
+        for (uint8_t track = 0; track < kPerformanceTracks; track++)
+        {
+            if (tracksPerformanceState[track] == 1)
+                loadFxValuesOnTrack(slot, track);
+        }
+    }
+}
+
+void cPerformEngine::releaseSlotDirect(uint8_t slot)
+{
+    if (slot >= 12)
+        return;
+    slotsState[slot] = 0;
+    slotsTempValues[slot] = 0;
+    slotChangeFlag[slot] = 1;
+    resetSlotFx(slot);
+}
+
 // CC mode
 void cPerformEngine::setCCValue(uint8_t value, uint8_t slot)
 {
