@@ -50,7 +50,7 @@ class CutSessionLayer : public SessionLayer
 
     // ---- own screen ----
     void createControls() override { laneViewCreate(); } // hidden until enter()
-    void destroyControls() override { laneViewForget(); }
+    void destroyControls() override { laneViewForget(); } // the framework does not call this today (the display frees the controls); laneViewCreate resets the handles anyway
     bool refresh(bool force) override { return laneViewRefresh(force, first_); }
     bool drawsOwnScreen() const override { return true; }
     bool button(uint8_t i, bool down) override

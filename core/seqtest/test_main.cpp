@@ -133,37 +133,42 @@ static void test_perform_key_route()
     CHECK(performKeyRoute(false, true, true) == PERFORM_TO_FADER);          // stock page: Shift = fader page
 }
 
-static void test_double_tap()
+// Song key toggle (replaces the double tap): a plain press + release is a toggle; a hold, another button before the press or between
+// press and release, never. No timing: a slow press without a hold event still toggles, the hold event decides.
+static void test_song_toggle()
 {
-    DoubleTap d;
-    d.press(1000);
-    CHECK(!d.release(true)); // first tap
-    d.press(1300);
-    CHECK(d.release(true)); // second press 300 ms after the first: double
-    d.press(1400);
-    CHECK(!d.release(true)); // a third quick tap starts a new pair
-    d.press(1500);
-    CHECK(d.release(true));
-    d.press(2000);
-    CHECK(!d.release(true));
-    d.press(2400);
-    CHECK(!d.release(true)); // 400 ms between the presses: too slow, becomes tap 1 of a new pair
-    d.press(2500);
-    CHECK(d.release(true));
-    d.press(3000);
-    CHECK(!d.release(true));
-    d.press(3200);
-    CHECK(!d.release(false)); // second press was a hold / refused: never opens
-    d.press(3300);
-    CHECK(!d.release(true)); // and it broke the sequence
-    d.press(4000);
-    CHECK(!d.release(false)); // a long first press is no tap
-    d.press(4100);
-    CHECK(!d.release(true));
-    d.press(0xFFFFFF00u);
-    CHECK(!d.release(true));
-    d.press(0x40u);
-    CHECK(d.release(true)); // across the 32-bit wrap
+    SongToggle t;
+    t.down(true);
+    CHECK(t.up());                       // plain press + release
+    t.down(true);
+    CHECK(t.up());                       // and again: no state left over, no timing window
+    t.down(true);
+    t.hold();
+    CHECK(!t.up());                      // the stock hold (momentary peek, or a hold on the Song page itself)
+    t.down(true);
+    CHECK(t.up());                       // the next plain press is fine again
+    t.down(false);
+    CHECK(!t.up());                      // another button was already held at the press
+    t.down(true);
+    t.other();
+    CHECK(!t.up());                      // another button used while Song is down (Song + arrow)
+    t.other();
+    t.down(true);
+    CHECK(t.up());                       // activity before the press does not matter
+    CHECK(!t.up());                      // a release without a press
+    t.down(true);
+    t.hold();
+    t.hold();
+    t.other();
+    CHECK(!t.up());
+    t.down(true);
+    CHECK(t.up());
+    // decision of the Song page release: the press must have begun on the page (the page that switched here does not count)
+    struct Page { static bool opensLauncher(bool toggle, bool pressedHere, bool exitOnRelease) { return toggle && pressedHere && !exitOnRelease; } };
+    CHECK(Page::opensLauncher(true, true, false));
+    CHECK(!Page::opensLauncher(true, false, false));   // Song pressed on another page, released here
+    CHECK(!Page::opensLauncher(false, true, false));   // held / combined
+    CHECK(!Page::opensLauncher(true, true, true));     // stock peek
 }
 
 static void test_logic()
@@ -1343,7 +1348,7 @@ int sessionTests(int& checks);
 int main()
 {
     test_tap();
-    test_double_tap();
+    test_song_toggle();
     test_perform_key_route();
     test_logic();
     test_sidecar_policy();

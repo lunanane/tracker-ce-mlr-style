@@ -25,7 +25,7 @@ This branch adds sequencers per track and a clip launcher on top of Tracker CE. 
 
 **How to enter**
 * Pattern page: tap the bottom-right key (**Perform**, the firmware's Pattern key) to switch Play mode on and off. Left / Right switch the strip between tracks 1-8 and 9-16; a screen button selects a track; hold a screen button and turn the wheel to pick its sequencer type; hold Shift to see what the pads do.
-* Clip launcher (Session view): double tap Song (two short presses within about 0.35 s) from any page. A single press still goes to the Song page and a hold is still the momentary peek; Song inside the launcher returns to the Song page. The bottom-right **Perform** key (the firmware's Pattern key) only toggles Play mode.
+* Clip launcher (Session view): the **Song** key toggles between the stock Song page and the launcher (v0.2.4). From any other page Song goes to the Song page as in stock; on the Song page a plain press and release of Song opens the launcher (no timing, nothing else held); in the launcher (CLIPS or CUT layer) Song returns to the Song page. A hold is still the stock momentary peek and a hold on the Song page does nothing. The bottom-right **Perform** key (the firmware's Pattern key) only toggles Play mode.
 * Performance: the top-row **Perform** key (the firmware's Performance key) opens the fader page; **Shift + Perform** opens the stock Performance page (and back).
 
 **Install and recovery**

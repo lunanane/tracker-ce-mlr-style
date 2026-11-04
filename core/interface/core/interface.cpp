@@ -468,10 +468,11 @@ void Interface::switchModuleByButton(hModule module, uint8_t button, uint32_t op
 
     // sequencer tracks mod: the Performance key opens the alt fader page; Shift + Performance the stock Performance page (owner
     // change 2026-11-04). The check runs before deactivateModule, which fakes a Shift release (plan 005 R3).
+    // (the stock page binds the key itself and never gets here; the table says which hook a Shift press on it would take)
     if (button == interfaceButtonPerformance &&
         seqlogic::performKeyRoute(isSeqPerformScreenActive(), isPerformanceModeScreenActive(),
                                   getPlatform()->getButtons()->isButtonPressed(interfaceButtonShift)) == seqlogic::PERFORM_TO_FADER &&
-        seqFaderShiftFromElsewhere(isSeqPerformScreenActive()))
+        (isPerformanceModeScreenActive() ? seqFaderShiftFromStock() : seqFaderShiftFromElsewhere(isSeqPerformScreenActive())))
     {
         deactivateModule(module);
         activateModule(&seqPerform, 0);

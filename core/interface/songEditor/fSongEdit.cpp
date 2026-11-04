@@ -44,6 +44,8 @@ static void functRecAction();
 static void functEncoder(int16_t value);
 
 static void functSwitchModule(uint8_t button);
+// sequencer tracks mod: the Song press began on this page (not on the page that switched here); only that press can open the launcher
+static bool s_songPressedHere = false;
 static void functSwitchModeSong(uint8_t state);
 
 static void functPads(uint8_t pad, uint8_t state, int16_t velo);
@@ -154,6 +156,7 @@ void cSongEditor::start(uint32_t options)
     isSomethingCopied = 0;
 
     pressedSongButton = false;
+    s_songPressedHere = false;
     exitOnButtonRelease = 0;
     flagHeld = false;
     flagWheelUsed = false;
@@ -1496,9 +1499,10 @@ static void functSwitchModeSong(uint8_t state)
 {
     if (state == buttonPress)
     {
+        s_songPressedHere = true;
         if (SE->selectedPlace == 2)
         {
-            return;
+            return; // the stock early return stays; the launcher toggle does not depend on it (s_songPressedHere is set above)
         }
         SE->pressedSongButton = true;
         SE->lastSelectedPlace = SE->selectedPlace;
@@ -1516,9 +1520,11 @@ static void functSwitchModeSong(uint8_t state)
     }
     else if (state == buttonRelease)
     {
-        // sequencer tracks mod: a short double tap of Song (detected in Interface::buttonChange, any page) opens the clip launcher
-        bool tap = seqSongDoubleNow;
-        seqSongDoubleNow = false;
+        // sequencer tracks mod: a plain press + release of Song on this page (no hold, nothing else pressed; Interface::buttonChange
+        // decides) opens the clip launcher; a Song press that began on another page (stock peek / switch) never does
+        bool tap = seqSongToggleNow && s_songPressedHere;
+        seqSongToggleNow = false;
+        s_songPressedHere = false;
         if (SE->pressedSongButton)
         {
             SE->selectedPlace = SE->lastSelectedPlace;

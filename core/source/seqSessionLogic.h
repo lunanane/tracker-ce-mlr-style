@@ -50,16 +50,17 @@ inline uint16_t stepsToQuant(Quant q, uint16_t pos, uint16_t len)
 // buffer at once (main loop, asynchronous), and the audio side swaps it in at a step boundary where quantHit() says so, once the
 // read is done. At every step boundary (pos = the step that plays next, len = steps of the playing pattern) it decides:
 //  - SCENE_SWAP: the swap happens now; the tracks go on at pos mod their new length (the phase stays musical);
-//  - SCENE_ARM_STOCK: no hit before the pattern end, and the coming step is the last one: the stock switch is armed, it swaps at the
-//    pattern end exactly as before (this also keeps the Song page's slot logic in charge there);
+//  - SCENE_ARM_STOCK: no hit before the pattern end, and the coming step is the last one: the stock switch is armed, it loads the pattern
+//    again on the last step and swaps at the pattern end exactly as before (this also keeps the Song page's slot logic in charge there).
+//    This happens whether or not the early read finished, so the pattern end never depends on the SD timing and a scene is never dropped;
 //  - SCENE_WAIT: nothing yet (also: the read is not finished - the next boundary after it is, decides).
 enum SceneAct : uint8_t { SCENE_WAIT = 0, SCENE_ARM_STOCK = 1, SCENE_SWAP = 2 };
 inline SceneAct sceneStepAction(Quant q, uint16_t pos, uint16_t len, bool ready, bool armedByStock)
 {
-    if (armedByStock || !ready || q == Q_PATTERN || q == Q_CLIPEND)
+    if (armedByStock || q == Q_PATTERN || q == Q_CLIPEND)
         return SCENE_WAIT;
     if (len == 0) len = 1;
-    if (quantHit(q, pos))
+    if (ready && quantHit(q, pos))
         return SCENE_SWAP;
     if ((uint16_t)(pos + 1) >= len)
         return SCENE_ARM_STOCK;

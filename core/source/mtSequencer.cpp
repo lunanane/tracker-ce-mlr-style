@@ -3450,17 +3450,32 @@ void Sequencer::seqSessionSceneBoundary()
     const bool armed = player.sequencialSwitch_isArmed;
     if (player.selectionMode)
     {
-        if (seqLauncher.sceneReady() && !armed)
+        if (!armed)
             sequencialSwitch_SetReadyNow(); // a loop selection has its own end: stock switch
         return;
     }
     const uint16_t len = (uint16_t)(currentPattern->track[0].length + 1);
-    switch (seqsession::sceneStepAction(seqLauncher.sceneQuant(), player.globalPos, len, seqLauncher.sceneReady(), armed))
+    // the flag is only a hint of the main loop: the file manager is asked again here, and an edited pattern waits for its save
+    const bool ready = seqLauncher.sceneReady() && newFileManager.isIdleForScratch() &&
+                       newFileManager.getLoadedPatternIndex() == seqLauncher.scenePattern() &&
+                       !newFileManager.isPatternStructChanged(mtProject.values.actualPattern);
+    switch (seqsession::sceneStepAction(seqLauncher.sceneQuant(), player.globalPos, len, ready, armed))
     {
         case seqsession::SCENE_SWAP: seqSessionSceneSwap(); break;
         case seqsession::SCENE_ARM_STOCK: sequencialSwitch_SetReadyNow(); break;
         default: break;
     }
+}
+
+// Steps a track loops over, as switchRowStep takes it (the pattern, the performance track length, a performance pattern length).
+uint16_t Sequencer::seqLoopLength(uint8_t row)
+{
+    uint8_t len = currentPattern->track[0].length;
+    if (player.performanceMode && isPerformanceTrack(row))
+        len = player.performance.trackLength[row];
+    if (player.performance.patternLength > -1)
+        len = (uint8_t)player.performance.patternLength;
+    return (uint16_t)(len + 1);
 }
 
 // The swap itself, like the stock pattern end (switchRamPatternsNow in the interrupt) but in the middle of the pattern: every track goes
@@ -3471,12 +3486,31 @@ void Sequencer::seqSessionSceneSwap()
     seqSongPatternEndTaken();             // as the stock switch: a queued pattern no longer ends the song mode
     switchRamPatternsNow();               // swaps, song slot, clip launcher reset, scene state
     sequencialSwitch_Reset();
+    if (player.performanceMode)
+    {
+        // as the song path of the stock pattern end: the tracks loop over the length of the new pattern
+        for (uint8_t a = 0; a < kPerformanceTracks; a++)
+            player.performance.trackLength[a] = getActualPattern()->track[0].length;
+    }
     player.globalPos = seqsession::scenePhase(gp, (uint16_t)(currentPattern->track[0].length + 1));
     for (uint8_t row = 0; row < kAllTracks; row++)
     {
-        const uint8_t ph = (uint8_t)seqsession::scenePhase(gp, (uint16_t)(currentPattern->track[row].length + 1));
-        reset_actual_pos(row, ph);
+        const uint16_t loop = seqLoopLength(row);
+        const uint8_t ph = (uint8_t)seqsession::scenePhase(gp, loop);
         player.track[row].actual_pos_absolute = ph;
+        const int8_t mode = (player.performanceMode && isPerformanceTrack(row)) ? player.track[row].performancePlayMode : PLAYMODE_FORWARD;
+        if (mode == PLAYMODE_FORWARD)
+            player.track[row].actual_pos = MINSTEP + ph;
+        else if (mode >= PLAYMODE_CUSTOM_1)
+        {
+            // the first step of a custom order, as switchRowStep picks it
+            const uint8_t inOrder = (uint8_t)(ph % playOrderWithFxLength);
+            const uint8_t n = playOrderWithFx[mode - PLAYMODE_CUSTOM_1][inOrder].stepNumberToPlay;
+            player.track[row].actual_pos = n != 0 ? (int16_t)((n - 1) % loop) : 0;
+            applyRowCustomFx(row, inOrder);
+        }
+        else
+            reset_actual_pos(row, ph);
     }
     seqCutPatternSwitched();
     for (uint8_t a = 0; a < kPerformanceTracks; a++)

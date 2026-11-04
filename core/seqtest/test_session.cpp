@@ -366,7 +366,7 @@ static void test_long_pattern_quant()
     }
 }
 
-// The scene (stock pattern switch) is the pattern end by definition: the launcher counts it that way, whatever the quantise is.
+// The countdown of the pattern-end scene (and of a Song page queue) is the distance to the pattern end; bar / now scenes are bounded like clips.
 static void test_scene_countdown_is_pattern_end()
 {
     for (int L = 16; L <= 255; L += 37)
@@ -436,6 +436,29 @@ static void test_scene_quantise()
     // bar quantise in a pattern whose length is not a multiple of 16: the wrap of the pattern is a boundary too (arm, then stock swap)
     SCHECK(sceneStepAction(Q_BAR, 19, 20, true, false) == SCENE_ARM_STOCK);
     SCHECK(sceneStepAction(Q_BAR, 18, 20, true, false) == SCENE_WAIT);
+    // not ready at the last boundary (the early read is late): the stock switch is armed anyway - the pattern end never depends on
+    // the SD timing and a scene is never dropped; before that a late read just waits
+    for (int qi = 0; qi < Q_COUNT; qi++)
+    {
+        if (qi == Q_PATTERN) continue;
+        SCHECK(sceneStepAction((Quant)qi, 63, 64, false, false) == SCENE_ARM_STOCK);
+        SCHECK(sceneStepAction((Quant)qi, 63, 64, false, true) == SCENE_WAIT);   // already armed: the stock path owns it
+        SCHECK(sceneStepAction((Quant)qi, 63, 64, true, false) == (quantHit((Quant)qi, 63) ? SCENE_SWAP : SCENE_ARM_STOCK));
+    }
+    SCHECK(sceneStepAction(Q_NOW, 10, 64, false, false) == SCENE_WAIT);
+    SCHECK(sceneStepAction(Q_BAR, 32, 64, false, false) == SCENE_WAIT);          // a hit with the read unfinished: next boundary
+    SCHECK(sceneStepAction(Q_BAR, 15, 16, false, false) == SCENE_ARM_STOCK);     // 16-step pattern: every last boundary
+    SCHECK(sceneStepAction(Q_NOW, 0, 1, false, false) == SCENE_ARM_STOCK);       // one-step pattern
+    // a read that never finishes still ends in the stock switch at the pattern end, at every launch position and length
+    for (int L = 2; L <= 255; L += 13)
+        for (int q = Q_BAR; q <= Q_NOW; q += Q_NOW - Q_BAR)
+        {
+            int armedAt = -1;
+            for (int pos = 0; pos < L && armedAt < 0; pos++)
+                if (sceneStepAction((Quant)q, (uint16_t)pos, (uint16_t)L, false, false) == SCENE_ARM_STOCK)
+                    armedAt = pos;
+            SCHECK(armedAt == L - 1);
+        }
     // phase after the swap: the global position inside the new length of the track; the pattern end starts at 0
     SCHECK(scenePhase(37, 16) == 5 && scenePhase(37, 128) == 37 && scenePhase(0, 16) == 0 && scenePhase(200, 256) == 200);
     SCHECK(scenePhase(5, 0) == 0);

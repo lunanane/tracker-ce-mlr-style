@@ -33,8 +33,8 @@ void Interface::buttonChange(uint8_t n, uint8_t value)
     // only buttons break a mode-button tap; a mode button does not break its own tap
     seqNoteButtonInput(n == interfaceButtonPattern, n == interfaceButtonPerformance, n == interfaceButtonSong);
 
-    // Song double tap (clip launcher from any page): tracked here because the first press switches modules
-    seqSongDoubleNow = false;
+    // Song key (stock Song page <-> clip launcher): tracked here, the release is handled by the Song page
+    seqSongToggleNow = false;
     if (n == interfaceButtonSong)
     {
         if (value == buttonPress)
@@ -48,12 +48,15 @@ void Interface::buttonChange(uint8_t n, uint8_t value)
                     break;
                 }
             }
-            seqSongTap.down(!othersHeld, seqNowMs());
-            seqSongDouble.press(seqNowMs());
+            seqSongToggle.down(!othersHeld);
+        }
+        else if (value == buttonHold)
+        {
+            seqSongToggle.hold();
         }
         else if (value == buttonRelease)
         {
-            seqSongDoubleNow = seqSongDouble.release(seqTapUp(seqSongTap)) && seqClipsSongTap();
+            seqSongToggleNow = seqSongToggle.up();
         }
     }
 
