@@ -158,6 +158,31 @@ Built around immediate playability; no separate Seq page, no Off/Live/Rec modes.
 - No jog-wheel parameter pages yet (play mode, swing, gate, lock, velocity pattern etc.); LCK gesture not mapped. Pad LED
   brightness = level * 2 on the single-colour pad LEDs.
 
+## Step B as built (2026-11-04, provisional where marked)
+- Code: `seqTracksRec.h` (pure record planner + chord lookup), record queue and sidecar in `seqTracksCore.*`, main-loop part
+  in `seqTracks.cpp` (`seqTracksUpdate()` called from `TrackerImpl::update`), Rec button in `core/interface/seqPlay`. Tests: `core/seqtest`.
+- Rec button exists only inside Play mode (the stock Rec outside it is untouched). **Rec** = punch-in on the current track,
+  **Shift + Rec** = one loop, Rec again ends either. It uses its own recording state, not the stock `isREC`/edit mode.
+- Transport stopped: Rec starts the pattern from step 1 and records at once (Shift + Rec: the loop starts at once, as step 1 is the loop start). [provisional]
+- Replace: every step the playhead enters is cleared (`clearStep`) unless a sequencer note already claimed it; a note replaces the whole
+  step (note, instrument = the taken-over instrument, volume = velocity only if stock "rec velocity" is on, micromove only if
+  stock "rec microtiming" is on, chord FX in fx[0]). Quantise = stock rule (second half of a step goes to the next step).
+  Punch-in does not clear the step that is already playing when Rec is pressed. [provisional]
+- Gate: the sequencer's note-off is written as a tracker note-off on the first following step that holds no note (stock rule: a
+  note-off on the note's own step moves to the next step), so rests and legato come out like live recording.
+- Chords: group of notes of the same pulse -> lowest note + `FX_TYPE_MIDI_CHORD` index from `chordDef[1..29]`; no match ->
+  highest notes dropped until it matches ("Chord reduced"); sample track -> lowest note only ("Chords need a MIDI track"). Chord
+  intervals above 14 semitones cannot be expressed and are dropped as well.
+- Threading: the planner runs in the audio context and pushes operations (8 bytes each, queue of 32) to the main loop, which
+  writes the pattern and stores **one** undo revision per recording (first write). Nothing touches the SD from the audio context.
+  Recording ends when: Rec again, the loop is complete, the transport stops, the track is set Off, or the pattern changes.
+- Sidecar `seqtracks.bin` (2810 bytes max): "SQTR", version 1, 16 tracks, per track [type, ChordArp block, Mono block], CRC16-CCITT.
+  Written next to `project.mt` by Save / Save as (only when a sequencer was ever used in the project), mirrored in
+  `Workspace/seqtracks.bin` by the Workspace autosave (state change detected by a hash about once a second), copied from the project
+  folder into the Workspace when a project is opened, read when the Workspace is loaded. Missing / short / corrupt / wrong version =
+  all tracks Off, nothing else changes. `.mtp`, `project.mt` and the pattern struct are untouched.
+- Not done: Copy / Paste of a track's sequencer, recording into other patterns than the one active at Rec start, pad velocity record.
+
 ## Script sequencers — parked (owner 2026-11-03)
 The owner decided against an embedded script engine on the original Tracker (flash too tight): all sequencers are
 built in (C++). The notes below stay for a possible Tracker+ version.
