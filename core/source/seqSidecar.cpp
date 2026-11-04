@@ -1,6 +1,7 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 #include "seqSidecar.h"
 #include "seqClips.h"
+#include "seqHooks.h"
 #include "seqClipsLogic.h"
 #include "seqTracks.h"
 #include "seqTracksCore.h"
@@ -98,6 +99,7 @@ void seqSidecarsLoadWorkspace()
 {
     seqTracksLoadWorkspace();
     seqClipsLoadWorkspace();
+    seqFaderProjectLoaded(); // perform FX are not saved: nothing stays dialled in across a project load
 }
 
 void seqSidecarsSaveWorkspace()

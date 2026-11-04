@@ -644,6 +644,12 @@ bool cFileManager::loadPerformanceTrackToBuffer(uint8_t pattIndex, uint8_t track
 bool cFileManager::loadClipTrackToBuffer(uint8_t pattIndex, uint8_t trackIndex)
 {
     assert(trackIndex < kPerformanceTracks);
+    return loadClipTracksToBuffer(pattIndex, (uint16_t)(1u << trackIndex));
+}
+
+/// sequencer tracks mod (Session view): one read of the pattern file fills every track of the mask (tracks that follow into the same row)
+bool cFileManager::loadClipTracksToBuffer(uint8_t pattIndex, uint16_t trackMask)
+{
     if (!isIdleForScratch())
         return false;
 
@@ -663,42 +669,14 @@ bool cFileManager::loadClipTrackToBuffer(uint8_t pattIndex, uint8_t trackIndex)
         sequencer.clearPattern(patternFrom);
     }
 
-    patternTo->track[trackIndex] = patternFrom->track[trackIndex];
-    patternTo->track[trackIndex].length = patternFrom->track[0].length;
-    return true;
-}
-
-/// sequencer tracks mod (Session view): which tracks of a workspace pattern hold content (a note or an fx)
-int cFileManager::getPatternTracksWithNotes(uint8_t pattIndex, uint16_t& mask)
-{
-    mask = 0;
-    if (!isIdleForScratch())
-        return -1;
-    char patternToLoad[PATCH_SIZE]{ 0 };
-    snprintf(patternToLoad, PATCH_SIZE, cWorkspacePatternFileFormat, pattIndex);
-    if (!fileSystem->exists(patternToLoad))
-        return 0;
-
-    Sequencer::strPattern* pattern = &fileManagerPatternBuffer;
-    if (!readPatternFile(patternToLoad, pattern))
-        return 0;
-
-    uint8_t len = pattern->track[0].length;
-    if (len > Sequencer::MAXSTEP)
-        len = Sequencer::MAXSTEP;
     for (uint8_t t = 0; t < kPerformanceTracks; t++)
     {
-        for (uint8_t s = 0; s <= len; s++)
-        {
-            const Sequencer::strPattern::strTrack::strStep& st = pattern->track[t].step[s];
-            if (st.note >= Sequencer::STEP_NOTE_MIN || st.fx[0].type != 0 || st.fx[1].type != 0)
-            {
-                mask = (uint16_t)(mask | (1u << t));
-                break;
-            }
-        }
+        if (!((trackMask >> t) & 1u))
+            continue;
+        patternTo->track[t] = patternFrom->track[t];
+        patternTo->track[t].length = patternFrom->track[0].length;
     }
-    return 1;
+    return true;
 }
 
 /// sequencer tracks mod (Session view): the workspace file of a pattern into the caller buffer (cleared when missing)

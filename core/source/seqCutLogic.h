@@ -26,7 +26,8 @@ inline uint8_t argCol(uint8_t a) { return (uint8_t)(a >> 4); }
 inline uint8_t packSyncAll() { return packArg(SUB_RESET, false, 1); }
 inline bool argIsSyncAll(uint8_t a) { return argSub(a) == SUB_RESET && argCol(a) == 1; }
 
-// Screen button (0-based) of SYNC ALL in the CUT layer: button 6; 7 stays empty (a gap), 8 is CLIPS (owned by the host).
+// Screen button (0-based) of SYNC ALL in the CUT layer: button 6 = seqsession::kButtonLayer (the layer's own button; static_assert in
+// cutSessionLayer.h); 7 is an empty gap and 8 switches CLIPS <-> CUT (both owned by the host).
 enum { kScreenButtonSyncAll = 5 };
 
 // Group of 4 tracks: firstTrack is clamped to 0, 4, 8, 12 (anything in between rounds down).

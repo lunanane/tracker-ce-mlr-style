@@ -13,7 +13,6 @@
 #include "instrumentEditor/instrumentEditor.h"
 #include "masterParams/masterParams.h"
 #include "patternEditor/patternEditor.h"
-#include "seqPlay/seqPlay.h"
 #include "seqPerform/seqPerform.h"
 #include "seqSession/seqSession.h"
 #include "seqHooks.h"
@@ -476,6 +475,11 @@ void Interface::switchModuleByButton(hModule module, uint8_t button, uint32_t op
         return;
     }
 
+    // sequencer tracks mod: fader FX kept running into Pattern / Song follow the stock rule on any other page (plan 005 R3)
+    if (seqFaderKept() && button != interfaceButtonPattern && button != interfaceButtonSong &&
+        button != interfaceButtonPerformance && button != interfaceButtonMaster && button != interfaceButtonParams)
+        seqFaderEndKept();
+
     uint32_t localOptions = options > 0 ? options : modulesButtons[index][2];
 
     deactivateModule(module);
@@ -606,12 +610,6 @@ void interfaceEnvents(uint8_t event, void* param1, void* param2, void* param3)
         {
             mtInterface.deactivateModule((hModule)param1);
             mtInterface.activateModule(&imageViewer, param2 == nullptr ? 0 : *((uint8_t*)param2));
-            break;
-        }
-        case eventActivateSeqPlay:
-        {
-            mtInterface.deactivateModule((hModule)param1);
-            mtInterface.activateModule(&seqPlay, 0);
             break;
         }
         case eventActivateSeqPerform:

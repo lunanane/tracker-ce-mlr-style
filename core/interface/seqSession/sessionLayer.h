@@ -1,6 +1,6 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 // A pad layer of the Session view (plans/002-session-view.md). The Session module owns the screen buttons (group select
-// per layer, button 7 = CLIPS, button 8 = CUT) and the Play button; a layer gets all 48 pads, the jog wheel and Rec.
+// per layer, button 6 = layer, button 7 gap, button 8 switches CLIPS <-> CUT) and the Play button; a layer gets all 48 pads, the jog wheel and Rec.
 //   CLIPS = clip launcher (clipsLayer.*)        CUT = MLR page (cutSessionLayer.h)
 //
 // Pad numbering: col 0..11, row 0..3 (0-based), pad index = row * 12 + col. LED levels 0..15.

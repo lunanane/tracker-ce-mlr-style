@@ -176,10 +176,8 @@ void cSeqSession::screenButton(uint8_t button, bool down)
         return; // the layer owns this button now (hold gestures, quantise ...)
     if (!down)
         return;
-    if (button == seqsession::kButtonClips)
-        selectLayer(0);
-    else if (button == seqsession::kButtonCut)
-        selectLayer(1);
+    if (button == seqsession::kButtonSwitch)
+        selectLayer(layerIndex == 0 ? 1 : 0); // CLIPS <-> CUT (the label shows the other layer)
     else
     {
         uint8_t first = seqsession::groupFromButton(button, layers[layerIndex]->groupSize());
@@ -190,7 +188,11 @@ void cSeqSession::screenButton(uint8_t button, bool down)
 
 void cSeqSession::arrowKey(seqsession::ArrowDir dir)
 {
-    layers[layerIndex]->arrow(dir, buttons->isButtonPressed(interfaceButtonShift));
+    if (layers[layerIndex]->arrow(dir, buttons->isButtonPressed(interfaceButtonShift)))
+        return;
+    // the layer left Left / Right alone: they page the groups of tracks (1-8 / 9-16 for CLIPS), as in every layer
+    if (dir == seqsession::ARROW_LEFT || dir == seqsession::ARROW_RIGHT)
+        selectGroup(seqsession::stepGroup(groupFirst, dir == seqsession::ARROW_RIGHT, layers[layerIndex]->groupSize()));
 }
 
 //----------------------------------------------------------------------------------------------
@@ -256,14 +258,13 @@ void cSeqSession::refreshScreen(bool force)
             bool sel = groupFirst == i * gs;
             snprintf(buttonText[i], sizeof(buttonText[i]), "%s%d-%d%s", sel ? "[" : "", i * gs + 1, i * gs + gs, sel ? "]" : "");
         }
-        else if (i == seqsession::kButtonClips || i == seqsession::kButtonCut)
+        else if (i == seqsession::kButtonSwitch)
         {
-            bool sel = layerIndex == (i == seqsession::kButtonClips ? 0 : 1);
-            snprintf(buttonText[i], sizeof(buttonText[i]), "%s%s%s", sel ? "[" : "", i == seqsession::kButtonClips ? "CLIPS" : "CUT", sel ? "]" : "");
+            snprintf(buttonText[i], sizeof(buttonText[i]), "%s", layerIndex == 0 ? "CUT" : "CLIPS");
         }
         else
         {
-            buttonText[i][0] = 0;
+            buttonText[i][0] = 0; // 6 = gap
         }
         if (strcmp(buttonText[i], shownButtons[i]) != 0)
         {

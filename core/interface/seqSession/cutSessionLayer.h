@@ -1,16 +1,19 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
-// CUT (MLR) page as a Session layer: adapts the free functions of cutLayer.h to seqsession::SessionLayer.
+// CUT (MLR) page as a Session layer: adapts the free functions of cutLayer.h to seqsession::SessionLayer
 // and owns the lane screen (laneView.*, plan 005 R4). Group of 4 tracks (screen buttons 1-4 = tracks 1-4 / 5-8 / 9-12 / 13-16,
-// Left / Right page the groups), all 12 pad columns belong to the layer. Screen button 6 = SYNC ALL (the gap on 7 and CLIPS on 8
-// are the host's). The layer draws its own screen: the host hides its title and info lines.
+// Left / Right page the groups), all 12 pad columns belong to the layer. Screen button 6 = SYNC ALL (the layer's own button
+// kButtonLayer); 7 is an empty gap and 8 switches back to CLIPS (the host's, this layer returns false for them). The layer draws its own screen: the host hides its title and info lines.
 #pragma once
 #include "cutLayer.h"
 #include "laneView.h"
 #include "seqCutLogic.h"
+#include "seqSessionLogic.h"
 #include "sessionLayer.h"
 #include <stdio.h>
 
 namespace seqsession {
+
+static_assert(seqcut::kScreenButtonSyncAll == kButtonLayer, "SYNC ALL sits on the layer's own screen button");
 
 class CutSessionLayer : public SessionLayer
 {

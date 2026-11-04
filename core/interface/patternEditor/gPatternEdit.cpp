@@ -4,6 +4,7 @@
 #include "mtAudioExport.h"
 #include "mtStructs.h"
 #include "patternEditor/patternEditor.h"
+#include "seqPlay/seqPlay.h"
 #include "performanceMode/performanceMode.h"
 #include "scales.h"
 
@@ -116,6 +117,9 @@ void cPatternEditor::initDisplayControls()
     prop2.h = 54;
 
     bgLabel = display.createControl<cBgLabel>(&prop2);
+
+    // Play mode overlay (sequencer tracks mod): a lower table index is drawn on top, so it is created before the pattern controls
+    seqPlayOverlay.createControl();
 
     //=====================================================================================================
     // POPUP

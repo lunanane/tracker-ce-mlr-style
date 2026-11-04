@@ -84,6 +84,7 @@ void cPerformanceMode::start(uint32_t options)
     // ustawienie trackow
     if (!dontClearPerformanceMode)
     {
+        seqFaderStockEntered(); // sequencer tracks mod: perform FX the fader page kept running end before the rows reset
         performance.resetSelectedRows();
         tracksPage = 0;
 
@@ -159,7 +160,9 @@ void cPerformanceMode::stop()
 {
     if (!dontClearPerformanceMode)
     {
-        if (performance.turnOff())
+        // fader FX never change pattern data: reload only when per-track performance patterns were loaded (keeps unsaved edits)
+        const bool reload = sequencer.isPerformancePatternChanged();
+        if (performance.turnOff() && reload)
         {
             newFileManager.loadWorkspacePatternNow(mtProject.values.actualPattern);
             sequencer.switchRamPatternsNow();
@@ -252,7 +255,9 @@ void cPerformanceMode::turnOffAtEndOfPattern()
         return;
 
     dontClearPerformanceMode = 1;
-    if (!sequencer.isSongMode() && !sequencer.seqPerfOwners.has(seqlogic::PERF_OWNER_LAUNCHER))
+    // fader FX never change pattern data: the forced reload (it drops unsaved edits) only when per-track patterns were loaded
+    if (!sequencer.isSongMode() && !sequencer.seqPerfOwners.has(seqlogic::PERF_OWNER_LAUNCHER) &&
+        sequencer.isPerformancePatternChanged())
     {
         // force pattern reload to clear changed tracks
         sequencer.sequencialSwitch_changeNextPattern(0);

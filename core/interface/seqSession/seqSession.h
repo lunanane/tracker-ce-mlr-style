@@ -1,6 +1,6 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
-// Session view: pad layers (CLIPS clip launcher, CUT) on the 48 pads. Reached from Play mode with a Pattern tap
-// (Editor -> Play -> Session -> Editor), see plans/002-session-view.md.
+// Session view: pad layers (CLIPS clip launcher, CUT) on the 48 pads. Reached with a Song double tap (plan 005 R2); the Song
+// button returns to the Song page. See plans/002-session-view.md, plans/005-v0.2-rework.md.
 #ifndef INTERFACE_SEQSESSION_H_
 #define INTERFACE_SEQSESSION_H_
 
