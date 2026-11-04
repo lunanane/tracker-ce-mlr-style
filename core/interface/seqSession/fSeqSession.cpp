@@ -143,6 +143,11 @@ void cSeqSession::selectLayer(uint8_t index)
     layers[layerIndex]->enter(groupFirst);
     for (int i = 0; i < 48; i++)
         ledShown[i] = 0xFF;
+    shownTitle[0] = 0;
+    memset(shownButtons, 0xFF, sizeof(shownButtons));
+    memset(shownInfo, 0xFF, sizeof(shownInfo));
+    refreshScreen(true); // the new layer is composed at once: every control of it is drawn again
+    refreshPads();
 }
 
 void cSeqSession::padEvent(uint8_t pad, uint8_t state)

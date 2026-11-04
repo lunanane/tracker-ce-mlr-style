@@ -274,6 +274,7 @@ AUDIO_CORE_RAM void Sequencer::tick_uStep(void)
                     play_microStep(trackIdx);
                 inc_uStep(trackIdx);
             }
+            seqSessionSceneBoundary(); // clip launcher: a scene with bar / now quantise swaps the pattern at its boundary (plan 007 B2)
             if (cutOn)
                 seqCutApply(); // sequencer tracks mod: the playheads of the CUT tracks decide the next positions
         }
@@ -3431,6 +3432,57 @@ void Sequencer::switchRamPatternsNow()
     }
 
     seqSessionPatternSwitched(); // clip launcher: every track follows the new pattern again
+    seqSessionSceneDone();       // a queued scene is over (or was overtaken by a song / pattern switch)
+}
+
+// Plan 007 B2 (audio context, once per step boundary, after every track stepped and before the CUT playheads are applied):
+// a scene with the quantise bar / now was read into the next-pattern buffer when it was launched. Here it swaps in at the boundary
+// the quantise names, or - when no boundary hit before the pattern end - arms the stock switch that swaps at the pattern end.
+void Sequencer::seqSessionSceneBoundary()
+{
+    if (!seqLauncher.scenePending() || !player.isPlay || player.uStep != 1)
+        return;
+    if (player.sequencialSwitch_pattern != seqLauncher.scenePattern())
+    {
+        seqLauncher.cancelScene(); // the Pattern page / Song page took the stock switch over
+        return;
+    }
+    const bool armed = player.sequencialSwitch_isArmed;
+    if (player.selectionMode)
+    {
+        if (seqLauncher.sceneReady() && !armed)
+            sequencialSwitch_SetReadyNow(); // a loop selection has its own end: stock switch
+        return;
+    }
+    const uint16_t len = (uint16_t)(currentPattern->track[0].length + 1);
+    switch (seqsession::sceneStepAction(seqLauncher.sceneQuant(), player.globalPos, len, seqLauncher.sceneReady(), armed))
+    {
+        case seqsession::SCENE_SWAP: seqSessionSceneSwap(); break;
+        case seqsession::SCENE_ARM_STOCK: sequencialSwitch_SetReadyNow(); break;
+        default: break;
+    }
+}
+
+// The swap itself, like the stock pattern end (switchRamPatternsNow in the interrupt) but in the middle of the pattern: every track goes
+// on at the global position inside its new length, so the groove stays in phase; the pattern end starts at step 0 as stock.
+void Sequencer::seqSessionSceneSwap()
+{
+    const uint16_t gp = player.globalPos; // the step that plays next
+    seqSongPatternEndTaken();             // as the stock switch: a queued pattern no longer ends the song mode
+    switchRamPatternsNow();               // swaps, song slot, clip launcher reset, scene state
+    sequencialSwitch_Reset();
+    player.globalPos = seqsession::scenePhase(gp, (uint16_t)(currentPattern->track[0].length + 1));
+    for (uint8_t row = 0; row < kAllTracks; row++)
+    {
+        const uint8_t ph = (uint8_t)seqsession::scenePhase(gp, (uint16_t)(currentPattern->track[row].length + 1));
+        reset_actual_pos(row, ph);
+        player.track[row].actual_pos_absolute = ph;
+    }
+    seqCutPatternSwitched();
+    for (uint8_t a = 0; a < kPerformanceTracks; a++)
+        mtProject.perfTracksPatterns[a] = mtProject.values.actualPattern; // as the stock full-pattern switch
+    if (mtInterface.isPerformanceModeScreenActive() || mtInterface.isSeqPerformScreenActive())
+        PM->refreshTrackPattern = 1;
 }
 
 int16_t Sequencer::findSlotWithPattern()

@@ -168,8 +168,9 @@ void cSeqPlayheads::update()
 //----------------------------------------------------------------------------------------------
 void laneViewCreate()
 {
-    if (s_hLanes >= 0 || s_hHeads >= 0)
-        return; // already there (created by enter())
+    // Called once per module start (initDisplayControls): the display freed the controls of the last start, the old handles are void.
+    s_hLanes = s_hHeads = -1;
+    s_visible = false;
     // controls created first are drawn last (on top): the playheads go over the lanes
     memset(&s_lanes, 0, sizeof(s_lanes));
     memset(&s_heads, 0, sizeof(s_heads));
@@ -186,12 +187,12 @@ void laneViewCreate()
     s_have = false;
 }
 
-void laneViewDestroy()
+// Never display.destroyControl() at runtime (plan 007 B1): it frees the slot while the control may still sit in the display's refresh
+// queue (laneViewShow(false) queues it), and the queue then stalls on the empty slot for good - nothing on the screen is drawn again
+// ("stuck in MLR"); it also shifts the slots (and so the handles and the cached display lists) of every control above it. The controls
+// are created once per module start and only shown / hidden; the display frees them when the module stops.
+void laneViewForget()
 {
-    if (s_hLanes >= 0)
-        display.destroyControl(s_hLanes);
-    if (s_hHeads >= 0)
-        display.destroyControl(s_hHeads);
     s_hLanes = s_hHeads = -1;
     s_visible = false;
 }

@@ -45,6 +45,29 @@ inline uint16_t stepsToQuant(Quant q, uint16_t pos, uint16_t len)
     return toBar < toEnd ? toBar : toEnd;
 }
 
+// ---- scene quantise (plan 007 B2) -------------------------------------------------------------------
+// A scene (pattern switch) with the quantise bar / now does not wait for the pattern end: its pattern is read into the next-pattern
+// buffer at once (main loop, asynchronous), and the audio side swaps it in at a step boundary where quantHit() says so, once the
+// read is done. At every step boundary (pos = the step that plays next, len = steps of the playing pattern) it decides:
+//  - SCENE_SWAP: the swap happens now; the tracks go on at pos mod their new length (the phase stays musical);
+//  - SCENE_ARM_STOCK: no hit before the pattern end, and the coming step is the last one: the stock switch is armed, it swaps at the
+//    pattern end exactly as before (this also keeps the Song page's slot logic in charge there);
+//  - SCENE_WAIT: nothing yet (also: the read is not finished - the next boundary after it is, decides).
+enum SceneAct : uint8_t { SCENE_WAIT = 0, SCENE_ARM_STOCK = 1, SCENE_SWAP = 2 };
+inline SceneAct sceneStepAction(Quant q, uint16_t pos, uint16_t len, bool ready, bool armedByStock)
+{
+    if (armedByStock || !ready || q == Q_PATTERN || q == Q_CLIPEND)
+        return SCENE_WAIT;
+    if (len == 0) len = 1;
+    if (quantHit(q, pos))
+        return SCENE_SWAP;
+    if ((uint16_t)(pos + 1) >= len)
+        return SCENE_ARM_STOCK;
+    return SCENE_WAIT;
+}
+// Position of the tracks after the swap: the global position inside the new length of the track.
+inline uint16_t scenePhase(uint16_t pos, uint16_t newLen) { return newLen ? (uint16_t)(pos % newLen) : 0; }
+
 // ---- pattern window (4 rows) ------------------------------------------------------------------
 struct Window
 {
@@ -408,7 +431,35 @@ class Launcher
         tail_ = 0;
         quant_ = Q_BAR;
         epoch_ = 0;
+        cancelScene();
+        gpos_ = 0;
+        glen_ = 1;
     }
+
+    // ---- scene (plan 007 B2): main loop writes, audio context reads ----
+    void beginScene(uint8_t pattern, Quant q)
+    {
+        sceneReady_ = false;
+        sceneQ_ = q;
+        scenePattern_ = pattern;
+        scenePending_ = true;
+    }
+    void setSceneReady(bool r) { sceneReady_ = r; }
+    void cancelScene()
+    {
+        scenePending_ = false;
+        sceneReady_ = false;
+        scenePattern_ = 0;
+        sceneQ_ = Q_PATTERN;
+    }
+    bool scenePending() const { return scenePending_; }
+    bool sceneReady() const { return sceneReady_; }
+    uint8_t scenePattern() const { return scenePattern_; }
+    Quant sceneQuant() const { return (Quant)sceneQ_; }
+    // The global position (the step that plays next) and the length of the playing pattern, as of the last advance(): what a scene
+    // counts from (the clip counter pos_ / len_ is frozen after a launch and is not the pattern).
+    uint16_t globalPosition() const { return gpos_; }
+    uint16_t globalLength() const { return glen_; }
 
     // ---- main loop ----
     void setQuant(Quant q) { quant_ = q; }
@@ -462,6 +513,8 @@ class Launcher
     // Call once per step from the hook of track 0 (before the other tracks).
     uint16_t advance(uint16_t globalPos, uint16_t patternLen)
     {
+        gpos_ = globalPos;
+        glen_ = patternLen ? patternLen : 1;
         if (!frozen_)
         {
             pos_ = globalPos;
@@ -587,6 +640,7 @@ class Launcher
             if (kind_[i] == K_STOP) kind_[i] = K_NONE;
         }
         fresh_ = true; // the next Play: the clip end counters start from the position the transport starts at
+        cancelScene();
     }
     // Panic (plan 005 M6, main loop, audio callback stopped, transport stopped): queued launches and stops are dropped, the
     // ring is emptied and stopped tracks play again. The launched clips (cur_) stay until the caller restored the tracks.
@@ -602,6 +656,7 @@ class Launcher
         fresh_ = true;
         stopped_ = 0;
         frozen_ = false;
+        cancelScene();
     }
 
   private:
@@ -662,6 +717,9 @@ class Launcher
     volatile Quant quant_;
     volatile bool frozen_;
     volatile uint16_t pos_, len_;
+    volatile uint16_t gpos_, glen_;
+    volatile bool scenePending_, sceneReady_;
+    volatile uint8_t scenePattern_, sceneQ_;
     Cmd ring_[kRing];
     volatile uint8_t head_, tail_;
 };
