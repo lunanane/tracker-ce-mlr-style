@@ -22,6 +22,9 @@ typedef struct
 
     text_icon_t icon;
 
+    // sequencer tracks mod (plan 006): marks of a slot (bit 0 = its scene plays next, bit 1 = queued), nullptr = none drawn
+    uint8_t (*slotMarks)(uint16_t slot) = nullptr;
+
 } localList_t;
 
 typedef struct

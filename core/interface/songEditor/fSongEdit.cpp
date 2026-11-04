@@ -8,6 +8,7 @@
 #include "performanceMode/performanceMode.h"
 #include "seqTracks.h"
 #include "seqHooks.h"
+#include "seqSong.h"
 
 #include "Platform.h"
 #include "mtPadBoard.h"
@@ -20,6 +21,7 @@ cSongEditor songEditor;
 static cSongEditor* SE = &songEditor;
 
 static void functPlayPattern();
+static void functPlayPatternHold(uint8_t state);
 static void functPlaySong();
 static void functIncPattern(uint8_t state);
 static void functDecPattern(uint8_t state);
@@ -148,6 +150,8 @@ void cSongEditor::start(uint32_t options)
 
     pressedSongButton = false;
     exitOnButtonRelease = 0;
+    flagHeld = false;
+    flagWheelUsed = false;
 
     newFileManager.updateActualPatternBitmask();
     readSong();
@@ -203,7 +207,7 @@ void cSongEditor::setDefaultScreenFunct()
 
     ip->setButtonObj(interfaceButtonShift, functShift);
 
-    ip->setButtonObj(interfaceButton0, buttonPress, functPlayPattern);
+    ip->setButtonObj(interfaceButton0, functPlayPatternHold); // sequencer tracks mod (plan 006): hold + wheel = scene "play next" flag
     ip->setButtonObj(interfaceButton1, buttonPress, functPlaySong);
     ip->setButtonObj(interfaceButton2, buttonPress, functUndo);
     ip->setButtonObj(interfaceButton3, buttonPress, functAddSlot);
@@ -237,6 +241,28 @@ void cSongEditor::lightUpPadBoard()
 }
 
 //==============================================================================================================
+
+// Sequencer tracks mod (plan 006). Screen button 1 is "play pattern" (loop / song toggle). Held with the wheel it sets the "play next"
+// flag of the selected slot's scene instead (the same per-pattern flag the clip launcher shows). A plain tap still does the stock thing,
+// now when the button is released (a wheel turn while it is held cancels the tap).
+static void functPlayPatternHold(uint8_t state)
+{
+    if (state == buttonPress)
+    {
+        SE->flagHeld = true;
+        SE->flagWheelUsed = false;
+    }
+    else if (state == buttonRelease)
+    {
+        bool tap = SE->flagHeld && !SE->flagWheelUsed;
+        SE->flagHeld = false;
+        SE->flagWheelUsed = false;
+        if (tap && !SE->isBusy)
+        {
+            functPlayPattern();
+        }
+    }
+}
 
 static void functPlayPattern()
 {
@@ -657,6 +683,17 @@ static void functEncoder(int16_t value)
         return;
     }
 
+    if (SE->flagHeld) // sequencer tracks mod (plan 006): button 1 held + wheel = "play next" flag of the selected slot
+    {
+        SE->flagWheelUsed = true;
+        if (value != 0)
+        {
+            seqSongSetPlayNext(SE->selectedSongPosition, value > 0);
+            display.refreshControl(SE->songPlayerControl);
+        }
+        return;
+    }
+
     switch (SE->selectedPlace)
     {
         case 1:
@@ -1051,6 +1088,7 @@ void cSongEditor::refreshPatternsList()
     }
 
     patternsList.names = patternNames;
+    patternsList.slotMarks = seqSongSlotMarks; // sequencer tracks mod (plan 006): play next / queued marks of the slots
 }
 
 void cSongEditor::cleanPatternsListResources()
@@ -1649,6 +1687,14 @@ static void functInsert()
             case 0: SE->walkOnSongPlayer(playerHome); break;
             case 1: SE->changeSongPositionSelection(-300); break;
         }
+    }
+    else if (!SE->isBusy)
+    {
+        // sequencer tracks mod (plan 006): Insert (it had no plain function here) queues the selected slot while the song plays: it takes
+        // over at the pattern end like a scene pad; Insert on the playing slot cancels a queued one. Move the selection while playing in
+        // the red edit mode (Rec), as stock.
+        seqSongQueueSlot(SE->selectedSongPosition);
+        display.refreshControl(SE->songPlayerControl);
     }
 }
 

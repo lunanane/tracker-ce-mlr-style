@@ -18,7 +18,7 @@ bool seqSessionLaunchClipQ(uint8_t track, uint8_t pattern, uint8_t quant); // sa
 bool seqSessionStopTrack(uint8_t track);                   // silent from the quantise point until a clip is launched
 bool seqSessionStopTrackQ(uint8_t track, uint8_t quant);
 bool seqSessionStopAll();
-bool seqSessionLaunchScene(uint8_t pattern);               // stock pattern switch (pattern end), or at once when stopped
+bool seqSessionLaunchScene(uint8_t pattern);               // stock pattern switch (pattern end; the song mode goes on), or at once when stopped
 uint8_t seqSessionOwnPattern();                            // pattern currently loaded (mtProject.values.actualPattern)
 uint8_t seqSessionQueuedScene();                           // queued stock pattern switch, 0 = none
 uint8_t seqSessionLastRefusal();                          // seqsession::Refusal of the last refused launch
@@ -27,11 +27,8 @@ uint8_t seqSessionLastRefusal();                          // seqsession::Refusal
 // the loaded pattern is read from RAM, so unsaved edits count.
 uint16_t seqSessionPatternMask(uint8_t pattern);
 
-// LIVE (plan 005 C2): the song was frozen by a launch. Back to song: the clips end at the next pattern end and the song
-// continues at the slot after the playing one. Returns false when the sequencer is busy (try again).
-bool seqSessionLive();
-uint8_t seqSessionLiveSlot();       // 1-based slot the song was frozen on
-bool seqSessionBackToSong();
+// Plan 006: the LIVE freeze / BACK TO SONG of plan 005 C2 are gone. The song loops its slot by default (seqSong.h), so a launch needs
+// no freeze: the clips end when the pattern switches (a scene pad, a queued Song page slot, or the slot's play-next flag).
 
 // Panic (transport Stop, plan 005 M6): queued launches / stops are dropped, launched clips end and the tracks play their
 // pattern again, LIVE ends. The track data is restored from the pattern files on a later pass when the file manager is busy.

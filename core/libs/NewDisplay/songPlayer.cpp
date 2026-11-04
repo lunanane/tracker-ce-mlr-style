@@ -596,6 +596,36 @@ void cSongPlayer::showList()
 
 void cSongPlayer::drawIcon(int pos, int row, int x, int y, int h)
 {
+    if (list->slotMarks != nullptr && pos >= 0 && pos < list->length)
+    {
+        // sequencer tracks mod (plan 006): right end of the line. Play next = an arrow (the slot goes on to the next one), queued =
+        // a red square (the song goes to this slot at the end of the pattern). Shapes only.
+        uint8_t m = list->slotMarks((uint16_t)pos);
+        int16_t cy = y + (row * h);
+        int16_t mx = x + 160;
+        if (m & 2)
+        {
+            API_COLOR(colors[5]);
+            API_LINE_WIDTH(16);
+            API_BEGIN(RECTS);
+            API_VERTEX2F(mx - 16, cy - 6);
+            API_VERTEX2F(mx - 6, cy + 6);
+            API_END();
+        }
+        if (m & 1)
+        {
+            API_COLOR(colors[0]);
+            API_LINE_WIDTH(20);
+            API_BEGIN(LINES);
+            API_VERTEX2F(mx, cy);
+            API_VERTEX2F(mx + 18, cy);
+            API_VERTEX2F(mx + 11, cy - 6);
+            API_VERTEX2F(mx + 18, cy);
+            API_VERTEX2F(mx + 11, cy + 6);
+            API_VERTEX2F(mx + 18, cy);
+            API_END();
+        }
+    }
     if (list->icon.useSpecialIcons)
     {
         if ((list->icon.iconPositionInList) == pos)

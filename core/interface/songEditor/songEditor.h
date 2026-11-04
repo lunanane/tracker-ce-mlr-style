@@ -138,6 +138,9 @@ class cSongEditor : public ModuleBase
 
     uint8_t isBusy = 0;
 
+    bool flagHeld = false;      // sequencer tracks mod (plan 006): screen button 1 is held (wheel = scene "play next" flag)
+    bool flagWheelUsed = false; // the wheel was turned while it was held: the release is not a tap
+
     uint8_t isDeletingInProgress = 0;
     uint8_t deleteElementMax;
     uint8_t currentDeleteElement;

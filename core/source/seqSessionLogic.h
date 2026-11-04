@@ -298,15 +298,15 @@ struct View
     uint8_t focusTrack;
     uint8_t focusMode;    // play mode of the focused clip
     uint8_t quant;        // Quant
-    uint8_t live;         // LIVE: the song is frozen
-    uint8_t liveSlot;     // 1-based slot of the frozen song
+    uint8_t live;         // unused since plan 006 (the LIVE freeze is gone); kept so the layout and the worst-case test stay as they were
+    uint8_t focusScene;   // the focused row's scene is flagged "play next" (plan 006; the slot of the old LIVE line)
     uint8_t modeHeld;     // screen button 1 held
     uint8_t stopHeld;     // screen button 3 held
     uint8_t msg;          // MSG_* status line
     uint8_t cell[kVisRows][kTracks];
     uint8_t flags[kVisRows][kTracks];
     uint8_t scene[kVisRows];      // Cell of the scene cell
-    uint8_t sceneFlags[kVisRows]; // F_ONEX: every clip of the row plays once
+    uint8_t sceneFlags[kVisRows]; // F_ONEX: the scene is flagged "play next" (plan 006; before: every clip of the row plays once)
 };
 
 // The animated part (small, redrawn at most once per step and for the blink).
@@ -347,7 +347,7 @@ inline GridPlan planGrid(const View& v)
     cost += (uint32_t)(kVisRows * kTracks + kVisRows) * kRectCost + 3 * kBatchCost; // cells and scene cells in three batches
     cost += 2 * kOutlineCost + 8 + kOutlineCost + 8;                              // pad window frames, focus frame
     cost += textCost(14) + textCost(18) + textCost(18);                           // launch quantise, focus lines
-    if (v.live) cost += 2 * textCost(22);
+    cost += textCost(22);                                                         // the scene line of the info column (plan 006)
     if (v.msg) cost += textCost(44);
     uint32_t follow = 0, one = 0, stop = 0;
     for (uint8_t r = 0; r < kVisRows; r++)

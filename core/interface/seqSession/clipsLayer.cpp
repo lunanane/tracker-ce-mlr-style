@@ -154,14 +154,14 @@ bool ClipsLayer::jog(int16_t value, bool shift)
 {
     if (modeHeld_)
     {
-        // button 1 held: the wheel sets the play mode of the focused clip, with Shift of the whole row
+        // button 1 held: the wheel sets the play mode of the focused clip; with Shift it sets the SCENE flag of the row instead
+        // (plan 006: play next = the Song page goes on to the next slot after this pattern; the clips' own modes stay as they are)
         if (focusPattern_ == 0 || value == 0)
             return true;
-        uint8_t m = stepClipMode(seqClipMode(focusPattern_, focusTrack_), value);
         if (shift)
-            seqClipSetRowMode(focusPattern_, m);
+            seqClipSetPlayNext(focusPattern_, stepClipMode(seqClipPlayNext(focusPattern_) ? seqclips::CLIP_PLAY1X : seqclips::CLIP_LOOP, value) == seqclips::CLIP_PLAY1X);
         else
-            seqClipSetMode(focusPattern_, focusTrack_, m);
+            seqClipSetMode(focusPattern_, focusTrack_, stepClipMode(seqClipMode(focusPattern_, focusTrack_), value));
         dirty_ = true;
         return true;
     }
@@ -200,10 +200,7 @@ bool ClipsLayer::button(uint8_t i, bool down)
             stopHeld_ = down;
             dirty_ = true;
             return true;
-        case kBtnBackToSong:
-            if (down && seqSessionLive() && !seqSessionBackToSong())
-                say(clipgrid::MSG_BUSY);
-            dirty_ = true;
+        case kBtnBackToSong: // plan 006: unused (the song loops its slot, no LIVE freeze to leave)
             return true;
         default: return false;
     }
@@ -225,7 +222,7 @@ bool ClipsLayer::buttonLabel(uint8_t i, char out[12])
             snprintf(out, 12, "%s", stopHeld_ ? "[STOP]" : "STOP");
             return true;
         case kBtnBackToSong:
-            snprintf(out, 12, "%s", seqSessionLive() ? "BACK:SONG" : "");
+            out[0] = 0;
             return true;
         case 4:
         case 5:
@@ -327,8 +324,7 @@ void ClipsLayer::build(clipgrid::View& v, clipgrid::Marks& m)
     v.focusTrack = focusTrack_;
     v.focusMode = focusPattern_ ? seqClipMode(focusPattern_, focusTrack_) : 0;
     v.quant = seqLauncher.quant();
-    v.live = seqSessionLive();
-    v.liveSlot = v.live ? seqSessionLiveSlot() : 0;
+    v.focusScene = focusPattern_ && seqClipPlayNext(focusPattern_) ? 1 : 0;
     v.modeHeld = modeHeld_;
     v.stopHeld = stopHeld_;
 
@@ -388,11 +384,7 @@ void ClipsLayer::build(clipgrid::View& v, clipgrid::Marks& m)
         }
         bool queuedScene = seqSessionQueuedScene() == pattern;
         v.scene[r] = queuedScene ? CELL_QUEUED : (pattern == own ? CELL_PLAYING : (masks[r] ? CELL_NOTES : CELL_EMPTY));
-        bool all1x = masks[r] != 0;
-        for (uint8_t t = 0; t < kTracks && all1x; t++)
-            if (((masks[r] >> t) & 1u) && seqClipMode(pattern, t) != seqclips::CLIP_PLAY1X)
-                all1x = false;
-        v.sceneFlags[r] = all1x ? F_ONEX : 0;
+        v.sceneFlags[r] = seqClipPlayNext(pattern) ? F_ONEX : 0; // the scene's own "play next" flag (plan 006)
     }
 
     // ---- animated marks

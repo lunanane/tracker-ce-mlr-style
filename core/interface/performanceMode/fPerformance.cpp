@@ -10,6 +10,7 @@
 #include "performanceMode.h"
 #include "seqTracks.h"
 #include "seqHooks.h"
+#include "seqSong.h"
 
 #include "Platform.h"
 #include "performanceEngine.h"
@@ -256,7 +257,8 @@ void cPerformanceMode::turnOffAtEndOfPattern()
 
     dontClearPerformanceMode = 1;
     // fader FX never change pattern data: the forced reload (it drops unsaved edits) only when per-track patterns were loaded
-    if (!sequencer.isSongMode() && !sequencer.seqPerfOwners.has(seqlogic::PERF_OWNER_LAUNCHER) &&
+    // (plan 006: a song that loops its slot does not reload the pattern at its end either, so it counts as no song here)
+    if ((!sequencer.isSongMode() || seqSongSlotStays()) && !sequencer.seqPerfOwners.has(seqlogic::PERF_OWNER_LAUNCHER) &&
         sequencer.isPerformancePatternChanged())
     {
         // force pattern reload to clear changed tracks

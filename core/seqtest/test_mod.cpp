@@ -4,6 +4,7 @@
 #include "seqClipsLogic.h"
 #include "seqModLogic.h"
 #include "seqSidecarLogic.h"
+#include "seqSongLogic.h"
 #include "seqTracksLogic.h"
 #include <stdio.h>
 #include <string.h>
@@ -244,13 +245,132 @@ static void test_clip_modes()
     memset(payload, 0, sizeof(payload));
     payload[0] = 0x0E; // clip (1,0) = 2 (bits 1..0), clip (1,1) = 3 (bits 3..2)
     payload[1] = 0x01; // clip (1,4) = 1 (Play 1x)
-    sn = seqsidecar::frameWrite(nb, sizeof(nb), kMagic, kVersion, payload, kPayload);
-    CHECK(sn == (size_t)kFileMax && q.load(nb, sn));
+    sn = seqsidecar::frameWrite(nb, sizeof(nb), kMagic, kVersionV1, payload, kPayload); // a v0.2 file (plan 006: version 2 has the scene flags too)
+    CHECK(sn == (size_t)kPayload + seqsidecar::kOverhead && q.load(nb, sn));
     CHECK(q.mode(1, 0) == CLIP_LOOP && q.mode(1, 1) == CLIP_LOOP && q.mode(1, 4) == CLIP_PLAY1X);
     // cleaned entries are not stored back as reserved values
     n = q.save(buf, sizeof(buf));
     ClipModes q2;
     CHECK(q2.load(buf, n) && q2.mode(1, 0) == CLIP_LOOP && q2.mode(1, 4) == CLIP_PLAY1X && q2.hash() == q.hash());
+}
+
+// ---- plan 006: scene flag "play next" in seqclips.bin (version 2) ----
+static void test_scene_flags()
+{
+    using namespace seqclips;
+    ClipModes m;
+    CHECK(kVersion == 2 && kVersionV1 == 1 && kPayloadV2 == kPayload + 32 && kFileMax == kPayloadV2 + seqsidecar::kOverhead);
+    // default: every scene loops
+    for (int p = 0; p <= 255; p++)
+        CHECK(!m.playNext((uint8_t)p));
+    CHECK(!m.anyNonDefault());
+    uint16_t h0 = m.hash();
+    // set / clear / unchanged / out of range
+    CHECK(m.setPlayNext(1, true) && m.playNext(1) && !m.playNext(2) && m.anyNonDefault() && m.hash() != h0);
+    CHECK(!m.setPlayNext(1, true));
+    CHECK(m.setPlayNext(255, true) && m.playNext(255) && !m.playNext(254));
+    CHECK(m.setPlayNext(9, true) && m.playNext(9) && !m.playNext(8) && !m.playNext(10)); // byte boundary
+    CHECK(!m.setPlayNext(0, true) && !m.playNext(0));
+    CHECK(m.setPlayNext(9, false) && !m.playNext(9));
+    CHECK(m.setPlayNext(1, false) && m.setPlayNext(255, false) && !m.anyNonDefault() && m.hash() == h0);
+    // the scene flag does not touch the clip modes and the other way round
+    CHECK(m.setPlayNext(7, true) && m.mode(7, 0) == CLIP_LOOP);
+    CHECK(m.setMode(7, 0, CLIP_PLAY1X) && m.playNext(7));
+    CHECK(m.setRow(7, CLIP_LOOP) && m.playNext(7)); // the row setter is a clip thing only
+
+    // round trip (version 2)
+    m.clear();
+    m.setPlayNext(3, true);
+    m.setPlayNext(255, true);
+    m.setMode(4, 2, CLIP_PLAY1X);
+    uint8_t buf[kFileMax + 8];
+    size_t n = m.save(buf, sizeof(buf));
+    CHECK(n == (size_t)kFileMax && buf[4] == 2);
+    CHECK(m.save(buf, kFileMax - 1) == 0);
+    ClipModes r;
+    bool newer = true;
+    CHECK(r.load(buf, n, &newer) && !newer && r.playNext(3) && r.playNext(255) && !r.playNext(4) && r.mode(4, 2) == CLIP_PLAY1X && r.hash() == m.hash());
+    // a version 2 frame with a v1 length (or the other way round) is refused
+    uint8_t payload[kPayloadV2];
+    memset(payload, 0, sizeof(payload));
+    uint8_t fb[kFileMax];
+    ClipModes q;
+    q.setPlayNext(5, true);
+    uint16_t hq = q.hash();
+    size_t sn = seqsidecar::frameWrite(fb, sizeof(fb), kMagic, kVersion, payload, kPayload);
+    CHECK(!q.load(fb, sn) && q.hash() == hq);
+    sn = seqsidecar::frameWrite(fb, sizeof(fb), kMagic, kVersionV1, payload, kPayloadV2);
+    CHECK(!q.load(fb, sn) && q.hash() == hq);
+    // a v0.2 file (version 1, clip modes only) loads with every scene flag = Loop and keeps its clip modes
+    memset(payload, 0, sizeof(payload));
+    payload[0] = 0x01; // clip (1,0) = Play 1x
+    sn = seqsidecar::frameWrite(fb, sizeof(fb), kMagic, kVersionV1, payload, kPayload);
+    ClipModes v1;
+    v1.setPlayNext(9, true); // loading replaces everything, also the flags
+    CHECK(v1.load(fb, sn) && v1.mode(1, 0) == CLIP_PLAY1X);
+    for (int p = 0; p <= 255; p++)
+        CHECK(!v1.playNext((uint8_t)p));
+    // ... and saves as version 2 from then on
+    n = v1.save(buf, sizeof(buf));
+    CHECK(n == (size_t)kFileMax && buf[4] == 2 && r.load(buf, n) && r.mode(1, 0) == CLIP_PLAY1X && !r.playNext(3));
+    // a version 2 file with the unused bit 255 set: the bit is dropped, the other flags stay
+    memset(payload, 0, sizeof(payload));
+    payload[kPayload + 31] = 0x80 | 0x01; // bit 255 (no pattern) + pattern 249
+    sn = seqsidecar::frameWrite(fb, sizeof(fb), kMagic, kVersion, payload, kPayloadV2);
+    CHECK(q.load(fb, sn) && q.playNext(249) && !q.playNext(250));
+    // a newer version is reported and nothing is loaded
+    uint16_t hq2 = q.hash();
+    sn = seqsidecar::frameWrite(fb, sizeof(fb), kMagic, kVersion + 1, payload, kPayloadV2);
+    CHECK(!q.load(fb, sn, &newer) && newer && q.hash() == hq2);
+    // bad CRC: nothing changes
+    n = m.save(buf, sizeof(buf));
+    buf[kPayload + 20] ^= 1;
+    CHECK(!q.load(buf, n) && q.hash() == hq2);
+}
+
+// ---- plan 006: song advance decision (loop by default), latch, queue ----
+static void test_song_advance()
+{
+    using namespace seqsong;
+    // not flagged: the slot plays again, whatever the position
+    CHECK(advance(false, false, false, false) == ADV_STAY);
+    CHECK(advance(false, true, false, false) == ADV_STAY);
+    // flagged: the song goes on to the next slot
+    CHECK(advance(true, false, false, false) == ADV_NEXT);
+    // flagged on the last slot: the song does not end, the slot loops
+    CHECK(advance(true, true, false, false) == ADV_STAY);
+    // a pattern break effect asks for the next pattern (already loading): it advances, flagged or not
+    CHECK(advance(false, false, true, false) == ADV_NEXT && advance(true, false, true, false) == ADV_NEXT && advance(false, true, true, false) == ADV_NEXT);
+    // audio export: the stock song (and its end)
+    CHECK(advance(false, false, false, true) == ADV_NEXT && advance(true, true, false, true) == ADV_NEXT && advance(false, true, false, true) == ADV_NEXT);
+
+    // latch: the answer of the last step (where the next pattern is loaded) is the one the pattern end acts on
+    Latch l;
+    CHECK(l.resolve(ADV_STAY, false) == ADV_STAY && l.v == 0);          // no last-step answer: the live decision
+    CHECK(l.resolve(ADV_NEXT, false) == ADV_NEXT && l.v == 0);
+    CHECK(l.decide(ADV_STAY) == ADV_STAY && l.v == 1);
+    CHECK(l.resolve(ADV_NEXT, false) == ADV_STAY && l.v == 0);          // the flag flipped after the last step: nothing was loaded, stay
+    CHECK(l.decide(ADV_NEXT) == ADV_NEXT && l.v == 2);
+    CHECK(l.resolve(ADV_STAY, false) == ADV_NEXT && l.v == 0);          // flipped back: the next pattern was loaded, take it
+    CHECK(l.decide(ADV_STAY) == ADV_STAY);
+    CHECK(l.resolve(ADV_STAY, true) == ADV_NEXT && l.v == 0);           // a break effect loaded the next pattern on its own
+    l.decide(ADV_NEXT);
+    l.clear();
+    CHECK(l.v == 0);
+
+    // queue: press on a slot (playing, slot, playingSlot, patternAtSlot, queuedSlot1)
+    CHECK(queueOp(false, 3, 0, 5, 0) == QOP_NONE);       // stopped
+    CHECK(queueOp(true, 3, 0, 0, 0) == QOP_NONE);        // empty slot
+    CHECK(queueOp(true, 3, 0, 5, 0) == QOP_QUEUE);
+    CHECK(queueOp(true, 4, 0, 6, 4) == QOP_QUEUE);       // another slot moves the queue
+    CHECK(queueOp(true, 0, 0, 5, 0) == QOP_NONE);        // the playing slot: nothing to queue
+    CHECK(queueOp(true, 0, 0, 5, 4) == QOP_CANCEL);      // ... but it cancels a pending queue
+    // shown only while the stock switch is armed for that slot's pattern
+    CHECK(queuedShown(4, 6, 6) == 4);
+    CHECK(queuedShown(4, 6, 7) == 0 && queuedShown(4, 6, 0) == 0 && queuedShown(0, 6, 6) == 0 && queuedShown(4, 0, 0) == 0);
+    // after the switch: the queued slot wins over the stock search when its pattern plays now
+    CHECK(slotAfterSwitch(4, 6, 6) == 3);
+    CHECK(slotAfterSwitch(4, 6, 7) == -1 && slotAfterSwitch(0, 6, 6) == -1);
 }
 
 int main()
@@ -264,6 +384,8 @@ int main()
     test_tap_refused();
     test_sidecar_frame();
     test_clip_modes();
+    test_scene_flags();
+    test_song_advance();
     printf("seqmod: %d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

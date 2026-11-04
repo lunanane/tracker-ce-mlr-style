@@ -12,7 +12,7 @@ extern Sequencer sequencer;
 
 namespace
 {
-// 1 KB, in the OCRAM bss section (the Plus has only ~5 KB of external RAM left)
+// 1 KB + 32 bytes of scene flags, in the OCRAM bss section (the Plus has only ~5 KB of external RAM left)
 OCRAM_BSS_SECTION seqclips::ClipModes s_modes;
 
 seqlogic::DirtyGate s_dirty;     // a mode changed: the workspace autosave is asked for once the transport stopped
@@ -51,6 +51,17 @@ void seqClipSetMode(uint8_t pattern, uint8_t track, uint8_t mode)
 void seqClipSetRowMode(uint8_t pattern, uint8_t mode)
 {
     if (s_modes.setRow(pattern, mode))
+        s_dirty.mark();
+}
+
+bool seqClipPlayNext(uint8_t pattern)
+{
+    return s_modes.playNext(pattern);
+}
+
+void seqClipSetPlayNext(uint8_t pattern, bool on)
+{
+    if (s_modes.setPlayNext(pattern, on))
         s_dirty.mark();
 }
 

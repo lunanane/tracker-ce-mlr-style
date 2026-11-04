@@ -157,8 +157,8 @@ void cSeqClipGrid::update()
                     if (one && (pass == 1) == end)
                         rect(colX(t) + kCellW - 9, rowY(r) + 2, colX(t) + kCellW - 3, rowY(r) + 8);
                 }
-                if ((v.sceneFlags[r] & F_ONEX) && pass == 0)
-                    rect(sceneX() + kSceneW - 9, rowY(r) + 2, sceneX() + kSceneW - 3, rowY(r) + 8);
+                if ((v.sceneFlags[r] & F_ONEX) && pass == 0) // scene "play next": a bar along the top (the clip notch is a small square)
+                    rect(sceneX() + 4, rowY(r) + 2, sceneX() + kSceneW - 5, rowY(r) + 5);
             }
             API_END();
         }
@@ -198,12 +198,11 @@ void cSeqClipGrid::update()
     snprintf(buf, sizeof(buf), "Launch: %s", quantShort((Quant)v.quant));
     API_CMD_TEXT(x, y, f->handle, 0, buf);
     y += 40; // the countdown (marks control) sits at posY + 28
-    if (v.live)
+    if (v.focusPattern) // the scene flag of the focused row (plan 006)
     {
-        API_COLOR(pal.red);
-        API_CMD_TEXT(x, y, f->handle, 0, "LIVE: song frozen");
-        snprintf(buf, sizeof(buf), "slot %d, btn 4: back", v.liveSlot);
-        API_CMD_TEXT(x, y + 20, f->handle, 0, buf);
+        API_COLOR(pal.text);
+        snprintf(buf, sizeof(buf), "Scene %d: %s", v.focusPattern, v.focusScene ? "PLAY NEXT" : "LOOP");
+        API_CMD_TEXT(x, y, f->handle, 0, buf);
     }
     y += 52;
     API_COLOR(pal.text);
@@ -220,8 +219,8 @@ void cSeqClipGrid::update()
     if (plan.help) // only while button 1 or 3 is held
     {
         API_COLOR(v.modeHeld ? pal.text : pal.dim);
-        API_CMD_TEXT(x, y + 52, f->handle, 0, "Wheel: loop / 1x");
-        API_CMD_TEXT(x, y + 72, f->handle, 0, "Shift: whole row");
+        API_CMD_TEXT(x, y + 52, f->handle, 0, "Wheel: clip loop / 1x");
+        API_CMD_TEXT(x, y + 72, f->handle, 0, "Shift: scene play next");
         API_COLOR(v.stopHeld ? pal.text : pal.dim);
         API_CMD_TEXT(x, y + 100, f->handle, 0, "Hold 3 + pad: stop");
         API_COLOR(pal.dim);

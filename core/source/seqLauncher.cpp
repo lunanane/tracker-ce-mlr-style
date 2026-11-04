@@ -2,6 +2,7 @@
 #include "seqLauncher.h"
 #include "seqClips.h"
 #include "seqTracks.h"
+#include "seqSong.h"
 #include "mtSequencer.h"
 #include "mtStructs.h"
 #include "fileManager.h"
@@ -23,17 +24,13 @@ namespace
 bool s_active = false;   // Session view is on screen
 bool s_ownsPerf = false; // Session switched performance mode on (only then it switches it off again)
 bool s_wasPlay = false;
-seqsession::LiveState s_live;       // the song was frozen by a launch (C2)
 seqsession::FollowArms s_arms;      // Play 1x follow actions queued for the clip instance that plays now
 bool s_panicRestore = false;        // panic: the launched tracks still have to be put back
 bool s_undoCleared = false;         // the pattern undo history was dropped by the last launched clip going away
 uint8_t s_refusal = seqsession::REFUSE_NONE; // why the last launch was refused
 
-// LIVE requests, carried out in the sequencer's global-step callback (the stock pattern for song <-> loop changes: it retries
-// every step until the sequencer is not changing pattern, so a tap on the last step is not refused)
-volatile bool s_wantFreeze = false;
-volatile bool s_wantBack = false;
-volatile bool s_wantArm = false; // a queued scene is to be armed (SetReadyNow) once cbkLive is done: the callback slot is shared
+// Plan 006: no LIVE freeze any more. The song loops its slot by default (seqSong.h), so a launch or a scene never has to stop the song
+// from running away; the clips simply end when the pattern switches.
 
 // Play 1x follow actions: at most one attempt per step, hard read errors count towards giving up
 uint16_t s_lastTry = 0xFFFF;
@@ -221,50 +218,6 @@ bool restoreThrottled(bool leavePerf)
     return false;
 }
 
-// Plan 005 C2: song <-> loop requests run in the global-step callback, like the stock song playback toggle: it retries every
-// step while the sequencer is changing pattern, then lets go. Runs in the sequencer interrupt.
-void cbkLive()
-{
-    if (newFileManager.isPatternLoading() || sequencer.isLastPatternStep())
-        return; // retry in one step
-    if (s_wantFreeze)
-    {
-        s_wantFreeze = false;
-        if (sequencer.isPlay() && sequencer.isSongMode())
-        {
-            uint8_t slot = mtProject.song.playlistPos;
-            sequencer.loopCurrentPattern(slot); // the pattern loops; launches override the arrangement (Ableton)
-            s_live.freeze(slot);
-        }
-    }
-    if (s_wantBack)
-    {
-        s_wantBack = false;
-        if (sequencer.isPlay() && !sequencer.isSongMode())
-            sequencer.continueSong(mtProject.song.playlistPos); // at the pattern end the song goes on with the next slot
-        s_live.clear();
-    }
-    if (s_wantArm)
-    {
-        s_wantArm = false;
-        // the scene arm callback this one replaced: arm now, after the freeze (the pattern is not at its last step here)
-        if (seqsession::LiveState::armAfterFreeze(true, sequencer.sequencialSwitch_GetNext() != 0))
-            sequencer.sequencialSwitch_SetReadyNow();
-    }
-    sequencer.setOnGlobalStep(nullCallback);
-}
-
-void requestFreezeIfNeeded()
-{
-    if (!seqsession::LiveState::needsFreeze(sequencer.isPlay(), sequencer.isSongMode()))
-        return;
-    // taking the shared slot would drop a queued scene's arm callback: cbkLive arms it instead
-    if (sequencer.sequencialSwitch_GetNext() != 0)
-        s_wantArm = true;
-    s_wantFreeze = true;
-    sequencer.setOnGlobalStep(cbkLive);
-}
-
 enum LaunchResult : uint8_t { LR_OK = 0, LR_BUSY, LR_ERROR };
 
 // Launch the clips of `pattern` on every track of `tracks` (one file read for all of them). Checks and the load come first; only
@@ -333,7 +286,6 @@ LaunchResult launchClips(uint16_t tracks, uint8_t pattern, uint8_t quant)
         return LR_ERROR;
     }
 
-    requestFreezeIfNeeded();
     sequencer.seqSessionEnterPerformance();
     for (uint8_t t = 0; t < seqsession::kTracks; t++)
     {
@@ -358,8 +310,8 @@ LaunchResult launchClips(uint16_t tracks, uint8_t pattern, uint8_t quant)
 //  - at most one attempt per step; a hard read error three times in a row stops the track instead of retrying for ever.
 void queueFollowActions()
 {
-    if (!sequencer.isPlay() || sequencer.isSongMode() || s_panicRestore)
-        return; // the song advances by itself
+    if (!sequencer.isPlay() || (sequencer.isSongMode() && !seqSongSlotStays()) || s_panicRestore)
+        return; // the song advances by itself (a slot flagged "play next"; a looping slot is like a pattern loop)
     if (seqLauncher.ringPending() || seqSessionQueuedScene() != 0)
         return;
     if (sequencer.isLastPatternStep() || newFileManager.isPatternLoading())
@@ -619,7 +571,6 @@ bool seqSessionStopTrackQ(uint8_t track, uint8_t quant)
 {
     if (!seqLauncher.postStop(track, quant))
         return false;
-    requestFreezeIfNeeded();
     if (!sequencer.isPlay())
         flushNow();
     return true;
@@ -629,7 +580,6 @@ bool seqSessionStopAll()
 {
     if (!seqLauncher.postStopAll())
         return false;
-    requestFreezeIfNeeded();
     if (!sequencer.isPlay())
         flushNow();
     return true;
@@ -658,34 +608,6 @@ uint16_t seqSessionPatternMask(uint8_t pattern)
     return m;
 }
 
-bool seqSessionLive()
-{
-    return s_live.active(sequencer.isPlay(), sequencer.isSongMode());
-}
-
-uint8_t seqSessionLiveSlot()
-{
-    // the slot the song stands on now (a scene whose pattern is in the song moves it)
-    return (uint8_t)(mtProject.song.playlistPos + 1);
-}
-
-bool seqSessionBackToSong()
-{
-    if (!seqSessionLive())
-        return false;
-    // armed follow actions are over: the pattern switch at the end ends the clips anyway
-    for (uint8_t t = 0; t < seqsession::kTracks; t++)
-        if (seqLauncher.queuedKind(t) != seqsession::Launcher::K_NONE && seqLauncher.queuedQuant(t) == seqsession::Q_CLIPEND)
-            seqLauncher.postCancel(t);
-    if (seqSessionQueuedScene() != 0)
-        sequencer.sequencialSwitch_Reset(); // a queued scene would switch the song off again at the pattern end
-    // stock "continue song" in the global-step callback: at the pattern end the song goes on with the slot after the playing
-    // one, and the pattern switch ends every launched clip (seqSessionPatternSwitched)
-    s_wantBack = true;
-    sequencer.setOnGlobalStep(cbkLive);
-    return true;
-}
-
 uint8_t seqSessionLastRefusal()
 {
     return s_refusal;
@@ -693,13 +615,10 @@ uint8_t seqSessionLastRefusal()
 
 void seqSessionPanic()
 {
-    s_wantFreeze = false;
-    s_wantBack = false;
-    s_wantArm = false;
     DISABLE_AUDIO_INTERRUPTS(); // the launcher and the player state are audio-side data
     seqLauncher.panic();
     ENABLE_AUDIO_INTERRUPTS();
-    s_live.clear();
+    seqSongPanic();
     s_arms.reset();
     memset(s_hardFails, 0, sizeof(s_hardFails));
     s_restoreGaveUp = false;
@@ -728,8 +647,6 @@ bool seqSessionLaunchScene(uint8_t pattern)
         // stock pattern switch: queued, happens at the end of the pattern (like Pattern + left / right)
         if (newFileManager.isPatternLoading())
             return false;
-        const bool freezing = seqsession::LiveState::needsFreeze(sequencer.isPlay(), sequencer.isSongMode());
-        requestFreezeIfNeeded(); // the song would pick the next pattern itself
         uint16_t base = sequencer.sequencialSwitch_GetNext();
         if (base == 0)
             base = (uint16_t)mtProject.values.actualPattern;
@@ -740,10 +657,7 @@ bool seqSessionLaunchScene(uint8_t pattern)
             sequencer.sequencialSwitch_changeNextPattern((int8_t)step);
             delta -= step;
         } while (delta != 0);
-        if (freezing)
-            s_wantArm = true; // cbkLive owns the slot: SetReady would overwrite it and the song would never go live
-        else
-            sequencer.sequencialSwitch_SetReady();
+        sequencer.sequencialSwitch_SetReady();
         return true;
     }
     // transport stopped: switch at once, like the Pattern page does
@@ -792,17 +706,6 @@ void seqSessionUpdate()
         ENABLE_AUDIO_INTERRUPTS();
     }
     s_wasPlay = play;
-    if (!play || sequencer.isSongMode())
-    {
-        // LIVE only means something while the transport runs and the song does not (Stop, BACK TO SONG or a song started by hand)
-        s_live.clear();
-        if (!play)
-        {
-            s_wantFreeze = false;
-            s_wantBack = false;
-        }
-    }
-
     // the last launched clip is gone (scene, Pattern page, restore): undo steps taken meanwhile hold clip content
     static uint16_t s_lastMask = 0;
     uint16_t mask = seqLauncher.launchedMask(seqSessionOwnPattern());

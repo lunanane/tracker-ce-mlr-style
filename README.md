@@ -20,6 +20,7 @@ This branch adds sequencers per track and a clip launcher on top of Tracker CE. 
 * **Play mode**: every track gets a sequencer type, **Chord/Arp** or **Mono**, played from the pads, with **Record** (punch-in or one loop) into the track's tracker steps. It is a page of the pattern editor: the bottom labels show the sequencers of 8 tracks.
 * **Session view**: an Ableton-style **clip launcher** (CLIPS: a clip is one track of another pattern; scene launch, stop) and an **MLR CUT layer** (a playhead per track that jumps through the pattern, with playhead recording).
 * **Alt Performance page**: a fader page for the perform FX.
+* **Live-set Song page (v0.2.3)**: the song **loops the playing slot by default**. A slot only hands over to the next one when its scene (pattern) is flagged **play next**. You move on during a set by scene pads in the launcher or by **queueing a slot** on the Song page (select it, press **Insert**; it takes over at the pattern end, shown as a red square). The play-next flag is set with **screen button 1 held + wheel** on the selected Song page slot, or with **Shift + screen button 1 held + wheel** on a row of the launcher; it shows as an arrow on the Song page slot list and as a bar on the launcher's scene cell. The LIVE freeze / BACK TO SONG of v0.2 are gone (the loop makes them unnecessary). Audio export of the song and the stock playlist editing are unchanged.
 
 **How to enter**
 * Pattern page: tap the bottom-right key (**Perform**, the firmware's Pattern key) to switch Play mode on and off. Left / Right switch the strip between tracks 1-8 and 9-16; a screen button selects a track; hold a screen button and turn the wheel to pick its sequencer type; hold Shift to see what the pads do.
@@ -27,13 +28,13 @@ This branch adds sequencers per track and a clip launcher on top of Tracker CE. 
 * Performance: the top-row **Perform** key (the firmware's Performance key) opens the fader page; **Shift + Perform** opens the stock Performance page (and back).
 
 **Install and recovery**
-1. Build (`make original`, `make plus`, `make mini`) or take a release: `PolyendTracker_SEQ_0.2.ptf`, `TrackerPlus_SEQ_0.2.ptf`, `TrackerMini_SEQ_0.2.ptf` (the device shows the version as `1.0.0 CE-SEQ0.2`).
+1. Build (`make original`, `make plus`, `make mini`) or take a release: `PolyendTracker_SEQ_0.2.3.ptf`, `TrackerPlus_SEQ_0.2.3.ptf`, `TrackerMini_SEQ_0.2.3.ptf` (the device shows the version as `1.0.0 CE-SEQ0.2.3`).
 2. Copy the `.ptf` to `/Firmware/` on the microSD card and run **Config > Firmware > Firmware update** (see [Flashing on Hardware & Emergency Recovery](#4-flashing-on-hardware--emergency-recovery)).
 3. Recovery: keep the stock CE `.ptf` for your device on the card. If the mod misbehaves, flash the stock `.ptf` the same way; if it does not boot, use the reset pinhole procedure described in the Emergency Recovery note linked above.
 
-**Status**: v0.2, **untested on hardware**. Use at your own risk and **back up your projects** first. Test plan: [`docs/seq-tracks-test-list.md`](docs/seq-tracks-test-list.md) (start with its "Start here" section); design plans: [`plans/`](plans/).
+**Status**: v0.2.3, **untested on hardware**. Use at your own risk and **back up your projects** first. Test plan: [`docs/seq-tracks-test-list.md`](docs/seq-tracks-test-list.md) (start with its "Start here" section); design plans: [`plans/`](plans/).
 
-**Known limits (v0.2)**: the CUT state is not saved with the project; on the original Tracker, jumps in long SD-streamed samples may start late; MIDI perform CCs are ignored on the fader page; the delay time click is not fixed; recording on a track that holds a launched clip or is CUT-active is not supported; the stock 10 s autosave still writes while playing (R1 recordings, PING / REV jog on the fader page); kept fader FX continue into event-opened pages until Stop, and the Song page Play toggle back to song mode ends them (stock behaviour); on the Tracker Plus / Mini a clip launch while playing is refused when the pattern has unsaved edits.
+**Known limits (v0.2.3)**: the CUT state is not saved with the project; on the original Tracker, jumps in long SD-streamed samples may start late; MIDI perform CCs are ignored on the fader page; the delay time click is not fixed; recording on a track that holds a launched clip or is CUT-active is not supported; the stock 10 s autosave still writes while playing (R1 recordings, PING / REV jog on the fader page); kept fader FX continue into event-opened pages until Stop, and the Song page Play toggle back to song mode ends them (stock behaviour); on the Tracker Plus / Mini a clip launch while playing is refused when the pattern has unsaved edits.
 
 **License**: the mod files (`seqgen/`, and the new `seq*` files and their headers) are **PolyForm Noncommercial 1.0.0** (see [`seqgen/LICENSE.md`](seqgen/LICENSE.md)). The Polyend files stay under Polyend's [`LICENSE`](LICENSE) (MIT with the CE restrictions).
 
