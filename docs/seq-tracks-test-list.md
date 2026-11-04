@@ -9,13 +9,14 @@ any change.
 ## Start here: the highest-value on-device tests
 Do these first (the full list below is the detail):
 1. Shift+Rec a loop in Play mode, Stop, go to Performance, then Pattern, reopen the project: the whole recording is there.
-2. Record on track 3, go to Session, launch another clip on track 3, then launch the own scene: the recording is intact.
+2. Record on track 3, go to the launcher (Song double tap), launch another clip on track 3, then launch the own scene: the recording is intact.
 3. Launch clips, wait 15 s, Save, Save As, power cycle: the original pattern files are unchanged and edits on other tracks are kept; also in song mode.
 4. A project that never used the mod behaves like stock CE (section 12).
 5. CUT jumps on track 1 while Chord/Arp runs elsewhere: the arp stays on the bar.
 6. External MIDI clock start / stop / cable pull with Chord/Arp + Mono: no hung notes, a recording ends.
 7. Clips running, visit Master, come back: the clips keep playing.
 8. Reflash the stock .ptf to confirm the recovery path.
+9. R2: Song double tap opens the launcher; with the song playing launch a clip (LIVE, song frozen), BACK:SONG resumes; a Play 1x clip chains into the next row; Stop = panic (section 9, 9b, 9c).
 
 Contents: 1-6 Play mode | 7 Record | 8 save / load | 9 Session CLIPS | 10 Session CUT | 11 alt Performance page | 12 stock-behaviour checks.
 
@@ -183,45 +184,75 @@ Known limits of step B: the sidecar is rewritten about once a second after a cha
 not written to patterns other than the one you started in; sample-track chords keep the lowest note only; no pad-velocity record.
 
 # Session view: CLIPS (section 9) and CUT (section 10)
-Reached with the Pattern tap cycle **Editor > Play > Session > Editor**. Screen buttons 7 / 8 switch between the CLIPS and the CUT layer; all 12 x 4 pads belong to the active layer. A *clip* = one track of one pattern, a *scene* = a whole
-pattern. Needs patterns 1-8 (or any four in a row) that hold different notes on a few tracks, saved in the project (leave the pattern
-page once so the Workspace files exist). Tracks that have no notes in a pattern are empty clips.
+**Plan 005 R2.** The clip launcher is reached with a **Song double tap**: press **Song** to arrive on the Song page, then tap **Song** again (press and release inside 0.4 s, no other button). Press **Song** in the launcher to go back to the Song page. Screen buttons 7 / 8 switch between the CLIPS and the CUT layer; all 12 x 4 pads belong to the active layer. A *clip* = one track of one pattern, a *scene* = a whole
+pattern. **Rows are patterns** (row n = pattern n, moved by hand, independent of the song arrangement). Needs patterns 1-8 that hold different notes on a few tracks, saved in the project. Tracks that have no notes in a pattern are empty clips.
 
-## 9. Session view, CLIPS layer
-Layout (pads 12 x 4, 1-based): columns 1-8 = the 8 tracks of the group, rows 1-4 = 4 patterns of the window; column 9 = SCENE (one per row);
-column 10 row 1 = STOP-T, row 4 = STOP-A; column 12 row 1 = QUANT. Screen buttons: 1-2 = group, 7 = CLIPS, 8 = CUT.
+## 9. Session view, CLIPS layer (plan 005 R2)
+Pads (1-based): columns 1-8 = the 8 tracks of the window, **column 9 empty (gap)**, **column 10 = scene launch** of the row, columns 11-12 empty; rows 1-4 = 4 patterns. Screen buttons: **1 MODE** (hold + wheel), **2 QUANT** (tap), **3 STOP** (hold + pad), **4 BACK TO SONG** (only while LIVE), 5 empty, 6 belongs to the active layer (CUT: SYNC ALL), 7 empty gap, **8 switches CLIPS <-> CUT** (its label shows the other layer). Left / Right = tracks 1-8 / 9-16, Up / Down = rows (Shift = 4 rows), jog = rows.
+Screen (ASCII text and shapes only): a grid of 12 pattern rows x 16 tracks (gap after track 8) and the scene column; **a red frame round the 8 x 4 pad window** (and one round its scene cells); empty cell dark, clip with notes grey, playing green with a dark progress bar, queued blinking white, follow action armed = steady green outline; a notch in the top right corner = Play 1x (red notch = the next row is empty, the track stops after this clip); a dim square in an empty cell of a sounding track = pressing that pad stops the track; a white outline = the focused clip; a green bar on the left edge = the row the transport plays. Right column: launch quantise, countdown ("next in N steps"), LIVE state, focused clip and its mode, short help.
 | Press | Expected |
 |---|---|
-| Play mode, tap **Pattern** | Title bar "Session view", title "Session: CLIPS   tracks 1-8". Pad LEDs: playing clips bright (the loaded pattern's row), clips that hold notes dim, empty clips off, scene pads of the loaded pattern bright. Bottom labels: `[1-8]` `9-16` and `[CLIPS]` `CUT`. |
-| Tap **Pattern** again | Back to the pattern editor. A project that never entered Session plays exactly as before. |
-| Screen button 2 | Group 9-16: title "tracks 9-16", the 8 pad columns show tracks 9-16. Button 1 = tracks 1-8. Buttons 3-6 do nothing. |
-| Turn the jog wheel | The pattern window scrolls by one pattern per detent (Shift + jog = 4); info line "Patterns 5-8"; the LEDs show the new rows after a moment (the files are read one per pass). Not below 1, not above 255. |
-| Transport running. Tap a dim clip (track T, pattern P) | The pad blinks; at the next **bar** (16 steps of the global position) track T plays its part of pattern P from its first step, the pad turns bright and the old clip of that track turns dim. Info line "Now ... T:P"; while queued "Next T>P". Other tracks keep playing. |
-| Quantise: tap the QUANT pad (col 12 row 1) | Cycles next bar (dim) > pattern end > immediate (bright). Launch at the pattern end / at the next step of the track for "immediate". |
-| Tap a clip while the pad of another clip of that track blinks | The newer launch wins. |
-| Clip with a different length than the loaded pattern | The track loops with its own length (stock Performance behaviour). The pattern page title then shows 4444 (stock Performance marker). |
-| Hold **STOP-T** and tap a clip pad of track T | Its pad blinks, at the quantise point track T goes silent (a held note ends) and no clip is bright for it. Info "Now T:--". Tap any clip of T: it plays again. |
-| Tap an **empty** (off) clip pad | Stops that track like STOP-T. |
-| **STOP-A** (col 10 row 4) | All 16 tracks stop at the quantise point. |
-| Tap a **scene** pad (col 9) | The scene pad blinks; at the pattern end the whole pattern switches (stock pattern switch, like Pattern + left / right), all clip states reset to "the loaded pattern", stopped tracks play again. Scene launch is always at the pattern end whatever QUANT says. |
-| Transport stopped: tap a clip / scene / STOP | Takes effect at once (nothing to wait for). Press Play: it plays. |
-| Stop the transport with launches queued | Queued clips take effect, stopped tracks play again when you restart. |
-| Screen button 8 (**CUT**) | Title "Session: CUT   tracks 1-4", the CUT pads (section 10), buttons 1-4 = tracks 1-4 / 5-8 / 9-12 / 13-16. Button 7 (**CLIPS**): back, clip states unchanged. Held pads are released when you switch. |
+| Song page, tap **Song** twice quickly | The launcher opens: grid, red frame round tracks 1-8 x rows 1-4, labels `MODE LOOP` `Q: bar` `STOP` (button 4 empty) and `CUT` on 8. Pad LEDs: playing clips bright (the loaded pattern's row), clips with notes dim, empty clips off (a dimmer light for empty pads of a sounding track), scene pads of the loaded pattern bright. |
+| Press **Song** once (not a tap: hold it > 0.4 s, or press another button with it) | No launcher; the stock Song page behaves as before (slot list focus while held). |
+| **Pattern**, **Performance**, any other module button in the launcher | Leaves the launcher for that page; the clips keep playing. **Song** returns to the Song page. |
+| **Right** / **Left** | The red frame and the pads jump to tracks 9-16 / 1-8; the pad columns show those tracks. At tracks 9-16 **Right** does nothing, at 1-8 **Left** does nothing. |
+| **Down** / **Up** (Shift + key) | The frame moves one row (4 rows) down / up; the grid scrolls when the frame would leave the 12 shown rows. Not above pattern 1, not below pattern 255. The jog wheel does the same (Shift = 4). |
+| Transport running. Tap a dim clip (track T, pattern P) | The cell blinks; at the next **bar** (global position) track T plays its part of pattern P from its first step, the cell turns green and the old clip turns grey. Countdown "next in N steps" counts down. Other tracks keep playing. |
+| Screen button 2 (tap) | The label cycles `Q: bar` > `Q: pattern` > `Q: now` > `Q: bar`. Launch at the bar / pattern end / next step of the track. The right column shows the value. |
+| Tap a clip while another clip of that track is queued | The newer launch wins. |
+| Clip with a different length than the loaded pattern | The track loops with its own length (stock Performance behaviour). |
+| Hold screen button **3** (label `[STOP]`) and tap a clip pad of track T | At the quantise point track T goes silent (a held note ends); no clip is green for it; empty pads of T are not dimly lit any more. Tap any clip of T: it plays again. |
+| Hold **3** and tap a **scene** pad | All 16 tracks stop at the quantise point. |
+| Tap an **empty** clip pad (dark cell) | Stops that track (same as hold 3 + pad). The empty cells of a sounding track carry a dim square so this is visible. A track that is already stopped ignores it. |
+| Tap a **scene** pad (column 10) | The scene pad blinks; at the pattern end the whole pattern switches (stock pattern switch), all clip states reset to "the loaded pattern", stopped tracks play again. Scene launch is always at the pattern end whatever QUANT says. |
+| Transport stopped: tap a clip / scene / empty pad | Takes effect at once (nothing to wait for). Press Play: it plays. |
+| Stop the transport with launches queued | **Stop is the panic**: queued launches and stops are dropped, launched clips end, every track plays its own pattern again (the pattern is restored from its file), LIVE ends. Play again = stock pattern playback. Pressing Stop with nothing launched changes nothing. |
+| Screen button 8 (label `CUT`) | The CUT layer (section 10); the label now reads `CLIPS`, button 8 again: back, clip states unchanged. Held pads are released when you switch. |
 | Pattern file safety: launch a clip on a track, wait 15 s (autosave), launch a scene or switch pattern, look at the original pattern | The original pattern is unchanged (launched clips were not saved into it); edits you made to other tracks of it are kept. |
-| Launch own pattern's clip on a track that has a queued clip | The queued clip is cancelled, the track keeps/returns to the pattern's own part. |
-| Scene pad of the loaded pattern while clips run | At the pattern end all tracks are back on the loaded pattern. |
-| Leave Session (any module button) with clips running | They keep running. Hold no pad: nothing hangs. |
-| Open the pattern page and edit while clips run | **Known limit**: the pattern in RAM holds the launched clips; do not save/edit seriously until a scene launch or a pattern switch has reset it. |
+| Launch own pattern's clip on a track that has a queued clip or follow action | The queued clip is cancelled, the track keeps/returns to the pattern's own part. |
+| Leave the launcher (any module button) with clips running | They keep running. Hold no pad: nothing hangs. |
 | Chord/Arp or Mono track taken over (Play mode) and a clip is launched on that track | The sequencer keeps priority while it takes over; the clip plays once it ends. |
-| Busy messages | "Busy - try again" appears when a pattern load / queued pattern switch is in progress. Tap again. |
+| Busy messages | "Busy - try again" (red, bottom of the grid) when the file manager is busy or the command ring is full. Tap again. A launch on the last step of a song pattern is not refused: the freeze (LIVE) is done on the next step. **Tracker Plus / Mini only**: "Unsaved edits: stop and save first" when the loaded pattern has unsaved edits and the transport plays (those units have no room for the own-data snapshot). |
+| "Undo history cleared" | Shown for 2 s when the last launched clip went away and the pattern undo history was dropped (a recording followed by a launch loses its undo step). |
 
-Behaviour since the review fixes (M2, M3, S3, S6): a clip launch first writes the loaded pattern's unsaved edits to its file ("Busy" and no launch when the file manager cannot do that now); a pattern file that cannot be read aborts the save (the changed flag stays, nothing is overwritten) and the launched tracks are never cleared by a read error; Pattern + arrows and scene launch refuse with "Busy" while clips run and the save did not happen; leaving Play mode or Session view and the end of a recording ask for the project autosave (like leaving the stock editor); leaving to Master or Instrument keeps the Session clips playing (no turn-off of performance mode), and entering the stock Performance page while clips run keeps their lengths; undo history is cleared when the last launched clip goes away.
+Behaviour since the review fixes: a clip launch copies the own data of the tracks it replaces into a RAM snapshot (about 1 KB per track, Tracker original) and **writes nothing to the card while the transport plays**; saving (after Stop, or an explicit Save) and the restore after Stop / panic take those tracks from the snapshot, not from the file. A pattern file that cannot be read aborts the save (the changed flag stays, nothing is overwritten) and the launched tracks are never cleared by a read error; scene launch refuses with "Busy" while clips run and the save did not happen; leaving the Session view and the end of a recording ask for the project autosave (like leaving the stock editor); leaving to Master or Instrument keeps the Session clips playing (no turn-off of performance mode), and entering the stock Performance page while clips run keeps their lengths; undo history is cleared when the last launched clip goes away (the view says "Undo history cleared").
 
-Known limits of C1: undo snapshots hold the RAM pattern; the "has notes" LEDs read the Workspace pattern files (an unsaved edit on a non-loaded pattern is not visible); clips
-are copied into the loaded pattern in RAM (stock Performance mechanism); saving writes those tracks from the pattern file, so edits to a launched clip are lost.
+
+### 9b. Play mode per clip (Loop / Play 1x) and the follow action
+Default playback is **Loop**. The mode belongs to the clip (pattern x track), is saved in `seqclips.bin` and applies however the clip was started (pad, scene, follow action).
+| Press | Expected |
+|---|---|
+| Hold screen button **1** and tap a clip pad | The pad (and its cell, white outline) is **focused**, nothing launches or stops while button 1 is held. The right column shows "Clip P  track T" and LOOP. |
+| Still holding 1, turn the wheel one detent clockwise | The focused clip becomes **PLAY 1X**: notch in its cell, label `MODE 1X`. One detent back: LOOP. No wrap, no change beyond the two modes. |
+| Hold **Shift + 1**, wheel clockwise (focus any pad or scene pad of the row) | Every clip of that **row** (all 16 tracks) becomes PLAY 1X, the scene cell shows the notch; wheel back: all LOOP. Other rows are unchanged. |
+| Release 1, save the project, power cycle, open it | The modes are still set (`seqclips.bin` next to the project; not written while the transport plays - they are saved after Stop). A project from before has all clips on Loop. |
+| Transport running, launch a Play 1x clip (pattern P) on track T and let it play | When it has played once, **track T continues with the clip of pattern P+1** (same track, the row below) at the clip end, without a gap. While it plays, the next cell shows a steady green outline (armed), not blinking. |
+| Same, but pattern P+1 has no notes on track T (or P = 255) | After one pass track T **stops** (silent). The notch in the cell is red from the start (END marker). |
+| Chain: clips P, P+1, P+2 all Play 1x with notes, P+3 empty on that track | The track plays P, P+1, P+2 once each and stops. The clip length of each decides when the next one starts. |
+| While a Play 1x clip plays, tap the playing clip again (or another clip of that track) | Tapping the playing clip cancels the follow action (it loops on); another clip replaces it. The follow action does not come back for the same clip instance. |
+| A scene (row) that is all Play 1x | Every track plays its clip once and continues in the next row; a track without a clip below stops. |
+| Stop the transport during a follow chain | Panic: tracks are back on the loaded pattern; Play starts stock playback. |
+| File manager busy at the clip end (e.g. while a save runs) | The clip plays once more and the follow action follows at the next clip end (never silence, never a switch in the middle of a step). |
+
+### 9c. LIVE: launching while the song plays
+| Press | Expected |
+|---|---|
+| Play the **song** (Song page, Play), open the launcher, launch a clip | The song **freezes on its slot** (the pattern now loops): the right column shows "LIVE - song frozen, slot N", button 4 reads `BACK:SONG`. The clip plays and is not wiped at the next pattern end. A green bar on the left edge marks the row of the playing pattern. |
+| Launch a scene while the song plays | Same: LIVE, the scene switches at the pattern end and keeps looping. |
+| Press screen button **4** (BACK:SONG) | LIVE ends at once in the display; at the next pattern end all clips end and the **song continues with the slot after the playing one**. A queued scene is dropped. |
+| Press **Stop** while LIVE | Panic (see above). Play again: stock pattern playback, no LIVE. |
+| Start the song again by hand (Song page) while LIVE | LIVE ends by itself. |
+| Launch while only a pattern loops (not song mode) | No LIVE, nothing frozen. |
+| Launch on the last step of a song pattern | Not refused: the clip is queued and the song freezes on the next step (LIVE appears one step later). |
+
+Known limits (R2): in song playback a Play 1x follow action is not queued (the song advances by itself; launch freezes the song, then follow actions work). A Play 1x clip counts its first pass from the step Play started at (or the last pattern switch / join). The follow actions of tracks that continue into the same row share one read of the card (at most one attempt per step; after three read errors in a row the track stops at the clip end instead). A follow action is not started on the last step of the pattern, while a scene is queued, or while one of your taps is still on its way to the audio side. Undo snapshots hold the RAM pattern; the "has notes" display of a pattern that is not loaded comes from the stock Song bitmasks (updated when that pattern is saved); clips are copied into the loaded pattern in RAM (stock Performance mechanism), so edits to a launched clip are lost on save/restore. The Tracker Plus / Mini keep no snapshot: there the file is the source and a launch while playing is refused when the pattern has unsaved edits.
+
+### 9d. Display list measurement (device, once)
+The clip screen is budgeted in software (grid at most about 5.5 KB of the 8 KB frame, optional parts dropped first: armed outlines, notches, dim squares, help lines). Verify on the unit with a **DEBUG build**: `display.lastMemoryUsed` (display.cpp step3) must stay below 8172 B in the worst case - all 16 tracks playing, many Play 1x notches, LIVE and the help lines (hold button 1 or 3), a message showing. If the screen loses its last controls (labels or the grid's right column) the budget is too high.
+
 
 ## 10. Session CUT (MLR playhead, plan 002 S2)
-Open it with Pattern (Play mode) > Pattern (Session) > screen button 8 (CUT). Title "Session: CUT   tracks 1-4"; screen buttons 1-4 choose the four tracks shown (1-4, 5-8, 9-12, 13-16); the info lines explain the pads. Use a project with: track 1 = ONE long
+Open it with a Song double tap (launcher) > screen button 8 (CUT). Title "Session: CUT   tracks 1-4"; screen buttons 1-4 choose the four tracks shown (1-4, 5-8, 9-12, 13-16); the info lines explain the pads. Use a project with: track 1 = ONE long
 loop sample on step 1 only (e.g. a 2 s drum loop, pattern 16 steps, tempo so the loop fits the 16 steps, note at the sample's
 original pitch, play mode One-shot or Loop), track 2 = a normal drum pattern, track 3 = a MIDI track with a few notes.
 Pad grid of the layer (all 12 columns, none reserved): 4 rows = 4 tracks of the group; pads 1-8 of a row = 8 positions; pad 9 = STOP/START,
@@ -263,13 +294,13 @@ selection looping and Performance-mode track lengths are ignored by cut rows; sw
 Setup: patterns 1-4 with different notes on tracks 1-3 (CLIPS needs them), track 1 = the loop sample as above.
 | Press | Expected |
 |---|---|
-| CUT: jump around on row 1 (track 1), switch to CLIPS (button 7), launch a clip (other pattern) on track 1 at the next bar | At the bar the track plays the new clip from its first step; the CUT playhead follows (jump pads count from the new clip's step 1 on). No stuck note, no silence. |
+| CUT: jump around on row 1 (track 1), switch to CLIPS (button 8), launch a clip (other pattern) on track 1 at the next bar | At the bar the track plays the new clip from its first step; the CUT playhead follows (jump pads count from the new clip's step 1 on). No stuck note, no silence. |
 | CUT: STOP track 1 (pad 9), then CLIPS: launch a clip on track 1 | The CUT stop ends: the clip plays (a launch means "play this"). |
 | CLIPS: hold STOP-T and tap a clip pad of track 2 (it stops at the bar). CUT, row 2: press position pads | Track 2 stays silent: Session STOP wins over CUT, the position pads do nothing audible, the playhead LED of row 2 stays where it was. |
 | Then CLIPS: tap any clip on track 2 | Track 2 plays the clip again; the CUT position follows the clip's step 1. |
 | CUT row with a recorded loop, CLIPS: STOP-A, then launch clips | While stopped all tracks are silent and the CUT loops do not run on; after a launch the track plays again. |
 | CLIPS: launch a scene while CUT rows are active | At the pattern end the new pattern plays; CUT rows keep their settings (position inside the new pattern, clamped). |
-| In CUT hold two pads (loop), then press screen button 7 (CLIPS) | The loop ends at once (pads are released by the layer switch). Rec held while switching: the take is closed. |
+| In CUT hold two pads (loop), then press screen button 8 (CLIPS) | The loop ends at once (pads are released by the layer switch). Rec held while switching: the take is closed. |
 | Leave the Session view (any module button) while a CUT pad is held / Rec is held | Nothing hangs: loop ends, take closed. |
 
 # Alt Performance page (8-step faders) — plans/004-perform-faders.md, reworked in plan 005 R3 (v0.2)

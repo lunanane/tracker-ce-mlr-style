@@ -12,21 +12,35 @@ inline bool seqSessionStopped(int row) { return seqLauncher.stopped((uint8_t)row
 
 // ---- main loop (Session view) ----
 // All launch calls return false when the pattern buffer is busy (pattern load / queued pattern switch / last
-// song step) or the ring is full; nothing is queued then.
+// song step) or the ring is full; nothing is queued then. A launch while the song plays freezes the song first (LIVE).
 bool seqSessionLaunchClip(uint8_t track, uint8_t pattern); // read the clip now, switch at the quantise point
+bool seqSessionLaunchClipQ(uint8_t track, uint8_t pattern, uint8_t quant); // same, with the quantise of this command (Q_CLIPEND: follow action)
 bool seqSessionStopTrack(uint8_t track);                   // silent from the quantise point until a clip is launched
+bool seqSessionStopTrackQ(uint8_t track, uint8_t quant);
 bool seqSessionStopAll();
 bool seqSessionLaunchScene(uint8_t pattern);               // stock pattern switch (pattern end), or at once when stopped
 uint8_t seqSessionOwnPattern();                            // pattern currently loaded (mtProject.values.actualPattern)
 uint8_t seqSessionQueuedScene();                           // queued stock pattern switch, 0 = none
+uint8_t seqSessionLastRefusal();                          // seqsession::Refusal of the last refused launch
 
-// "Has notes" cache of the 4-pattern window. The rows are read one per main-loop pass while the Session view is
-// active; never in the audio context.
-void seqSessionSetWindow(uint8_t first);
-const seqsession::NoteCache& seqSessionCache();
+// Tracks of a pattern that hold content (bit per track). From the project bitmasks the stock Song page uses (no SD access);
+// the loaded pattern is read from RAM, so unsaved edits count.
+uint16_t seqSessionPatternMask(uint8_t pattern);
+
+// LIVE (plan 005 C2): the song was frozen by a launch. Back to song: the clips end at the next pattern end and the song
+// continues at the slot after the playing one. Returns false when the sequencer is busy (try again).
+bool seqSessionLive();
+uint8_t seqSessionLiveSlot();       // 1-based slot the song was frozen on
+bool seqSessionBackToSong();
+
+// Panic (transport Stop, plan 005 M6): queued launches / stops are dropped, launched clips end and the tracks play their
+// pattern again, LIVE ends. The track data is restored from the pattern files on a later pass when the file manager is busy.
+void seqSessionPanic();
+
 void seqSessionActive(bool on);
+bool seqSessionTakeUndoCleared();   // true once after a launch step dropped the pattern undo history (the view shows a note)
 
-void seqSessionUpdate(); // once per main loop pass (Tracker::update)
+void seqSessionUpdate(); // once per main loop pass (Tracker::update); also queues the Play 1x follow actions
 
 // ---- saving: launched clips never reach the user's pattern file ----
 bool seqSessionHasLaunched();                // some track of the loaded pattern holds a launched clip (RAM != file)

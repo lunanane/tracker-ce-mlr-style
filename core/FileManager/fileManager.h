@@ -290,7 +290,7 @@ class cFileManager
     // sequencer tracks mod (Session view). These use fileManagerPatternBuffer: main loop only, and only when no file operation runs.
     bool isIdleForScratch() { return status == fmIdle && currentOperation == fmNoOperation; }
     bool loadClipTrackToBuffer(uint8_t pattIndex, uint8_t trackIndex); // clip -> fileManagerPerformancePatternBuffer.track[trackIndex]
-    int getPatternTracksWithNotes(uint8_t pattIndex, uint16_t& mask);  // -1 busy, 0 no file, 1 ok; bit per track with content
+    bool loadClipTracksToBuffer(uint8_t pattIndex, uint16_t trackMask); // one file read, every track of the mask -> the performance buffer
     int readWorkspacePatternTo(uint8_t pattIndex, Sequencer::strPattern* dest); // -1 read error, 0 no file, 1 ok
     bool isPatternLoading();
     bool isPatternEmpty(uint8_t index);
