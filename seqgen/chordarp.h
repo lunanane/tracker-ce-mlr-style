@@ -23,7 +23,10 @@ struct SeqContext {
 
 class ChordArp : public SeqBase {
  public:
-  enum Panel { PANEL_TYPES = 0, PANEL_SETTINGS, PANEL_GROOVE, PANEL_PARAM };
+  // The right half of the pads (cols 6..11) shows one page; the root grid (cols 0..5) is always there. See README "Chord/Arp pads".
+  //   PLAY: chord types, type/speed/direction, inversion/octave  GROOVE: groove / parametric groove, parametric on, gate, swing
+  //   FEEL: velocity pattern, gate lane, arp octave range, chord size  SETUP: key mode (key / locked / grid), transpose, mute
+  enum Page { PAGE_PLAY = 0, PAGE_GROOVE, PAGE_FEEL, PAGE_SETUP };
   // Screen / encoder items. Setters act immediately (pads queue to the next quarter/bar like c31).
   enum Param {
     P_PMODE = 0,   // 1 key, 2 locked, 3 grid (c31 pmode)
@@ -45,7 +48,7 @@ class ChordArp : public SeqBase {
     P_PSEED,       // groove seed
     P_TPOSE,       // arp_tpose (scale degrees)
     P_MUTE,        // amute
-    P_PANEL,       // visible panel (Panel)
+    P_PAGE,        // visible page (Page)
     P_Q_TYPE, P_Q_SPEED, P_Q_DIR, P_Q_SIZE, P_Q_GROOVE,  // queued values (0 = none), read-only
     P_Q_MOD,       // queued chord type (0 = none), read-only
     P_Q_ROOT,      // 1 when a root/chord waits for the next quarter, read-only
@@ -95,8 +98,12 @@ class ChordArp : public SeqBase {
   struct QRoot { bool valid; int16_t rv; uint8_t t, s, m; bool mn; int8_t cx, cy; };
 
   void gridRootEvent(int x, int y, bool down);
-  void panelEvent(int pc, int pr, bool down);
-  void controlEvent(int idx, bool down);
+  void playPage(int col, int row, bool down);
+  void groovePage(int col, int row, bool down);
+  void feelPage(int col, int row, bool down);
+  void setupPage(int col, int row, bool down);
+  void typePad(int m, bool down);
+  void setPage(int p);
   void pgen();
   void applyBar();
   void setPair(uint8_t& cur, int row, int v);
@@ -118,7 +125,7 @@ class ChordArp : public SeqBase {
 
   SeqContext* ctx_;
   bool internalGate_;
-  uint8_t selMod_, selSize_, selT_, selS_, selD_, selG_, sw_, glen_, pmode_, parch_, panel_;
+  uint8_t selMod_, selSize_, selT_, selS_, selD_, selG_, sw_, glen_, pmode_, parch_, page_, editPage_;
   bool pon_;
   uint8_t PW_[3];
   uint16_t pmask_;
@@ -144,6 +151,10 @@ class ChordArp : public SeqBase {
   uint32_t msAcc_;
   bool gbPending_;
   uint8_t selVg_, lane_, orng_, ownGb_, xh_[2];
+  uint8_t vh_, lh_;      // first finger on the velocity / gate-lane pads (0 = none), c34 vh / lh
+  bool modHeld_;         // chord type pad 1 is held: the next type pad is an extended type (c34 mod_held)
+  bool padLock_;         // centerHeld_ came from the Locked pad (not from lockButton)
+  uint8_t downPage_[kPads];  // page a pad went down on (0xFF = up): its release is handled there
   mutable uint8_t gx_;  // this step's gate in ticks (c34 gx), 0 = none (legato)
   uint32_t rng_;
 };

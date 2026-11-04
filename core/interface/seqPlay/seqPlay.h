@@ -19,8 +19,15 @@ struct SeqPlayViewData
     uint8_t cell = 0; // LIST: strip cell (0..7) the list sits above
     uint8_t sel = 0;  // LIST: highlighted type
     uint8_t cur = 0;  // LIST: the track's current type
-    uint8_t panel = 0; // LEGEND (Chord/Arp): visible panel
+    uint8_t page = 0;  // LEGEND (Chord/Arp): visible page (Play / Groove / Feel / Setup)
+    uint8_t pon = 0;   // LEGEND (Chord/Arp): parametric groove on
     uint8_t half = 0;  // LEGEND (Mono): steps 1-8 / 9-16
+    uint8_t menu = 0;  // LEGEND (Mono): menu view shown
+    uint8_t ep = 1;    // LEGEND (Mono): edit page
+    uint8_t np = 1;    // LEGEND (Mono): page count
+    uint8_t speed = 8; // LEGEND (Mono): speed 1..12
+    uint8_t vel = 1;   // LEGEND (Mono): velocity pattern 1..72
+    uint8_t tie = 0;   // LEGEND (Mono): tie
     int8_t win = 0;    // LEGEND (Mono): degree window offset
     uint8_t edge = 0;  // 0 none; 1 / 2: the selected track is on the higher / lower strip page than the one shown (edge marker)
     uint8_t edgeTrack = 0; // that track's number 1..16

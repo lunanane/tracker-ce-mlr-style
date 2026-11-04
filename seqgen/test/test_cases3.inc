@@ -83,20 +83,20 @@ TEST(arp_octave_range_drops_notes_above_127) {
   for (int i = 0; i < n; ++i) CHECK(o[i] <= 127);
 }
 TEST(speed_and_direction_pad_pairs) {
-  Rig r; r.panel(ChordArp::PANEL_SETTINGS);
+  Rig r; r.page(ChordArp::PAGE_PLAY);
   static const int a[6] = {1, 1, 1, 2, 2, 3}, b[6] = {2, 3, 4, 3, 4, 4};
   for (int k = 0; k < 6; ++k) {
     for (int order = 0; order < 2; ++order) {
       int x = order ? b[k] : a[k], y = order ? a[k] : b[k];
-      r.ca.pad(6 + x - 1, 1, true); r.ca.pad(6 + y - 1, 1, true);
+      r.ca.pad(7 + x, 1, true); r.ca.pad(7 + y, 1, true);
       CHECK_EQ(r.ca.getParam(ChordArp::P_Q_SPEED), 5 + k);
-      r.ca.pad(6 + y - 1, 1, false); r.ca.pad(6 + x - 1, 1, false);
-      r.ca.pad(6 + x - 1, 2, true); r.ca.pad(6 + y - 1, 2, true);
+      r.ca.pad(7 + y, 1, false); r.ca.pad(7 + x, 1, false);
+      r.ca.pad(7 + x, 2, true); r.ca.pad(7 + y, 2, true);
       CHECK_EQ(r.ca.getParam(ChordArp::P_Q_DIR), 5 + k);
-      r.ca.pad(6 + y - 1, 2, false); r.ca.pad(6 + x - 1, 2, false);
+      r.ca.pad(7 + y, 2, false); r.ca.pad(7 + x, 2, false);
     }
   }
-  r.press(7, 1); CHECK_EQ(r.ca.getParam(ChordArp::P_Q_SPEED), 2);   // fingers released: a single tap is single again
+  r.press(8, 1); CHECK_EQ(r.ca.getParam(ChordArp::P_Q_SPEED), 1);   // fingers released: a single tap is single again
 }
 TEST(extra_speeds_gstep_positions) {
   Rig r;

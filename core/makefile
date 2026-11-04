@@ -82,6 +82,18 @@ ifeq ($(PLATFORM), MK66)
 $(OBJ_DIR)/interface/seqPlay/%.o $(OBJ_DIR)/interface/seqSession/%.o $(OBJ_DIR)/interface/seqPerform/%.o $(OBJ_DIR)/interface/masterParams/%.o $(OBJ_DIR)/interface/configEditor/%.o $(OBJ_DIR)/interface/sampleImporter/%.o $(OBJ_DIR)/interface/projectEditor/%.o $(OBJ_DIR)/interface/instrumentEditor/%.o $(OBJ_DIR)/interface/sampleEditor/%.o: COMPILER_OPTIONS += -Os
 endif
 
+# plan 008 B: on MK66 ALL non-audio stock code (screens, file manager, display lib, fonts, exporter, theme/config helpers) is built
+# for size too. Kept at -O2: everything in AudioEngine/, libs/Audio/, effector/, synth/, seqgen/ and the sequencer sources
+# (source/mtSequencer*, seq*), and the three UI files that hold AUDIO_CORE_RAM (interrupt/audio-timed) functions.
+ifeq ($(PLATFORM), MK66)
+OS_DIRS		:= interface FileManager Exporter libs/NewDisplay libs/fonts libs/images libs/FT812
+OS_FILES	:= source/FileBrowser source/ThemeManager source/Themes source/mtRandomNameGenerator source/mtGridEditor source/mtConfig source/mtSliceDetector source/mtSliceManager
+OS_KEEP_O2	:= interface/core/songTimer interface/performanceMode/fPerformance FileManager/fileManagerSong
+OS_OBJS		:= $(filter $(addprefix $(OBJ_DIR)/,$(addsuffix /%,$(OS_DIRS)) $(addsuffix .o,$(OS_FILES))),$(OBJS))
+OS_OBJS		:= $(filter-out $(addprefix $(OBJ_DIR)/,$(addsuffix .o,$(OS_KEEP_O2))),$(OS_OBJS))
+$(OS_OBJS): COMPILER_OPTIONS += -Os
+endif
+
 # Build rules
 
 $(OBJ_DIR)/%.o: %.cpp

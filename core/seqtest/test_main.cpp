@@ -332,8 +332,12 @@ static void test_mono_follows_transport()
     u = 1;
     playUSteps(*e, 48, u);
     CHECK(e->takenOver(8));
-    e->postPad(8, 11 + 0 * 12, true); // CLEAR
-    e->postPad(8, 11 + 0 * 12, false);
+    e->postPad(8, 11 + 3 * 12, true); // Menu view ...
+    e->postPad(8, 11 + 3 * 12, false);
+    e->postPad(8, 7 + 3 * 12, true); // ... CLEAR (plan 008 C: clear lives in the menu view)
+    e->postPad(8, 7 + 3 * 12, false);
+    e->postPad(8, 11 + 3 * 12, true); // back to the notes
+    e->postPad(8, 11 + 3 * 12, false);
     playUSteps(*e, 48, u);
     CHECK(!e->takenOver(8));
     CHECK(h.count('+', 8) == h.count('-', 8));
@@ -1072,8 +1076,8 @@ static void test_engine_rec_chord()
     Engine* e = mk(h);
     e->postType(2, TYPE_CHORDARP);
     e->idleTick();
-    e->postPad(2, 8, true); // panel TYPES, 3rd pad of the first row: triad
-    e->postPad(2, 8, false);
+    e->postPad(2, 2 * 12 + 6, true); // Play page, chord type pad 3 (col 6, row 2): triad
+    e->postPad(2, 2 * 12 + 6, false);
     Head hd;
     playRec(*e, h, hd, 5);
     e->postRec(2, Engine::REC_PUNCH);
@@ -1126,8 +1130,8 @@ static void test_sample_track_chord_lowest_only()
     Engine* e = mk(h);
     e->postType(2, TYPE_CHORDARP);
     e->idleTick();
-    e->postPad(2, 8, true); // triad
-    e->postPad(2, 8, false);
+    e->postPad(2, 2 * 12 + 6, true); // triad
+    e->postPad(2, 2 * 12 + 6, false);
     e->idleTick();
     e->postPad(2, 0, true);
     idle(*e, 96 * 8);
@@ -1141,8 +1145,8 @@ static void test_sample_track_chord_lowest_only()
     Engine* e2 = mk(h2);
     e2->postType(2, TYPE_CHORDARP);
     e2->idleTick();
-    e2->postPad(2, 8, true);
-    e2->postPad(2, 8, false);
+    e2->postPad(2, 2 * 12 + 6, true);
+    e2->postPad(2, 2 * 12 + 6, false);
     e2->idleTick();
     e2->postPad(2, 0, true);
     idle(*e2, 96 * 8);
@@ -1303,18 +1307,18 @@ static void test_hash_ignores_performance()
     e->applyPad(2, 3, false);
     e->applyPad(2, 11, true); // panel switch (control pad)
     e->applyPad(2, 11, false);
-    e->applyPad(4, 8, true); // Mono HALF
-    e->applyPad(4, 8, false);
+    e->applyPad(4, 8 + 2 * 12, true); // Mono HALF (col 8, row 2)
+    e->applyPad(4, 8 + 2 * 12, false);
     CHECK(e->stateHash() == h0);
     // real settings change it
     e->applyPad(4, 0, true); // Mono step
     e->applyPad(4, 0, false);
     uint16_t h1 = e->stateHash();
     CHECK(h1 != h0);
-    e->applyPad(2, 10, true); // back to the TYPES panel
-    e->applyPad(2, 10, false);
-    e->applyPad(2, 8, true); // Chord/Arp chord type
-    e->applyPad(2, 8, false);
+    e->applyPad(2, 11, true); // tab Play (the page pad / tab column)
+    e->applyPad(2, 11, false);
+    e->applyPad(2, 2 * 12 + 6, true); // Chord/Arp chord type 3
+    e->applyPad(2, 2 * 12 + 6, false);
     CHECK(e->stateHash() != h1);
     // saving still stores the full state (lock root included): save before and after a root press differ
     uint8_t b1[Engine::kSidecarMax], b2[Engine::kSidecarMax];

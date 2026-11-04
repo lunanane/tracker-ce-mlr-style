@@ -181,32 +181,42 @@ inline Tone stripTone(const StripCell& c)
     return c.type == seqlogic::TYPE_OFF ? TONE_OFF : TONE_ON;
 }
 
-// ---- pad legend: what the 12 x 4 pads do for the selected sequencer (plan 001 layouts) ----
+// ---- pad legend: what the 12 x 4 pads do for the selected sequencer (plan 008 C; the pad maps live in seqgen/chordarp.cpp / mono.cpp) ----
+// Real words, at most 6 characters per cell (a cell is 60 px wide in the 14 px bold font), ASCII only. A two-line caption names the
+// page / view that is shown and says how to play it.
 enum Zone : uint8_t
 {
     Z_NONE = 0,
     Z_NOTE = 1,   // pads that play (chord roots)
     Z_STEP = 2,   // Mono step grid
-    Z_PANEL = 3,  // Chord/Arp 4x4 panel (content chosen with the mode pads)
-    Z_MODE = 4,   // panel mode pads (TYPES SET GRV PRM)
-    Z_ADJ = 5,    // +/- pads (inversion, octave, page, speed, velocity, window)
-    Z_ACTION = 6, // one-shot actions (half, tie, clear)
-    Z_HOLD = 7    // hold modifiers (LOOP)
+    Z_PANEL = 3,  // selectors: chord type, Chord/Arp, speed, direction, groove, velocity, lane, range, size, pages, speeds
+    Z_MODE = 4,   // page pad and page tabs, back to the notes
+    Z_ADJ = 5,    // +/- pads (inversion, octave, swing, transpose, window, page, speed, velocity)
+    Z_ACTION = 6, // one-shot actions (tie, mute, clear, gate, param)
+    Z_HOLD = 7    // hold modifiers (Root, Loop, Locked)
 };
 
 struct LegendCell
 {
     Zone zone;
-    bool on;     // the pad that is active now (the visible panel's mode pad)
-    char txt[4]; // up to 3 characters, ' ' terminated
+    bool on;     // the pad that is active now (page tab, current speed / page / velocity, tie)
+    char txt[8]; // up to 6 characters
 };
 
 // What the legend needs to know about the selected sequencer (read from the engine, display only).
 struct LegendState
 {
     uint8_t type = 0;
-    uint8_t panel = 0; // Chord/Arp: 0 TYPES 1 SETTINGS 2 GROOVE 3 PARAM
-    uint8_t half = 0;  // Mono: 0 = steps 1-8, 1 = steps 9-16
+    uint8_t page = 0;   // Chord/Arp: 0 Play 1 Groove 2 Feel 3 Setup
+    uint8_t pon = 0;    // Chord/Arp: parametric groove on (the Groove page block shows tiers / archetypes)
+    uint8_t half = 0;   // Mono: 0 = steps 1-8, 1 = steps 9-16
+    uint8_t menu = 0;   // Mono: the menu view is shown
+    uint8_t ep = 1;     // Mono: edit page 1..8
+    uint8_t np = 1;     // Mono: page count 1..8
+    uint8_t speed = 8;  // Mono: speed 1..12
+    uint8_t vel = 1;    // Mono: velocity pattern 1..72
+    uint8_t tie = 0;    // Mono: tie
+    int8_t win = 0;     // Mono: degree window offset
 };
 
 // Chord/Arp root pads (c31 camelot grid, copy of kCam in seqgen/chordarp.cpp): pad row = grid x - 1, pad column = grid y - 1.
@@ -222,61 +232,166 @@ inline const char* rootName(uint8_t row, uint8_t col, char* buf4)
     return buf4;
 }
 
+// Mono speed 1..12 (seqgen kSpd = pulses per step 96 48 32 24 16 12 8 6 4 3 2 1)
+inline const char* speedName(uint8_t speed)
+{
+    static const char* const k[12] = { "1/1", "1/2", "1/2T", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/32T", "1/64T" };
+    return (speed >= 1 && speed <= 12) ? k[speed - 1] : "?";
+}
+
+inline const char* pageName(uint8_t page)
+{
+    return page == 1 ? "Groove" : page == 2 ? "Feel" : page == 3 ? "Setup" : "Play";
+}
+inline const char* panelName(uint8_t page) { return pageName(page); } // old name
+
 inline LegendCell legendCell(const LegendState& st, uint8_t col, uint8_t row)
 {
     LegendCell c;
     c.zone = Z_NONE;
     c.on = false;
-    c.txt[0] = 0;
-    c.txt[1] = 0;
-    c.txt[2] = 0;
-    c.txt[3] = 0;
+    for (int i = 0; i < 8; i++) c.txt[i] = 0;
     if (col >= 12 || row >= 4) return c;
     auto set = [&c](Zone z, const char* t) {
         c.zone = z;
-        for (int i = 0; i < 3 && t[i]; i++) c.txt[i] = t[i];
+        for (int i = 0; i < 6 && t[i]; i++) c.txt[i] = t[i];
     };
     if (st.type == seqlogic::TYPE_CHORDARP)
     {
+        static const char* const kTypes[8] = { "Root", "Sus2", "Triad", "Sus4", "5th", "6th", "7th", "9th" };
+        static const char* const kSpeeds[4] = { "1/8", "1/8T", "1/16", "1/16T" };
+        static const char* const kDirs[4] = { "Up", "Down", "UpDn", "Zigzag" };
+        static const char* const kTabs[4] = { "Play", "Groove", "Feel", "Setup" };
         if (col <= 5)
         {
             char b[4];
             set(Z_NOTE, rootName(row, col, b));
+            return c;
         }
-        else if (col <= 9) set(Z_PANEL, "");
-        else
+        const uint8_t page = st.page > 3 ? 0 : st.page;
+        if (col == 11 && (page != 0 || row == 0)) // page pad / tabs
         {
-            static const char* const k[4][2] = { { "TYP", "SET" }, { "GRV", "PRM" }, { "I-", "I+" }, { "O-", "O+" } };
-            set(row < 2 ? Z_MODE : Z_ADJ, k[row][col - 10]);
-            if (row < 2) c.on = st.panel == (uint8_t)(row * 2 + (col - 10)); // TYP SET GRV PRM = panels 0 1 2 3
+            if (page == 0) set(Z_MODE, "Page");
+            else
+            {
+                set(Z_MODE, kTabs[row]);
+                c.on = row == page;
+            }
+            return c;
+        }
+        char b[8] = { 0 };
+        switch (page)
+        {
+            case 0: // Play
+                if (col <= 7) set(col == 6 && row == 0 ? Z_HOLD : Z_PANEL, kTypes[(col - 6) * 4 + row]);
+                else if (row == 0) set(Z_PANEL, col == 8 ? "Chord" : col == 9 ? "Arp" : "ArpOct");
+                else if (row == 1) set(Z_PANEL, kSpeeds[col - 8]);
+                else if (row == 2) set(Z_PANEL, kDirs[col - 8]);
+                else
+                {
+                    static const char* const k[4] = { "Inv-", "Inv+", "Oct-", "Oct+" };
+                    set(Z_ADJ, k[col - 8]);
+                }
+                break;
+            case 1: // Groove
+                if (col <= 9)
+                {
+                    if (st.pon && row < 3) snprintf(b, sizeof b, "%d", col - 6);
+                    else if (st.pon) snprintf(b, sizeof b, "A%d", col - 5);
+                    else snprintf(b, sizeof b, "G%d", row * 4 + col - 5);
+                    set(Z_PANEL, b);
+                }
+                else
+                {
+                    static const char* const k[4] = { "Param", "Gate", "Swg-", "Swg+" };
+                    set(row < 2 ? Z_ACTION : Z_ADJ, k[row]);
+                }
+                break;
+            case 2: // Feel
+                if (col == 10)
+                {
+                    snprintf(b, sizeof b, "Size%d", row == 0 ? 5 : row == 1 ? 4 : row == 2 ? 3 : 2);
+                    set(Z_PANEL, b);
+                }
+                else
+                {
+                    if (row < 2) snprintf(b, sizeof b, "Vel %d", row * 4 + col - 5);
+                    else if (row == 2) snprintf(b, sizeof b, "Lane%d", col - 5);
+                    else snprintf(b, sizeof b, "Rng %d", col - 5);
+                    set(Z_PANEL, b);
+                }
+                break;
+            default: // Setup
+                if (row == 0 && col <= 8) set(col == 7 ? Z_HOLD : Z_MODE, col == 6 ? "Key" : col == 7 ? "Locked" : "Grid");
+                else if (row == 1 && col <= 8) set(Z_ADJ, col == 6 ? "Tran-" : col == 7 ? "Tran+" : "Tran 0");
+                else if (row == 2 && col == 6) set(Z_ACTION, "Mute");
+                else if (row == 2 && col == 7) set(Z_ACTION, "Off");
+                break;
         }
     }
     else if (st.type == seqlogic::TYPE_MONO)
     {
-        if (col < 8)
+        if (col == 11 && row == 3)
         {
-            char b[4] = { 0, 0, 0, 0 };
-            if (row == 0) snprintf(b, sizeof b, "%d", col + 1 + (st.half ? 8 : 0));
-            set(Z_STEP, b);
+            set(Z_MODE, st.menu ? "Notes" : "Menu");
+            return c;
         }
-        else
+        char b[8] = { 0 };
+        if (!st.menu)
         {
+            if (col < 8)
+            {
+                if (row == 0) snprintf(b, sizeof b, "%d", col + 1 + (st.half ? 8 : 0));
+                set(Z_STEP, b);
+                return c;
+            }
             switch (col * 4 + row)
             {
-                case 8 * 4 + 0: set(Z_ACTION, "HLF"); break;
-                case 8 * 4 + 1: set(Z_ACTION, "TIE"); break;
-                case 8 * 4 + 2: set(Z_ADJ, "W+"); break;
-                case 8 * 4 + 3: set(Z_ADJ, "W-"); break;
-                case 9 * 4 + 0: set(Z_ADJ, "P-"); break;
-                case 9 * 4 + 1: set(Z_ADJ, "S-"); break;
-                case 9 * 4 + 2: set(Z_HOLD, "LP"); break;
-                case 10 * 4 + 0: set(Z_ADJ, "P+"); break;
-                case 10 * 4 + 1: set(Z_ADJ, "S+"); break;
-                case 10 * 4 + 2: set(Z_ADJ, "V-"); break;
-                case 11 * 4 + 0: set(Z_ACTION, "CLR"); break;
-                case 11 * 4 + 2: set(Z_ADJ, "V+"); break;
+                case 8 * 4 + 0: set(Z_ADJ, "Win up"); break;
+                case 8 * 4 + 1: set(Z_ADJ, "Win dn"); break;
+                case 8 * 4 + 2: set(Z_ACTION, "Half"); c.on = st.half != 0; break;
+                case 8 * 4 + 3: set(Z_HOLD, "Loop"); break;
+                case 9 * 4 + 0: set(Z_ADJ, "Page-"); break;
+                case 9 * 4 + 1: set(Z_ADJ, "Page+"); break;
+                case 9 * 4 + 2: set(Z_ACTION, "Tie"); c.on = st.tie != 0; break;
+                case 10 * 4 + 0: set(Z_ADJ, "Slower"); break;
+                case 10 * 4 + 1: set(Z_ADJ, "Faster"); break;
+                case 10 * 4 + 2: set(Z_ADJ, "Vel-"); break;
+                case 11 * 4 + 2: set(Z_ADJ, "Vel+"); break;
                 default: break;
             }
+            return c;
+        }
+        const uint8_t velLow = (uint8_t)((st.vel ? st.vel - 1 : 0) % 8 + 1);
+        switch (row)
+        {
+            case 0:
+                set(Z_PANEL, speedName((uint8_t)(col + 1)));
+                c.on = st.speed == col + 1;
+                break;
+            case 1:
+                if (col < 8)
+                {
+                    snprintf(b, sizeof b, "Pg %d", col + 1);
+                    set(Z_PANEL, b);
+                    c.on = st.ep == col + 1;
+                }
+                else if (col == 8) { set(Z_ACTION, "Tie"); c.on = st.tie != 0; }
+                else if (col == 10) set(Z_ADJ, "Win up");
+                else if (col == 11) set(Z_ADJ, "Win dn");
+                break;
+            case 2:
+                if (col < 8) snprintf(b, sizeof b, "Vel %d", col + 1);
+                else snprintf(b, sizeof b, "%d+1", col - 7);
+                set(Z_PANEL, b);
+                c.on = (st.vel == col + 1) || (st.vel <= 8 && velLow == col + 1);
+                break;
+            default:
+                if (col == 0) set(Z_ADJ, "Tran-");
+                else if (col == 1) set(Z_ADJ, "Tran+");
+                else if (col == 2) set(Z_ACTION, "Mute");
+                else if (col == 7) set(Z_ACTION, "Clear");
+                break;
         }
     }
     return c;
@@ -288,15 +403,54 @@ inline LegendCell legendCell(uint8_t type, uint8_t col, uint8_t row)
     return legendCell(st, col, row);
 }
 
+// Short heading, kept for callers that only know the type: empty for an Off track
 inline const char* legendCaption(uint8_t type)
 {
-    if (type == seqlogic::TYPE_CHORDARP) return "CHORD/ARP   panel:";
-    if (type == seqlogic::TYPE_MONO) return "MONO   window:";
+    if (type == seqlogic::TYPE_CHORDARP) return "CHORD/ARP";
+    if (type == seqlogic::TYPE_MONO) return "MONO";
     return "";
 }
-inline const char* panelName(uint8_t panel)
+
+// Caption line 1: what is shown and the state ("CHORD/ARP  [Play] Groove Feel Setup", "MONO  Notes 1-8  Page 1/2  Speed 1/16  Vel 1  Tie off")
+inline void legendTitle(const LegendState& st, char* out, size_t n)
 {
-    return panel == 1 ? "SETTINGS" : panel == 2 ? "GROOVE" : panel == 3 ? "PARAM" : "TYPES";
+    if (st.type == seqlogic::TYPE_CHORDARP)
+    {
+        const uint8_t p = st.page > 3 ? 0 : st.page;
+        snprintf(out, n, "CHORD/ARP   Page:  %sPlay%s  %sGroove%s  %sFeel%s  %sSetup%s", p == 0 ? "[" : "", p == 0 ? "]" : "", p == 1 ? "[" : "",
+                 p == 1 ? "]" : "", p == 2 ? "[" : "", p == 2 ? "]" : "", p == 3 ? "[" : "", p == 3 ? "]" : "");
+    }
+    else if (st.type == seqlogic::TYPE_MONO)
+    {
+        char view[16];
+        if (st.menu) snprintf(view, sizeof view, "Menu");
+        else snprintf(view, sizeof view, "Notes %d-%d", st.half ? 9 : 1, st.half ? 16 : 8);
+        snprintf(out, n, "MONO   %s   Page %d/%d   Speed %s   Vel %d   Tie %s   Window %+d", view, (int)st.ep, (int)st.np, speedName(st.speed),
+                 (int)((st.vel ? st.vel - 1 : 0) % 8 + 1), st.tie ? "on" : "off", (int)st.win);
+    }
+    else if (n)
+        out[0] = 0;
+}
+
+// Caption line 2: how to play what is shown (<= 88 characters)
+inline const char* legendHelp(const LegendState& st)
+{
+    if (st.type == seqlogic::TYPE_CHORDARP)
+    {
+        switch (st.page)
+        {
+            case 1: return "Groove: rhythm. Param: random groove on/off. Gate: note length. Swg: swing.";
+            case 2: return "Vel: loudness (2 pads = blend). Lane: accent gates. Rng: arp octaves. Size: chord notes.";
+            case 3: return "Key: follows root. Locked: hold + tap a root. Grid: scale pads. Tran: shift. Off: silent.";
+            default: return "Hold a root. Type: chord shape (hold Root + type = more). 2 fingers on Speed/Dir: more.";
+        }
+    }
+    if (st.type == seqlogic::TYPE_MONO)
+    {
+        if (st.menu) return "Speed: tap one. Pg: tap = edit page, hold Pg 1 + Pg N = N pages. Vel: loudness.";
+        return "Tap a cell: note on/off. Hold Loop + tap first and last step = loop. Half: steps 9-16.";
+    }
+    return "";
 }
 
 // The side of the strip a selected track that is not on the shown strip page sits on: 0 = on the page, 1 = higher (Right), 2 = lower

@@ -221,15 +221,21 @@ static void test_legend_state()
     CHECK(strcmp(rootName(2, 5, nb), "A#") == 0);   // 70, major row
     CHECK(rootName(4, 0, nb)[0] == 0);
     CHECK(strcmp(legendCell(st, 0, 1).txt, "C#m") == 0 && legendCell(st, 0, 1).zone == Z_NOTE);
-    // the visible panel's mode pad is on
-    for (uint8_t panel = 0; panel < 4; panel++)
+    // Play page: the page pad (no tab is on); an edit page: its tab in column 11 is the one pad that is on
+    int onPlay = 0;
+    for (uint8_t r = 0; r < 4; r++)
+        for (uint8_t c = 0; c < 12; c++) onPlay += legendCell(st, c, r).on ? 1 : 0;
+    CHECK(onPlay == 0);
+    CHECK(strcmp(legendCell(st, 11, 0).txt, "Page") == 0 && legendCell(st, 11, 0).zone == Z_MODE);
+    for (uint8_t page = 1; page < 4; page++)
     {
-        st.panel = panel;
+        st.page = page;
         int on = 0;
         for (uint8_t r = 0; r < 4; r++)
             for (uint8_t c = 0; c < 12; c++) on += legendCell(st, c, r).on ? 1 : 0;
         CHECK(on == 1);
-        CHECK(legendCell(st, (uint8_t)(10 + (panel & 1)), (uint8_t)(panel >> 1)).on);
+        CHECK(legendCell(st, 11, page).on);
+        CHECK(strcmp(legendCell(st, 11, 0).txt, "Play") == 0 && strcmp(legendCell(st, 11, page).txt, pageName(page)) == 0);
     }
     // Mono: second half shows steps 9-16
     LegendState m;
@@ -237,7 +243,21 @@ static void test_legend_state()
     CHECK(strcmp(legendCell(m, 0, 0).txt, "1") == 0);
     m.half = 1;
     CHECK(strcmp(legendCell(m, 0, 0).txt, "9") == 0 && strcmp(legendCell(m, 7, 0).txt, "16") == 0);
-    CHECK(strcmp(panelName(0), "TYPES") == 0 && strcmp(panelName(3), "PARAM") == 0);
+    CHECK(strcmp(pageName(0), "Play") == 0 && strcmp(pageName(1), "Groove") == 0 && strcmp(pageName(2), "Feel") == 0 && strcmp(pageName(3), "Setup") == 0);
+    // Mono menu: the current speed / edit page / velocity pattern / tie are on
+    m.half = 0;
+    m.menu = 1;
+    m.speed = 6;
+    m.ep = 2;
+    m.vel = 3;
+    m.tie = 1;
+    CHECK(legendCell(m, 5, 0).on && !legendCell(m, 4, 0).on && strcmp(legendCell(m, 5, 0).txt, "1/8") == 0);
+    CHECK(legendCell(m, 1, 1).on && !legendCell(m, 0, 1).on && strcmp(legendCell(m, 1, 1).txt, "Pg 2") == 0);
+    CHECK(legendCell(m, 2, 2).on && strcmp(legendCell(m, 2, 2).txt, "Vel 3") == 0);
+    CHECK(legendCell(m, 8, 1).on && strcmp(legendCell(m, 8, 1).txt, "Tie") == 0);
+    CHECK(strcmp(legendCell(m, 11, 3).txt, "Notes") == 0);
+    m.menu = 0;
+    CHECK(strcmp(legendCell(m, 11, 3).txt, "Menu") == 0 && legendCell(m, 9, 2).on);
 }
 
 static void test_edge_side()
@@ -367,27 +387,90 @@ static void test_strip_text()
 
 static void test_legend()
 {
-    // Chord/Arp: roots cols 0-5, 4x4 panel cols 6-9, controls cols 10-11
+    // Chord/Arp, Play page: roots cols 0-5, chord types cols 6-7, type / speed / direction rows, inversion + octave row
     for (int r = 0; r < 4; r++)
     {
         for (int c = 0; c <= 5; c++) CHECK(legendCell(seqlogic::TYPE_CHORDARP, (uint8_t)c, (uint8_t)r).zone == Z_NOTE);
-        for (int c = 6; c <= 9; c++) CHECK(legendCell(seqlogic::TYPE_CHORDARP, (uint8_t)c, (uint8_t)r).zone == Z_PANEL);
+        for (int c = 6; c <= 7; c++) CHECK(legendCell(seqlogic::TYPE_CHORDARP, (uint8_t)c, (uint8_t)r).txt[0] != 0);
     }
-    CHECK(strcmp(legendCell(seqlogic::TYPE_CHORDARP, 10, 0).txt, "TYP") == 0);
-    CHECK(strcmp(legendCell(seqlogic::TYPE_CHORDARP, 11, 1).txt, "PRM") == 0);
-    CHECK(legendCell(seqlogic::TYPE_CHORDARP, 10, 0).zone == Z_MODE);
+    CHECK(strcmp(legendCell(seqlogic::TYPE_CHORDARP, 6, 0).txt, "Root") == 0 && legendCell(seqlogic::TYPE_CHORDARP, 6, 0).zone == Z_HOLD);
+    CHECK(strcmp(legendCell(seqlogic::TYPE_CHORDARP, 6, 2).txt, "Triad") == 0 && strcmp(legendCell(seqlogic::TYPE_CHORDARP, 7, 3).txt, "9th") == 0);
+    CHECK(strcmp(legendCell(seqlogic::TYPE_CHORDARP, 8, 0).txt, "Chord") == 0 && strcmp(legendCell(seqlogic::TYPE_CHORDARP, 10, 0).txt, "ArpOct") == 0);
+    CHECK(strcmp(legendCell(seqlogic::TYPE_CHORDARP, 9, 1).txt, "1/8T") == 0 && strcmp(legendCell(seqlogic::TYPE_CHORDARP, 11, 2).txt, "Zigzag") == 0);
+    CHECK(strcmp(legendCell(seqlogic::TYPE_CHORDARP, 8, 3).txt, "Inv-") == 0 && strcmp(legendCell(seqlogic::TYPE_CHORDARP, 11, 3).txt, "Oct+") == 0);
     CHECK(legendCell(seqlogic::TYPE_CHORDARP, 11, 3).zone == Z_ADJ);
+    CHECK(legendCell(seqlogic::TYPE_CHORDARP, 11, 1).txt[0] != 0);
     // Mono: steps 1-8 on cols 0-7, controls beyond
     CHECK(legendCell(seqlogic::TYPE_MONO, 0, 0).zone == Z_STEP && strcmp(legendCell(seqlogic::TYPE_MONO, 7, 0).txt, "8") == 0);
     CHECK(legendCell(seqlogic::TYPE_MONO, 3, 2).zone == Z_STEP && legendCell(seqlogic::TYPE_MONO, 3, 2).txt[0] == 0);
-    CHECK(strcmp(legendCell(seqlogic::TYPE_MONO, 8, 0).txt, "HLF") == 0);
-    CHECK(legendCell(seqlogic::TYPE_MONO, 9, 2).zone == Z_HOLD);
-    CHECK(strcmp(legendCell(seqlogic::TYPE_MONO, 11, 0).txt, "CLR") == 0);
+    CHECK(strcmp(legendCell(seqlogic::TYPE_MONO, 8, 2).txt, "Half") == 0);
+    CHECK(legendCell(seqlogic::TYPE_MONO, 8, 3).zone == Z_HOLD && strcmp(legendCell(seqlogic::TYPE_MONO, 8, 3).txt, "Loop") == 0);
+    CHECK(strcmp(legendCell(seqlogic::TYPE_MONO, 8, 0).txt, "Win up") == 0 && strcmp(legendCell(seqlogic::TYPE_MONO, 10, 1).txt, "Faster") == 0);
+    CHECK(strcmp(legendCell(seqlogic::TYPE_MONO, 11, 3).txt, "Menu") == 0 && legendCell(seqlogic::TYPE_MONO, 11, 3).zone == Z_MODE);
     CHECK(legendCell(seqlogic::TYPE_MONO, 9, 3).zone == Z_NONE);
     // Off and out-of-range cells have no legend
     CHECK(legendCell(seqlogic::TYPE_OFF, 0, 0).zone == Z_NONE);
     CHECK(legendCell(seqlogic::TYPE_MONO, 12, 0).zone == Z_NONE && legendCell(seqlogic::TYPE_MONO, 0, 4).zone == Z_NONE);
     CHECK(legendCaption(seqlogic::TYPE_OFF)[0] == 0 && legendCaption(seqlogic::TYPE_MONO)[0] != 0);
+}
+
+// Plan 008 C: the Shift legend uses words, not three-letter codes; every pad that does something has a label, and the two caption
+// lines name the page / view and say how to play it.
+static void test_legend_words_and_captions()
+{
+    const char* const kBad[] = { "TYP", "SET", "GRV", "PRM", "HLF", "CLR", "LP", "W+", "W-", "P-", "P+", "S-", "S+", "V-", "V+", "I-", "I+", "O-", "O+", "TIE" };
+    for (uint8_t type = seqlogic::TYPE_CHORDARP; type <= seqlogic::TYPE_MONO; type++)
+    {
+        for (int variant = 0; variant < 8; variant++)
+        {
+            LegendState st;
+            st.type = type;
+            st.page = (uint8_t)(variant & 3);
+            st.menu = (uint8_t)((variant >> 2) & 1);
+            st.pon = (uint8_t)(variant & 1);
+            int labels = 0;
+            for (uint8_t r = 0; r < 4; r++)
+            {
+                for (uint8_t c = 0; c < 12; c++)
+                {
+                    LegendCell lc = legendCell(st, c, r);
+                    CHECK(strlen(lc.txt) <= 6);
+                    for (const char* bad : kBad) CHECK(strcmp(lc.txt, bad) != 0);
+                    if (lc.txt[0]) labels++;
+                }
+            }
+            CHECK(labels >= 20);
+            char title[96];
+            legendTitle(st, title, sizeof title);
+            CHECK(strlen(title) > 8 && strlen(title) < 80);
+            CHECK(strlen(legendHelp(st)) > 20 && strlen(legendHelp(st)) <= 90);
+        }
+    }
+    // the title names the active page / view and the state
+    LegendState st;
+    st.type = seqlogic::TYPE_CHORDARP;
+    st.page = 2;
+    char t[96];
+    legendTitle(st, t, sizeof t);
+    CHECK(strstr(t, "[Feel]") != nullptr && strstr(t, "[Play]") == nullptr && strstr(t, "Groove") != nullptr);
+    LegendState m;
+    m.type = seqlogic::TYPE_MONO;
+    m.ep = 2;
+    m.np = 3;
+    m.speed = 8;
+    m.half = 1;
+    legendTitle(m, t, sizeof t);
+    CHECK(strstr(t, "Notes 9-16") != nullptr && strstr(t, "Page 2/3") != nullptr && strstr(t, "Speed 1/16") != nullptr && strstr(t, "Tie off") != nullptr);
+    m.menu = 1;
+    legendTitle(m, t, sizeof t);
+    CHECK(strstr(t, "Menu") != nullptr && strstr(t, "Notes") == nullptr);
+    CHECK(strcmp(legendHelp(m), legendHelp(LegendState())) != 0);
+    CHECK(strcmp(speedName(1), "1/1") == 0 && strcmp(speedName(8), "1/16") == 0 && strcmp(speedName(0), "?") == 0);
+    // an Off track has no legend text at all
+    LegendState off;
+    CHECK(legendHelp(off)[0] == 0);
+    legendTitle(off, t, sizeof t);
+    CHECK(t[0] == 0);
 }
 
 int main()
@@ -407,6 +490,7 @@ int main()
     test_late_release();
     test_strip_text();
     test_legend();
+    test_legend_words_and_captions();
     printf("seqplay: %d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

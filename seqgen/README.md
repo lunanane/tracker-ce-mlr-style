@@ -15,7 +15,7 @@ License: **PolyForm Noncommercial 1.0.0** (owner 2026-11-04), see `LICENSE.md`.
 | `seqgen.h` | `Event`, event sink, `LedRole`, floor div/mod (Lua `//`, `%`), `SeqBase` | (API) |
 | `chordarp.h/.cpp` | `ChordArp`: roots, chord types, pool, arp, gstep, queues, live layer, groove, pads, LEDs, params, serialize; `SeqContext`; `vgvCalc` | c34 page 3: 241-274 (tables, state), 275-299 (`pgen`, `gbit`), 300-307 (`gstep`, gate lanes), 308-333 (`scale_set`, `scale_deg`, `rv`, `dlk`, `lkd`), 334-365 (`c_pool`), 366-385 (`c_arp`), 386-388 (`k_l`, `fl`), 398-419 (`tick_live`), 420-455 (`clock_pulse_tick`, quarter queue), 456-475 (`bar_tick` queue part), 476-484 (`update`), 485-576 (`draw`), 577-740 (`event`); `vgv` 87-101 |
 | `mono.h/.cpp` | `Mono`: one `tk[k]` | c34 page 4: 746-898 (`SPD`, `fire`, `clock_pulse`, `kill`, menu_event, draw, event) |
-| `test/test_main.cpp`, `test/test_cases2.inc`, `test/test_cases3.inc` | 74 unit tests, own tiny runner (cases3 = c34 additions) | - |
+| `test/test_main.cpp`, `test/test_cases2.inc`, `test/test_cases3.inc`, `test/test_pads.inc` | 118 unit tests, own tiny runner (cases3 = c34 additions, pads = the 12x4 pad map of plan 008 C) | - |
 | `test/lua_driver.cpp`, `test/lua_compare.py` | differential test against the real Lua pages | - |
 | `test/scripts/*.txt` | scripted gesture sequences for the differential test | - |
 | `test/shrink.py`, `test/dump.py` | delta-debug a failing script / print both streams side by side | - |
@@ -49,22 +49,75 @@ blink/LED breathing and the live-gate timer (4 ticks normal = 120 ms, 2 ticks sh
 The host either calls `tick()` every 30 ms (or `advanceMs(dt)`), or calls `setInternalGate(false)` and uses
 `Event::gateMs` (120/60/0 = until next note) to schedule its own note-offs (the Tracker's gate/length).
 
-## Pad layouts
+## Pad layouts (plan 008 C: Chord/Arp and Mono as c34 plays on the 16x8 grid)
 
-Chord/Arp: cols 0-5 = the 24 Camelot roots turned (c31 `cam[x][y]` is pad `(col = y-1, row = x-1)`), cols 6-9 = 4x4 panel
-(TYPES 1..15 direct / SETTINGS T,S,D,Z rows queued to the bar / GROOVE 16 `glib` masks / PARAM weights + archetype row),
-col 10-11 = TYPES, SETTINGS / GROOVE, PARAM (re-tap PARAM = PON) / INV-, INV+ / OCT-, OCT+ (both held = reset).
-Grid play mode (`P_PMODE = 3`): the 24 root pads become the degree grid `(x-1)*6+(6-y)`. LCK is `lockButton(bool)`;
-play mode, swing, gate, key lock root etc. are `setParam` items. Speed and direction rows accept two fingers (pair = index 5..10).
-Velocity pattern, gate lane and arp octave range (c34) are screen/encoder items, see "c31 -> c34" below.
+Pads are `(col, row)`, 0-based, 12 columns x 4 rows, row 0 = top (pad index = row*12 + col). The c34 region each pad comes from is
+in the right-hand column; the same table with the reasoning is in `plans/008-sequencers-and-recording.md`, "C as built".
+Every gesture below is plain pad events (`pad(col,row,down)`): the differential test drives c34 and the port through exactly these.
 
-Mono: cols 0-7 = 8 steps x 4 degree rows (top = window+3), col 8 = HALF/TIE/WIN+/WIN-, col 9 = PAGE-/SPD-/LOOP (hold),
-col 10 = PAGE+/SPD+/VEL-, col 11 = CLEAR/-/VEL+. LOOP held + two step pads sets the loop (start/end, either order).
+### Chord/Arp pads
+
+The 24 roots (cols 0-5) are on every page. Cols 6-11 show one page; `Page` is `(0,11)` on Play, the tab column `(11,0..3)` on the others.
+`P_PAGE` is the visible page, the Shift legend shows it.
+
+| Page | Pads | Function | c34 region |
+|---|---|---|---|
+| all | cols 0-5, rows 0-3 | roots: row = grid x-1 (rows 0, 2 major, rows 1, 3 minor), col = grid y-1; held = chord sounds; Grid mode: scale degrees | x1-4 y1-6 |
+| Play | cols 6-7, rows 0-3 | chord type 1..8 = `(col-6)*4 + row + 1`: Root Sus2 Triad Sus4 / 5th 6th 7th 9th; **hold pad 1 (Root) + pad 2..8 = extended types 9..15** (Dom7 Maj7 Dim Aug 7b5 7#5 b9) | x1-4 y7-8, mod_held |
+| Play | `(8..10, 0)` | Chord / Arp / Arp+Oct (queued to the bar) | x5-7 y1 |
+| Play | `(8..11, 1)` | speed 1/8 1/8T 1/16 1/16T; two fingers = pair (1/4, 1/4T, 1/32, 1/32T, 1/2, 1/2T) | x5-8 y2 |
+| Play | `(8..11, 2)` | direction Up Down UpDn Zigzag; two fingers = pair (more directions) | x5-8 y3 |
+| Play | `(8,3) (9,3)` | Inv- Inv+ (both held = reset) | x15 y5-7 |
+| Play | `(10,3) (11,3)` | Oct- Oct+ (both held = 0) | x16 y5-7 |
+| Play | `(0,11)` | Page: opens the last edit page | - |
+| Groove | cols 6-9, rows 0-3 | 16 groove patterns (queued); with Param on: rows 0-2 = tier weights 0..3, row 3 = archetype (re-tap = new seed) | x5-8 y5-8 |
+| Groove | `(10,0)` `(10,1)` | Param (parametric groove on/off), Gate (normal / short / legato) | (15,8) (14,8) |
+| Groove | `(10,2)` `(10,3)` | Swing - / + (0..3 pulses) | x13-16 y3 |
+| Feel | cols 6-9, rows 0-1 | velocity pattern 1..8; a second finger = blend of both | x13-16 y1-2 |
+| Feel | cols 6-9, row 2 | gate lane 1..4 (tap again = off, a second finger = both) | x13-16 y4 |
+| Feel | cols 6-9, row 3 | arp octave range 1..4 | x16 centre held + up/down |
+| Feel | `(10, 0..3)` | chord size 5 / 4 / 3 / 2 notes (queued) | x5-8 y4 |
+| Setup | `(6..8, 0)` | Key / Locked / Grid (hold Locked + tap a root = set the lock key) | x14 y5-7 |
+| Setup | `(6,1) (7,1) (8,1)` | Tran- / Tran+ / Tran 0 (scale degrees) | page 1 arp row |
+| Setup | `(6,2)` `(7,2)` | Mute (kills sounding notes), Off (type 4, queued) | page 1 mute, x8 y1 |
+| Groove/Feel/Setup | `(11, 0..3)` | tabs Play / Groove / Feel / Setup | - |
+
+A pad's release is handled on the page where it went down (`downPage_`), and a page change ends the held gestures of the page left
+(second fingers, Root modifier, Locked hold), so a release on the wrong page can never leave one stuck.
+
+### Mono pads
+
+NOTE view (default): cols 0-7 = 8 steps x 4 scale degrees (row 0 = highest), then
+
+| Pad | Function | c34 |
+|---|---|---|
+| `(8,0)` `(8,1)` | Window up / down (pitch scroll) | menu (15,5) (15,6) |
+| `(8,2)` | Half: steps 1-8 / 9-16 | (screen is 16 wide) |
+| `(8,3)` | Loop: hold it, tap first and last step (either order) | y8 loop row |
+| `(9,0)` `(9,1)` | Page - / + (+ extends the chain) | row 6 pages |
+| `(9,2)` | Tie | menu (9,6) |
+| `(10,0)` `(10,1)` | Slower / Faster | menu row 1 |
+| `(10,2)` `(11,2)` | Velocity pattern - / + | menu row 7 |
+| `(11,3)` | Menu | menu button |
+
+MENU view (all 12 columns, c34 `menu_draw`; the step pads do not edit while it is shown):
+
+| Pads | Function | c34 |
+|---|---|---|
+| row 0, cols 0-11 | speed 1..12 (1/1 ... 1/64T), direct | row 1 |
+| row 1, cols 0-7 | page: tap = edit page (on release), hold Pg 1 + Pg N = N pages | row 6 (fp/ra gesture) |
+| `(8,1)` `(10,1)` `(11,1)` | Tie, Window up, Window down | (9,6) (15,5) (15,6) |
+| row 2, cols 0-11 | velocity pattern 1..12 (9..12 = pattern 1..4 blended with 1) | row 7 (`vg = x`) |
+| `(0,3)` `(1,3)` `(2,3)` | Transpose - / + (scale degrees), Mute | performance page |
+| `(7,3)` | Clear all | (14,6) |
+| `(11,3)` | back to the notes | menu button |
+
+Opening or closing the menu ends the Loop / page-pad gestures of the other view.
 
 ## Tests
 
 ```
-make test                    # 74 unit tests, 2887 checks, host g++ only
+make test                    # 118 unit tests (plan 008 C: test/test_pads.inc covers the pad map), host g++ only
 make lua-compare LUA=<path to monome_iii_c34.lua> PYTHON=<python with lupa>   # differential test, see below
 make arm                     # arm-none-eabi-g++ compile + object sizes
 ```
@@ -83,6 +136,9 @@ Not covered by the Lua comparison: LED levels (layout differs), serialization, `
 below under deviations 12/13.
 
 ## c31 -> c34: what changed and where it lives in 12x4
+
+(The "screen/encoder" entries below were the state before plan 008 C: velocity pattern, swing, gate lane, gate length, octave range, play mode,
+transpose and mute are pads on the Groove / Feel / Setup pages now, see "Pad layouts". Params stay available to hosts and tests.)
 
 Diff of `monome_iii_c31.lua` against `monome_iii_c34.lua` (page 3 and 4 only; pages 1-2 and the scene code are out of scope):
 
@@ -106,9 +162,11 @@ Chord/Arp
    `live_override`, `live_pending_off`, `f_r`/`f_st`/`k_c`, `gate`/`GT` for stages. Consequences: with no stage the scale
    without a held root is C major (c31 would fall back to the stage root), and the type/speed/dir/groove pads always edit the live
    (queued) values (c31 edited the held stage when one was held).
-2. 12x4 pads instead of 16x8; panel pads replace the `x5-8/x13-16` blocks. The 15 chord types are direct pads, so c31's
-   "hold pad 1 + pad N" gesture (and its side effect of first selecting type 1) does not exist; the comparison driver emulates the
-   side effect so the streams stay identical. PON is a re-tap of PARAM. LCK, play mode, swing, gate are `lockButton`/`setParam`.
+2. 12x4 pads instead of 16x8; the Play / Groove / Feel / Setup pages replace the `x5-8/x13-16` blocks (plan 008 C; before it the
+   15 chord types were direct pads and the other blocks hid behind four panels). The c34 gestures are real again: "hold pad 1 + pad N"
+   for the extended types (with its side effect of first selecting type 1), two fingers for speed / direction pairs and velocity blends,
+   Locked held + a root sets the lock key. The comparison driver plays all of them through the pads. `lockButton` and the params stay
+   for hosts; there is no run/stop pad (the Tracker transport drives `start()`/`stop()`).
 3. Gate timer: c31 counts 30 ms framework ticks; here `tick()` is that tick and `Event::gateMs` reports it (see Timing).
 4. `g_meas` (position in the bar, 0..95) is per `ChordArp` instance and reset by `start()`; the host can resync with
    `setBarPos()`. c31 had one global counter shared with page 2.
@@ -215,7 +273,7 @@ Rules (all covered by tests):
 
 ## Open questions
 
-- Where velocity pattern / gate lane / octave range should live on the Tracker (screen + encoders proposed; a 5th "VEL" panel needs a spare control pad); SPD+ direction (item 15); OCT range; whether the Tracker wants `gateMs` or the internal 30 ms timer (item 3).
+- SPD+ direction (item 15); whether the Tracker wants `gateMs` or the internal 30 ms timer (item 3). (Where the c34 grid features live on the 12x4 pads is settled by plan 008 C, see "Pad layouts".)
 - LCK gesture on the hardware (button vs. hold-root).
 - License (see above).
 
