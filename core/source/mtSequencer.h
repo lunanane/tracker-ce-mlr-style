@@ -774,6 +774,14 @@ class Sequencer
     void seqTrackPos(uint8_t track, uint8_t& pos, uint8_t& uStep, uint8_t& last);
     bool seqRecMicrotiming() { return recMicrotiming() != 0; }
     bool seqRecVelocity() { return recVelocity() != 0; }
+    // CUT (MLR) layer glue (seqTracks.cpp)
+    void seqCutBoundary(uint8_t row);   // after a track's step switch: the playhead of a cut track decides the next position
+    void seqCutMicroStep(int row);      // play_microStep, plus the second half-step of a rate-2 track
+    void seqCutRetrigger(uint8_t row, strPlayer::strPlayerTrack::strSendStep& step); // play_microStep, uStep == 1
+    int seqCutSteps(uint8_t row);
+    int seqCutPos(uint8_t row) { return player.track[row].actual_pos; }
+    void seqCutNoteMap(uint8_t row, uint8_t steps, uint8_t* hasNote);
+    void seqCutStopNote(uint8_t row) { stopOpenNoteOnTrack(row); }
     void seqWriteStep(uint8_t track, uint8_t step, uint8_t kind, uint8_t note, uint8_t instrument, uint8_t chord, int8_t volume, int8_t micromove);
     void continueSong(uint8_t songPos);
     void loopCurrentPattern(uint8_t songPos);

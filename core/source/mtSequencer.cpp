@@ -261,9 +261,13 @@ AUDIO_CORE_RAM void Sequencer::tick_uStep(void)
             {
                 seqEngine.stepClock(player.track[0].uStep);
             }
+            const bool cutOn = seqEngine.cutMask() != 0;
             for (int trackIdx = 0; trackIdx < kAllTracks; trackIdx++)
             {
-                play_microStep(trackIdx);
+                if (cutOn)
+                    seqCutMicroStep(trackIdx); // sequencer tracks mod: CUT layer (rate 2 plays two steps per step)
+                else
+                    play_microStep(trackIdx);
                 inc_uStep(trackIdx);
             }
         }
@@ -318,6 +322,9 @@ AUDIO_CORE_FLASH void Sequencer::play_microStep(int row)
                 }
             }
         }
+
+        if (seqEngine.cutMask())
+            seqCutRetrigger(row, stepToSend); // sequencer tracks mod: CUT layer jumped here, replay "as if at" the position
 
         //		playerRow.micromove.isActive = 0;
         playerRow.cancelStep = 0;
@@ -406,6 +413,8 @@ AUDIO_CORE_FLASH void Sequencer::play_microStep(int row)
 
     if (seqEngine.isTakenOver(row))
         return; // sequencer tracks mod: a sequencer plays this track, the pattern step is ignored
+    if (seqEngine.cutMask() && seqEngine.cut()->holding(row))
+        return; // sequencer tracks mod: CUT layer holds this step (stopped track / second half of a slow step)
     if (!playerRow.isActive)
         return;
     if (isTrackEngineMuted(row))
@@ -1343,6 +1352,7 @@ AUDIO_CORE_RAM void Sequencer::play(uint8_t fromPos)
 
     player.isStop = 0;
     player.isPlay = 1;
+    seqEngine.cutPlayStarted(); // sequencer tracks mod: CUT playheads restart with the transport
     timerTicks = 1;
     internalTickAccumulatorUs = 0.0;
 
@@ -2326,6 +2336,8 @@ AUDIO_CORE_RAM void Sequencer::inc_uStep(uint8_t row)
     {
         player.track[row].uStep = 1;
         switchRowStep(row);
+        if (seqEngine.cutMask() && player.isPlay)
+            seqCutBoundary(row); // sequencer tracks mod: the playhead of a CUT track decides the next position
     }
 }
 
