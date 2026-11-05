@@ -479,10 +479,7 @@ void Interface::switchModuleByButton(hModule module, uint8_t button, uint32_t op
         return;
     }
 
-    // sequencer tracks mod: fader FX kept running into Pattern / Song follow the stock rule on any other page (plan 005 R3)
-    if (seqFaderKept() && button != interfaceButtonPattern && button != interfaceButtonSong &&
-        button != interfaceButtonPerformance && button != interfaceButtonMaster && button != interfaceButtonParams)
-        seqFaderEndKept();
+    // (plan 010 A4: kept fader FX stay engaged on every module switch; the stock rule that ended them on other pages is gone)
 
     uint32_t localOptions = options > 0 ? options : modulesButtons[index][2];
 

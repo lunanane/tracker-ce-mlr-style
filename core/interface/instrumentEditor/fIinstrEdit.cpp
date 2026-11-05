@@ -1,4 +1,5 @@
 #include "seqLauncher.h"
+#include "seqHooks.h"
 #ifdef FEATURE_PLINKY
 #include "seqPlinky.h"
 #endif
@@ -991,7 +992,7 @@ static void functDelete(uint8_t state)
 
 static void functSwitchModule(uint8_t button)
 {
-    if (!performanceMode.canPerformanceModeContinueAfterSwitchingTo(button) && !seqSessionOwnsPerformance())
+    if (!performanceMode.canPerformanceModeContinueAfterSwitchingTo(button) && !seqSessionOwnsPerformance() && !seqFaderKept())
     {
         performanceMode.turnOffAtEndOfPattern();
     }

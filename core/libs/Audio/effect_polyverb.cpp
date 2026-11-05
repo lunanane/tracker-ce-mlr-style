@@ -6,7 +6,9 @@
 #include <math.h>
 #include <string.h>
 
+#ifdef PLATFORM_IMX
 extern uint16_t externalRamReverbBuff[];
+#endif
 
 // Cortex-M DWT cycle counter (M4 and M7 share the registers). Enabled here, harmless if the platform already did.
 static inline uint32_t cycleCounter()
@@ -73,14 +75,27 @@ AUDIO_CORE_RAM void AudioEffectPolyverb::update(void)
     audio_block_t* block_left;
     audio_block_t* block_right;
 
+    // plan 010: a missing input block is silence (zeros), not "skip the block": the tail of the reverb keeps running and the output
+    // stays clocked. Today the always-on line-in chain keeps the bus fed (see connectInputToMixer); the silence skip of the stock
+    // reverb (ProcessOrSkip) still applies to the zeros.
     block_left = receiveWritable(0);
     if (block_left == NULL)
-        return;
+    {
+        block_left = allocate();
+        if (block_left == NULL)
+            return;
+        memset(block_left->data, 0, sizeof(block_left->data));
+    }
     block_right = receiveWritable(1);
     if (block_right == NULL)
     {
-        release(block_left);
-        return;
+        block_right = allocate();
+        if (block_right == NULL)
+        {
+            release(block_left);
+            return;
+        }
+        memset(block_right->data, 0, sizeof(block_right->data));
     }
 
     int16_t* l = block_left->data;
@@ -229,6 +244,11 @@ AUDIO_CORE_FLASH void AudioEffectPolyverb::setHighpass(uint8_t idx)
     hpControl.targetOct = log2f(hz);
     hpControl.targetQ = seqfx::kHpQ;
     hpControl.targetMix = 1.0f;
+}
+
+AUDIO_CORE_FLASH void AudioEffectPolyverb::setShimmer(uint8_t raw)
+{
+    ring.setShimmer(raw); // plan 010 A3: smoothed in the ring (a few units per block)
 }
 
 AUDIO_CORE_FLASH void AudioEffectPolyverb::reset(void)

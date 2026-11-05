@@ -3,6 +3,7 @@
 #include "mtStructs.h"
 #include "util_math.h"
 #include <cmath>
+#include <string.h>
 
 int16_t zeroblock[AUDIO_BLOCK_SAMPLES];
 
@@ -76,6 +77,14 @@ AUDIO_CORE_RAM void AudioEffectLimiter::processSidechain()
     int16_t* outputData;
 
     inputBlock = receiveWritable(0);
+    if (!inputBlock)
+    {
+        // plan 010: a missing input block is silence, not "do nothing" (the stale samples of the lookahead would stay, and the
+        // chain downstream would starve): treated as zeros
+        inputBlock = allocate();
+        if (inputBlock)
+            memset(inputBlock->data, 0, sizeof(inputBlock->data));
+    }
     sidechainBlock = receiveReadOnly(1);
     if (!inputBlock)
     {
@@ -139,6 +148,14 @@ AUDIO_CORE_RAM void AudioEffectLimiter::processMainStream()
     int16_t* inputData;
 
     inputBlock = receiveWritable(0);
+    if (!inputBlock)
+    {
+        // plan 010: a missing input block is silence, not "do nothing" (the stale samples of the lookahead would stay, and the
+        // chain downstream would starve): treated as zeros
+        inputBlock = allocate();
+        if (inputBlock)
+            memset(inputBlock->data, 0, sizeof(inputBlock->data));
+    }
     sidechainBlock = receiveReadOnly(1);
     if (!inputBlock)
     {

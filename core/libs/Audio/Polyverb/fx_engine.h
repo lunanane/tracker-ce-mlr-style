@@ -36,6 +36,7 @@
 #include <algorithm>
 
 #include "cosine_oscillator.h"
+#include "seqFxCaps.h"
 #include "util.h"
 
 #define TAIL , -1
@@ -300,6 +301,9 @@ class FxEngine
         {
             Read(d, 0, scale);
         }
+
+        // plan 010 A2: soft saturation of the accumulator (identity up to 5/8 of full scale) instead of the hard Clip16 of the next write
+        inline void Soft() { accumulator_ = seqfx::softSat(accumulator_); }
 
         inline void Lp(float& state, float coefficient)
         {

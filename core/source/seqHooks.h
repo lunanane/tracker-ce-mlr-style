@@ -29,10 +29,10 @@ bool seqFaderShiftFromElsewhere(bool onFaderPage);
 void seqFaderStockEntered();
 // A project was loaded (seqSidecarsLoadWorkspace): perform FX of the old project end, the fader state is cleared, no pattern reload.
 void seqFaderProjectLoaded();
-// Kept fader FX (left running into Pattern / Song) when the user goes on to a page that does not keep them: seqFaderKept() asks,
-// seqFaderEndKept() applies the stock rule (turn-off at the pattern end while playing, else now).
+// Kept fader FX (left running on any module switch since v0.3): seqFaderKept() asks. Stock modules that would turn performance mode off
+// when the user leaves them (Master, instrument parameters) leave it alone while this is true. (There is no "end the kept FX"
+// hook any more: they end by DISENGAGE, UNLATCH, the Stop panic or a project load only.)
 bool seqFaderKept();
-void seqFaderEndKept();
 
 // ---- panic (plan 005 M6): transport Stop is the panic of the whole mod. seqPanic() runs once on the main loop after every
 // Stop (seqTracksUpdate) and calls the four hooks below; each ends what its module owns. ----

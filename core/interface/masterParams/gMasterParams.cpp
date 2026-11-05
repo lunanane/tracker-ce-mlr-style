@@ -413,9 +413,9 @@ void cMasterParams::showReverbScreen()
     showLineInReverbSend();
     showReverbType();
     Profiler::getInstance()->resetMeasuringAudio(); // the average of the audio load starts when this screen opens
-    showReverbCpu();
+    showReverbSixth();
 
-    frameData.placesCount = 6;
+    frameData.placesCount = seqFxReverbType() == seqfx::RT_PLINKY ? 7 : 6;
     frameData.startPlace = selectedPlaceReverb;
     frameData.places[0] = &framesPlaces[0][0];
     frameData.places[1] = &framesPlaces[1][0];
@@ -581,8 +581,51 @@ void cMasterParams::showReverbCpu()
     Profiler::AudioProcessorUsage total;
     Profiler::getInstance()->getAudioProcessingUsagePercent(total);
     snprintf(reverbCpuVal, sizeof(reverbCpuVal), "%d%% / %d%%", (int)(engine.getReverbCpuPercent() + 0.5f), total.average);
+    if (seqFxReverbType() == seqfx::RT_PLINKY)
+    {
+        titleBar->setRightLabel(reverbCpuVal); // item 7 shows the shimmer with the Plinky type: the CPU readout moves to the title bar
+        return;
+    }
     display.setControlText2(label[6], reverbCpuVal);
     display.refreshControl(label[6]);
+}
+
+// plan 010 A3: shimmer of the Plinky ring, shown in percent (0 .. 100)
+void cMasterParams::showReverbShimmer()
+{
+    const uint8_t pct = seqfx::shimmerPercent(seqFxShimmer());
+    snprintf(reverbShimmerVal, sizeof(reverbShimmerVal), "%d", (int)pct);
+    display.setControlValue(barControl[6], pct);
+    display.refreshControl(barControl[6]);
+    display.setControlText2(label[6], reverbShimmerVal);
+    display.refreshControl(label[6]);
+}
+
+void cMasterParams::showReverbSixth()
+{
+    if (seqFxReverbType() == seqfx::RT_PLINKY)
+    {
+        display.setControlText(label[6], "Shimmer");
+        display.setControlShow(barControl[6]);
+        showReverbShimmer();
+        frameData.placesCount = 7;
+    }
+    else
+    {
+        titleBar->setRightLabel("");
+        display.setControlText(label[6], "Rev / All CPU");
+        display.setControlText2(label[6], " ");
+        display.refreshControl(label[6]);
+        display.setControlHide(barControl[6]);
+        display.refreshControl(barControl[6]);
+        frameData.placesCount = 6;
+        if (selectedPlaceReverb > 5)
+        {
+            selectedPlaceReverb = 5;
+            refreshReverbFrame();
+        }
+        showReverbCpu();
+    }
 }
 
 void cMasterParams::showReverbType()

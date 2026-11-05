@@ -65,6 +65,9 @@ class AudioEffectPolyverb : public AudioStream
     // Plan 007 F2: highpass (low cut) of the reverb input, seqfx::hpHz index 0 = off. Smoothed, no clicks.
     void setHighpass(uint8_t idx);
 
+    // Plan 010 A3: shimmer amount of the Plinky ring, 0 .. 127 (seqfx::shimmerFromPercent). Smoothed, no clicks.
+    void setShimmer(uint8_t raw);
+
     // CPU used by update() in percent of the 128 sample block period (average of ~32 blocks, and a slowly decaying peak)
     float cpuPercent() const { return cpuAvg; }
     float cpuPeakPercent() const { return cpuPeak; }
