@@ -1,0 +1,3 @@
+
+# sequencer tracks mod: shell scripts must keep LF (run by sh in the build)
+*.sh text eol=lf
