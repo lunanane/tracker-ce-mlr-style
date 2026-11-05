@@ -21,7 +21,8 @@ License: **PolyForm Noncommercial 1.0.0** (owner 2026-11-04), see `LICENSE.md`.
 | `test/shrink.py`, `test/dump.py` | delta-debug a failing script / print both streams side by side | - |
 | `playhead.h/.cpp` | `Playhead`: MLR-style per-track playhead for the Session view (plan 002 S1), see the Playhead section | - |
 | `test/test_playhead.inc` | 24 Playhead tests (included by `test_main.cpp`) | - |
-| `Makefile` | `make test`, `make lua-compare`, `make arm` | - |
+| `hr.h/.cpp`, `hr_*.h/.cpp`, `test/hr_driver.cpp`, `test/hr_compare.py`, `test/test_hr.inc` | the HYPER_RASP scripts, see "HYPER_RASP scripts" | - |
+| `Makefile` | `make test`, `make lua-compare`, `make hr-compare`, `make arm` | - |
 
 ## Interface (both sequencers)
 
@@ -113,6 +114,43 @@ MENU view (all 12 columns, c34 `menu_draw`; the step pads do not edit while it i
 | `(11,3)` | back to the notes | menu button |
 
 Opening or closing the menu ends the Loop / page-pad gestures of the other view.
+
+## HYPER_RASP scripts (plan 008 D)
+
+Eight more sequencer types, ported 1:1 from the scripts of HYPER_RASP (`scripts/*.lua`, same owner, 8 x 4 pads) onto a thin C++ adapter
+of HYPER_RASP's PadScript API. They only run on the original Tracker (MK66) build; see plan 008 "D as built".
+
+| Type | Class | Script | File |
+|---|---|---|---|
+| Arp Lines (`ARPL`) | `HrStab` (KIND_ARP) | `arp_lines.lua` | `hr_stab.h/.cpp` |
+| Chord Stabs (`STAB`) | `HrStab` (KIND_STABS) | `chord_stabs.lua` | `hr_stab.h/.cpp` |
+| Arp Seq (`ARSQ`) | `HrArpSeq` | `arp_seq.lua` | `hr_arpseq.h/.cpp` |
+| HR Chord/Arp (`HRCA`) | `HrChordArp` | `chord_arp.lua` (not the grid-composer Chord/Arp) | `hr_chordarp.h/.cpp` |
+| Bassline Seq (`BASS`) | `HrBass` | `bassline_seq.lua` | `hr_bass.h/.cpp` |
+| Euclid Drums (`EUCL`) | `HrEuclid` | `euclid_trigger.lua` | `hr_euclid.h/.cpp` |
+| Grid Seq (`GRID`) | `HrGridSeq` | `grid_seq.lua` | `hr_gridseq.h/.cpp` |
+| Step Follow (`STEP`) | `HrStepFollow` | `step_follower.lua` | `hr_stepfollow.h/.cpp` |
+
+- `hr.h/.cpp`: the adapter. `HrScript` has the script entry points under their Lua names (`grid(x, y, z)` = `event_grid`, `pulse()` =
+  `event_midi(248)`, `start()` / `stop()` = `start_playback` / `stop_playback`, `tick()` = `framework_tick`, `setParam` = `set_param`),
+  `HrBus` is the shared scale / root (`set_scale`, `current_scale`, `set_root_note`, `current_root_note`; default D# natural minor, no root),
+  plus `hrEuclid` (the host's `euclidean(k, n)`), `hrGrooveVel`, `HrSlot` (placement-new storage, 400 bytes, no heap).
+- Pad mapping: HYPER_RASP columns 1..8 are pad columns 0..7, rows 1..4 are pad rows 0..3. Pad columns 8..11 ("extras") carry what the
+  scripts put on encoders / faders (their `set_param` parameters) as - / + / reset pads; each script header names them.
+- `paint()` is the live 8 x 4 LED image (the scripts' `render()`, evaluated on demand), `legend()` / `title()` / `help()` are the Shift legend
+  (words <= 6 characters). `grid_led_bg` (the background layer) is composited as in the host: it shows only where the foreground level is 0.
+- `serialize()` / `deserialize()`: settings and stored patterns only (never the held keys, latch or running state), fixed length, version byte first.
+- Tests: `test/test_hr.inc` (host tests), `core/seqtest/test_hr.inc` (engine glue) and the differential test:
+
+```
+make hr-compare PYTHON=<python with lupa> [HR_SCRIPTS=<HYPER_RASP scripts dir>]   # default dir E:/claude/_HYPER_RASP/scripts
+```
+  `test/hr_compare.py` runs the real Lua script (lupa, with a stub of the PadScript API) and `test/hr_driver` on the same random command script
+  (`grid X Y Z`, `pulse N`, `start`, `stop`, `tick N`, `param NAME V`, `busscale ...`, `busroot N`) and compares every note event (stamped with the
+  pulse) and the 8 x 4 LED levels after every command. `math.random` (euclid_trigger chance) is replaced on both sides by the same LCG
+  (`s = s * 1664525 + 1013904223`, `(s >> 16) % n + 1`). For `bassline_seq`, `euclid_trigger`, `grid_seq` and `step_follower` the Lua side repaints
+  (`render()`) after a `param` command, because those scripts only repaint on their next event.
+  Results at hand-over: 8 scripts, 323 random scripts (40 each, plus exhaustive sweeps for arp_lines / chord_stabs / chord_arp), 0 mismatches.
 
 ## Tests
 
