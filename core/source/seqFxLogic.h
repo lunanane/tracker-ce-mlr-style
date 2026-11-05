@@ -252,6 +252,11 @@ struct Params
 
     bool operator==(const Params& o) const { return bw == o.bw && hp == o.hp && type == o.type && shim == o.shim && sel == o.sel; }
     bool isDefault() const { return bw == kBwDefault && hp == 0 && type == RT_STOCK && shim == kShimmerDefaultRaw && sel == 0; }
+    uint16_t hashBase() const // without the track selection (v0.3.1)
+    {
+        uint8_t b[4] = { bw, hp, type, shim };
+        return seqsidecar::crc16(b, 4);
+    }
     uint16_t hash() const
     {
         uint8_t b[6] = { bw, hp, type, shim, (uint8_t)(sel & 0xFF), (uint8_t)(sel >> 8) };

@@ -1329,6 +1329,15 @@ static void test_sidecar_v2()
     Params s = q;
     s.sel = 0x0005;
     CHECK(s.hash() != q.hash() && !(s == q));
+    // v0.3.1: a selection-only difference is not a project change (hashBase ignores the selection, still sees everything else)
+    CHECK(s.hashBase() == q.hashBase());
+    s.shim = (uint8_t)(q.shim + 1);
+    CHECK(s.hashBase() != q.hashBase());
+    s = q;
+    s.bw = 21;
+    CHECK(s.hashBase() != q.hashBase());
+    s = q;
+    s.sel = 0x0005;
     Params d;
     CHECK(d.isDefault() && d.shim == 32 && d.sel == 0);
     d.shim = 40;
