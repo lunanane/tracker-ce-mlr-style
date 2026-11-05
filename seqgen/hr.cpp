@@ -16,12 +16,21 @@ struct Bj {
   uint8_t counts[40], rem[40];
   uint8_t* out;
   int n;
+  // Expands level lvl into out[]. Non-recursive (an explicit stack of at most 42 small frames, ~90 bytes): this runs per step in the
+  // audio interrupt, where the recursive form used ~0.9 KB of the 4 KB stack. Same order of output as the recursive original:
+  //   build(l) = { build(l-1) x counts[l] ; if rem[l] != 0: build(l-2) },  build(0) = 0,  build(-1) = 1.
   void build(int lvl) {
-    if (lvl == 0) out[n++] = 0;
-    else if (lvl == -1) out[n++] = 1;
-    else {
-      for (int i = 0; i < counts[lvl]; ++i) build(lvl - 1);
-      if (rem[lvl] != 0) build(lvl - 2);
+    int8_t fl[42];
+    uint8_t fi[42];
+    int sp = 0;
+    fl[0] = (int8_t)lvl; fi[0] = 0; sp = 1;
+    while (sp > 0) {
+      int top = sp - 1, l = fl[top];
+      if (l == 0) { out[n++] = 0; --sp; }
+      else if (l == -1) { out[n++] = 1; --sp; }
+      else if (fi[top] < counts[l]) { ++fi[top]; fl[sp] = (int8_t)(l - 1); fi[sp] = 0; ++sp; }
+      else if (fi[top] == counts[l]) { ++fi[top]; if (rem[l] != 0) { fl[sp] = (int8_t)(l - 2); fi[sp] = 0; ++sp; } }
+      else --sp;
     }
   }
 };
