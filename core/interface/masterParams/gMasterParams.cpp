@@ -369,7 +369,7 @@ void cMasterParams::showReverbScreen()
         barData[i].value = display.getTheme().white;
     }
 
-    titleBar->show();
+    titleBar->show(seqFxReverbType() == seqfx::RT_PLINKY); // v0.3.1: the right label carries the CPU readout with ShimmerReverb
     titleBar->setTitle("Master Reverb");
 
     display.setControlText(label[0], "Size");
@@ -608,11 +608,13 @@ void cMasterParams::showReverbSixth()
         display.setControlText(label[6], "Shimmer");
         display.setControlShow(barControl[6]);
         showReverbShimmer();
+        titleBar->showRightLabel(true); // v0.3.1: the CPU readout lives in the title bar now
         frameData.placesCount = 7;
     }
     else
     {
         titleBar->setRightLabel("");
+        titleBar->showRightLabel(false); // v0.3.1: Stock shows the CPU in item 7; the title bar label is cleared and hidden
         display.setControlText(label[6], "Rev / All CPU");
         display.setControlText2(label[6], " ");
         display.refreshControl(label[6]);
