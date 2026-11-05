@@ -104,6 +104,9 @@ class SeqPlayOverlay
     void plinkyJog(int16_t value);
     void plinkyDefault();
     void plinkyClose();
+    bool editKey(uint8_t button, uint8_t state);
+    void borrowEdit();
+    void returnEdit();
 
     bool active_ = false;
     uint8_t stripPage_ = 0;
@@ -125,6 +128,8 @@ class SeqPlayOverlay
     const char* msg_ = nullptr;
     uint32_t msgUntil_ = 0;
     uint32_t ledTime_ = 0;
+    seqplay::EditKeys keys_;       // v0.3.2: stock editing keys (Note / Instr / FX1 / FX2 / Copy / Insert / Delete)
+    bool editBorrowed_ = false;    // the stock edit mode is on for a held editing key (Rec is the take key in Play mode)
     bool plinkyOpen_ = false;      // the Plinky parameter overlay (plan 010 B)
     seqplinky::Cursor plinkyCur_;
     uint32_t plinkyTime_ = 0;

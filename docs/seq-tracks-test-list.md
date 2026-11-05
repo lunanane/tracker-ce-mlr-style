@@ -52,7 +52,7 @@ Naming: the bottom-right key printed "Perform" is the firmware's **Pattern** key
 | Hold **Rec**, press **Play** in Play mode | Plain play / stop (no stock live-rec arm, edit mode stays off). |
 | Select a track on strip 9-16, press **Left** | The strip shows 1-8 and a yellow `T12 >` marker sits at its right edge (`< T3` at the left edge for the other direction). Pressing Shift snaps the strip to the selected track's group so the mute labels match. |
 | A track plays a launched clip or an MLR jam | Only the strip says so (`clip` / `cut` on line 2). The pattern column is NOT dimmed (a dim would look like a mute); the pattern view shows the edit pattern, not what that track sounds. |
-| Note / Instr / FX1 / FX2 / Copy / Insert / Delete in Play mode | Nothing happens (no popups over the strip). Up / Down and Play work as in stock. |
+| Note / Instr / FX1 / FX2 / Copy / Insert / Delete in Play mode | v0.3.2: stock behaviour (section 11h). Up / Down and Play work as in stock. |
 | Hold a pad, tap Pattern (leave), keep the finger down, then lift | No stray note-off / stock pad event on lift; the chord stopped at the tap. |
 | Pads on a track whose type is Off | Nothing (no stock notes either). |
 | Strip line 2 on a track that plays a launched Session clip / an MLR (CUT) jam | `clip` / `cut`. Rec on a launched-clip track shows `on a clip` on that cell for two seconds. |
@@ -578,6 +578,7 @@ Pads: the ping-pong and sync pads (PING page, column 10, rows 3-4) are dark when
 Known (v0.2.4): the ping-pong and sync switches are two pads on the PING page now (the jog wheel changed its job); the stock 10 s autosave still writes while playing when the delay center is changed (a stock project value); width, low cut and type are written only after Stop.
 
 ## 11f. Synth voice (plan 009 S, Original Tracker)
+_v0.3.2: the Shift + screen button 1 claim and the Channel parameter are gone, see section 11h._
 A polyphonic synth voice (4 voices max) that a MIDI instrument plays. It exists only in the Original Tracker build. Headphones or monitors, level low at first.
 
 **How to make a PolySynth instrument**
@@ -611,6 +612,7 @@ A polyphonic synth voice (4 voices max) that a MIDI instrument plays. It exists 
 
 Known (plan 009 S): the sends and the dry level of the voice are not on the Master mixer (use the page); the voice is not on the track faders / mute / solo / stems; crossing Shape 0 to 1 while a note sounds may tick once; one voice engine for all MIDI channels is not possible (exactly one channel).
 ## 11g. PolySynth sequencer type and parameter overlay (plan 010 B, Original Tracker)
+_v0.3.2: the type is now called Strings and plays the track's own instrument; the overlay belongs to the PolySynth instrument, see section 11h._
 Play mode (Pattern key tapped), a track's type list (hold its screen button + wheel) has a new last entry **PolySynth** (strip text `POLY`). Headphones or monitors, level low at first.
 
 **Pad layout (strings, provisional).** The 12 x 4 pads are 12 strings (columns) of 4 notes (rows); the bottom row is the lowest note of a string, the top row the highest. Each column starts 3 scale degrees (a 4th in a 7 note scale) above the column to its left, so neighbouring strings overlap like a guitar. Default: C minor, octave 2 (the bottom left pad is MIDI 36). The legend (hold Shift) shows the note names in the cells; root notes are white. The **bottom right pad is the Setup pad**: pressing it shows the setup view (the legend shows it): row 1 = root C .. B, row 2 = scale (Major, Minor, Dorian, Phrygian, Lydian, Mixolydian, Pentatonic minor, Pentatonic major) in columns 1-8 and octave 1-4 in columns 9-12, row 3 = string spacing Str+1 .. Str+7 (columns 1-7); pressing the Setup pad again returns to the notes. The setup is saved in `seqtracks.bin` (optional trailer, the file version is unchanged; a file without a PolySynth track is byte-for-byte what it was).
@@ -650,6 +652,44 @@ Play mode (Pattern key tapped), a track's type list (hold its screen button + wh
 | **Channel change while notes sound (v0.3.1, minor 7).** Hold a pad (or let a pattern note ring), change Channel on the instrument page to another channel with an external synth on the old and the new one. | The voice note ends at once; the external synths on both channels receive All Notes Off and nothing hangs. |
 | **Instrument key with the type list open (v0.3.1, minor 9).** Hold a track's screen button (type list opens), press the Instrument key, release the screen button. | The list closes without applying a type; the overlay opens only for a PolySynth track (otherwise `not a synth`). |
 | **Whole-frame display list (v0.3.1, minor 8; device, not modelled on the host because the pattern editor is stock Polyend drawing).** Overlay open on the PolySynth track in the pattern editor with 8 columns (8 tracks), many notes and FX visible, Shift legend not shown, the PolySynth CPU label running; also with the strip message `on MIDI n` showing. | No drawing missing, no text cut, no flicker for 1 minute (the pattern editor + strip + title + overlay stay within 8172 bytes; the overlay alone is about 3.6 KB, host-measured). Report any gap with a photo. |
+
+## 11h. v0.3.2: stock keys in Play mode, PolySynth as an instrument, Strings (Original Tracker only)
+Replaces the rows of 11f / 11g that mention the claim gesture (Shift + screen button 1), the channel parameter, `voice on T?`, `voice off`, `on MIDI n`, `POLY` and the Instrument key opening the overlay on a PolySynth type. Host tests: `core/seqtest` `test_edit_keys`, `test_shift_legend_flow`, `test_strip_shift_hint`.
+
+**Final key table of Play mode**
+
+| Key / gesture in Play mode | What it does |
+|---|---|
+| Pads | Play the selected track's sequencer (Chord/Arp, Mono, HYPER_RASP scripts, Strings). |
+| **Rec** / **Shift + Rec** | Take toggle / exactly one loop (stock Rec = edit mode is not available here). |
+| Screen buttons 1-8 | Select the track; hold one + jog wheel = the sequencer type list; hold one + **Instrument** = PolySynth parameters (only when the track plays the PolySynth instrument). |
+| **Left / Right** | Strip page 1-8 / 9-16. **Pattern + Left / Right**: stock pattern queue / change. |
+| **Shift** | Stock mute labels; held about a quarter of a second without a screen button: the pad legend above the labels. Shift + screen button: stock mute. |
+| **Play + Rec** | Plain play / stop (guard against the stock live-rec arm). |
+| **Note, Instrument, FX1, FX2** | Stock: choose the column of the cursor step (4 / 8 track view), Pattern + key = view mode. Hold the key and turn the jog wheel to edit that column of the cursor step (Instrument + jog = pick the instrument); the stock popups appear and commit as in the stock edit mode. |
+| **Copy, Insert, Delete** (+ Shift: Paste, Home, Backspace) | Stock, they act on the cursor step / selection. |
+| **Up / Down**, jog wheel | Stock cursor (the wheel moves the cursor while no screen button or editing key is held; stock rule: only while the transport is stopped). |
+| Undo, Fill, page 2 actions | Not available (they sit on the screen buttons, which select tracks here): tap Pattern to leave Play mode. |
+
+How the stock edit mode is handled: Rec is the take key, so the stock edit mode (red cursor) is never on by itself. While Note / Instrument / FX1 / FX2 / Copy / Insert / Delete is held, the stock edit mode is on for the stock handler of that key (the wheel edits, Copy / Insert / Delete work, popups commit on release); the first pass after the last of these keys is up gives it back (green cursor). No new hotkey was added.
+
+| Check | Expected |
+|---|---|
+| Play mode, track selected, tap **Instrument** | The stock Instrument column is chosen (4 track view shows the instrument column, 8 track view with Pattern + Instrument). No PolySynth overlay. |
+| Hold **Instrument**, turn the wheel | The instrument of the cursor step changes (the stock instrument popup shows); release: the step has it. Works with the transport stopped and playing. |
+| Hold **Note**, wheel; hold **FX1** / **FX2**, wheel | The note / effect of the cursor step changes as in the stock edit mode. |
+| **Copy** on a selection (Shift + arrows), move, **Shift + Copy** | Copy and paste as in stock (they used to do nothing). **Insert**, **Delete**, **Shift + Delete** work on the cursor step. |
+| After the keys are up | The cursor is green again (not in edit mode); the wheel moves the cursor (transport stopped); a pad press still plays the sequencer. |
+| A stock popup is open (the instrument popup), press a pad | The pad goes to the stock popup, not to the sequencer; the router is back when it closes. |
+| Hold **Shift** about a quarter of a second, no screen button, selected track is Chord/Arp, Mono, a script or Strings | The 12 x 4 legend appears above the mute labels (it ends at y 424, the labels start at y 424), the labels show Mute / Unmute. Shift + screen button: legend hides, mute toggles. Release: strip back. |
+| Sequencer track selected, Shift not held | The selected cell's second line reads `Shift: pads` (and, when the track plays the PolySynth instrument, `Hold+Instr` in turns every two seconds). |
+| PolySynth is an instrument | The instrument list (step popup, pattern editor) has an entry **PolySynth** where the project's MIDI instrument 16 is (a project of v0.3 / v0.3.1 that claimed another channel: that instrument). Pick it for a step or as the last used instrument: notes of the pattern, the keyboard pads and every sequencer type sound the voice. No channel setup is visible; nothing is sent to MIDI channel 16 (documented consequence). |
+| Instrument parameters of the PolySynth instrument | Three pages (Voices, Level, Reverb, Delay, Glide, Width, Interval / Shape, Detune, Noise, Cutoff, Reso, Drive, Attack / Decay, Sustain, Release, LFO rate, LFO depth, LFO to) with Next; title `PolySynth n/3 ...`; no hint `Shift+1: PolySynth` on the other MIDI instruments and Shift + screen button 1 does nothing special. |
+| Open a project saved with v0.3 / v0.3.1 that had the voice on MIDI n | The instrument list calls MIDI n `PolySynth`, patterns sound as before. A file with the voice off gets MIDI 16. |
+| Two tracks with the PolySynth instrument, play both | Both sound the one engine; 4 voices are shared (the oldest note goes first). |
+| Hold a track's screen button + **Instrument**, the track plays the PolySynth instrument | The parameter overlay opens (title `PolySynth (track n)`, no MIDI channel); Instrument closes it; Note / FX / Copy / Insert do nothing under it; Delete = default. |
+| Same on a track whose instrument is a sample | Nothing opens; the cell shows `not PolySynth`. |
+| Type **Strings** (list entry after the scripts; strip `STRG`) | Pad strings layout as before; it plays the track's own instrument (sample, MIDI or PolySynth); Rec writes ordinary notes of that instrument. A second Strings track is refused (`Strings T3`; the setup is shared). An old `seqtracks.bin` with type 11 loads as Strings. |
 
 ## 11f. CPU savings (plan 009 P, v0.2.7): compare with the previous build (v0.2.6) on the same project
 Use one project with 8 sample voices (some with the filter on), the delay and the stock reverb used, the limiter on, and play it. Open Master > Reverb (it resets the average when it opens) and write down "Rev / All CPU" after 30 s of the busiest part; also read Config > audio usage (min / max / avg / last) and "free heap" / "stack ... free ..." (bottom right of the Config page). Do it on v0.2.6 and on this build; the second number of the Master > Reverb item and the Config numbers are the comparison.

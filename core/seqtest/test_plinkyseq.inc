@@ -130,11 +130,11 @@ static void test_plinky_pad_map()
     for (int sc = 0; sc < kScales; sc++) CHECK(strlen(scaleDef((uint8_t)sc).shortName) <= 6);
     char title[96];
     seqplay::legendTitle(st, title, sizeof title);
-    CHECK(strstr(title, "POLYSYNTH") && strstr(title, "Minor") && strlen(seqplay::legendHelp(st)) <= 88);
+    CHECK(strstr(title, "STRINGS") && strstr(title, "Minor") && strlen(seqplay::legendHelp(st)) <= 88);
     st.plMenu = 0;
     CHECK(strlen(seqplay::legendHelp(st)) <= 88);
     // strip texts and the type name
-    CHECK(strcmp(seqplay::typeName(seqlogic::TYPE_PLINKY), "PolySynth") == 0 && strcmp(seqplay::typeShort(seqlogic::TYPE_PLINKY), "POLY") == 0);
+    CHECK(strcmp(seqplay::typeName(seqlogic::TYPE_PLINKY), "Strings") == 0 && strcmp(seqplay::typeShort(seqlogic::TYPE_PLINKY), "STRG") == 0);
     CHECK(!seqlogic::isHrType(seqlogic::TYPE_PLINKY) && seqlogic::TYPE_PLINKY == seqlogic::TYPE_HR_FIRST + seqlogic::kHrScripts &&
           seqlogic::TYPE_COUNT == seqlogic::TYPE_PLINKY + 1);
     seqplay::StripCell cell;
@@ -142,7 +142,7 @@ static void test_plinky_pad_map()
     char l1[16], l2[16];
     seqplay::stripLine1(l1, sizeof l1, cell);
     seqplay::stripLine2(l2, sizeof l2, cell);
-    CHECK(strcmp(l1, "1 POLY") == 0 && strcmp(l2, "voice") == 0);
+    CHECK(strcmp(l1, "1 STRG") == 0 && strcmp(l2, "ready") == 0);
     cell.takenOver = true;
     seqplay::stripLine2(l2, sizeof l2, cell);
     CHECK(strcmp(l2, "live") == 0);
@@ -390,19 +390,6 @@ static void test_plinky_overlay_logic()
     CHECK(strcmp(t, "Mono") == 0);
     valueText(P_LEVEL, 70, t, sizeof t);
     CHECK(strcmp(t, "70") == 0);
-}
-
-// v0.3.1 minor 5: the claimed channel avoids the channels the pattern and the last used instrument use
-static void test_plinky_claim_channel()
-{
-    using namespace seqplinky;
-    CHECK(claimChannel(0) == 16);
-    CHECK(claimChannel(1u << 15) == 15); // MIDI 16 used
-    CHECK(claimChannel((1u << 15) | (1u << 14) | 1u) == 14);
-    CHECK(claimChannel(0xFFFFu) == 16);  // everything used: MIDI 16
-    CHECK(claimChannel(0x7FFFu) == 16);  // only MIDI 16 free
-    CHECK(claimChannel(0xFFFEu) == 1);   // only MIDI 1 free
-    CHECK(claimChannel(1u << 2) == 16);  // an external synth on MIDI 3 is not touched
 }
 
 static void test_plinky_overlay_draw_budget()

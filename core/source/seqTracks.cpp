@@ -61,36 +61,16 @@ class SeqHost : public seqtracks::Host
         sequencer.seqTakeoverBegin(track);
     }
     void takeoverEnd(uint8_t track) override { s_sampleNote[track] = -1; }
-    // The Plinky type plays through the MIDI instrument whose channel is the voice's (so a recording writes MIDI instrument notes that
-    // the voice plays without the sequencer too); any other type: the last used instrument.
-    static uint8_t pickInstrument(uint8_t track)
+    // Every type plays the track's own instrument (v0.3.2: the Strings type no longer owns the voice): the last used instrument.
+    static uint8_t pickInstrument(uint8_t track) { return sequencer.seqPickInstrument(track); }
+    // A sample track is monophonic, but a MIDI instrument (also the PolySynth instrument) on it is polyphonic: no sample-track rule
+    // for the Strings type there (it plays chords and several strings at once)
+    static bool monoTrack(uint8_t track)
     {
-#ifdef FEATURE_PLINKY
-        if (seqEngine.type(track) == seqlogic::TYPE_PLINKY)
-        {
-            const int i = seqPlinkyInstrument();
-            if (i >= 0)
-                return (uint8_t)i;
-        }
-#endif
-        return sequencer.seqPickInstrument(track);
-    }
-    // the Plinky voice is polyphonic and a MIDI instrument: no sample-track rules for it
-    static bool monoTrack(uint8_t track) { return isSampleTrack(track) && seqEngine.type(track) != seqlogic::TYPE_PLINKY; }
-    // v0.3.1 minor 6: a PolySynth track whose voice is off (channel 0) plays nothing (it used to fall back to a sample instrument)
-    static bool voiceOff(uint8_t track)
-    {
-#ifdef FEATURE_PLINKY
-        return seqEngine.type(track) == seqlogic::TYPE_PLINKY && seqPlinkyInstrument() < 0;
-#else
-        (void)track;
-        return false;
-#endif
+        return isSampleTrack(track) && !(seqEngine.type(track) == seqlogic::TYPE_PLINKY && s_instrument[track] >= MIDI_INSTRUMENTS_START_IDX);
     }
     void noteOn(uint8_t track, uint8_t note, int8_t volume) override
     {
-        if (voiceOff(track))
-            return;
         if (monoTrack(track))
         {
             if (s_sampleNote[track] >= 0)
@@ -101,8 +81,6 @@ class SeqHost : public seqtracks::Host
     }
     void noteOff(uint8_t track, uint8_t note) override
     {
-        if (voiceOff(track))
-            return;
         if (monoTrack(track))
         {
             if (s_sampleNote[track] != note)
@@ -602,13 +580,6 @@ void seqTracksUpdate()
     seqFxUpdate();
 #ifdef FEATURE_PLINKY
     seqPlinkyUpdate();
-    {   // a Plinky track appeared (type list, project load): the voice gets a channel when it has none
-        static uint8_t owner = 0xFF;
-        const uint8_t now = seqEngine.plinkyOwner(false);
-        if (now != owner && now != 0xFF)
-            seqPlinkyClaim();
-        owner = now;
-    }
 #endif
     seqCutUpdate();
 

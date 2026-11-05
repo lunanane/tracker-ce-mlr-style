@@ -1474,7 +1474,6 @@ int main()
     test_plinky_record();
     test_plinky_sidecar();
     test_plinky_overlay_logic();
-    test_plinky_claim_channel();
     test_plinky_overlay_draw_budget();
     printf("%d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;

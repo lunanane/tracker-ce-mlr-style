@@ -368,7 +368,6 @@ void cInstrumentEditor::showTitleBar()
         case mtInstEditModeMidi:
             label = "MIDI Instrument Parameters";
 #ifdef FEATURE_PLINKY
-            label = "MIDI Parameters  Shift+1: PolySynth"; // hint of the claim gesture; stock items unchanged
             if (plinkyActive())
             {
                 showPlinkyCpu(true);
@@ -1927,24 +1926,23 @@ const char* const InstrumentCCNames[] = {
 // --------------------------------------------  synth  -------------------------------------------
 
 #ifdef FEATURE_PLINKY
-// plan 009 S: the synth voice on a MIDI instrument. Page 1: voice and sends, page 2: oscillators and filter, page 3: envelope and
-// LFO; place 7 = Next (wraps). Place 0 of page 1 is the Channel: Off (or another channel) gives the instrument back to MIDI.
+// plan 009 S / v0.3.2: the PolySynth instrument (the MIDI instrument that is the synth voice; MIDI instrument 16 in a new project).
+// Page 1: voice and sends, page 2: oscillators and filter, page 3: envelope and LFO; place 7 = Next (wraps); -2 = empty place.
+// The channel is not a parameter any more (v0.3.2: nothing to set up).
 namespace
 {
 using namespace plinkyvoice;
 const int8_t kPlinkyPages[3][8] = {
-    { P_CHANNEL, P_VOICES, P_LEVEL, P_REVERB, P_DELAY, P_GLIDE, P_WIDTH, -1 },
-    { P_SHAPE, P_DETUNE, P_INTERVAL, P_NOISE, P_CUTOFF, P_RESO, P_DRIVE, -1 },
-    { P_ATTACK, P_DECAY, P_SUSTAIN, P_RELEASE, P_LFO_RATE, P_LFO_DEPTH, P_LFO_DEST, -1 },
+    { P_VOICES, P_LEVEL, P_REVERB, P_DELAY, P_GLIDE, P_WIDTH, P_INTERVAL, -1 },
+    { P_SHAPE, P_DETUNE, P_NOISE, P_CUTOFF, P_RESO, P_DRIVE, P_ATTACK, -1 },
+    { P_DECAY, P_SUSTAIN, P_RELEASE, P_LFO_RATE, P_LFO_DEPTH, P_LFO_DEST, -2, -1 },
 };
 const char* const kPlinkyLfoDest[3] = { "Pitch", "Shape", "Cutoff" };
 } // namespace
 
 bool cInstrumentEditor::plinkyActive() const
 {
-    const int i = mtProject.values.lastUsedInstrument;
-    return mode == mtInstEditModeMidi && i >= MIDI_INSTRUMENTS_START_IDX && i < MIDI_INSTRUMENTS_START_IDX + kMidiInstrumentsCount &&
-           seqPlinkyGet(P_CHANNEL) == i - MIDI_INSTRUMENTS_START_IDX + 1;
+    return mode == mtInstEditModeMidi && seqPlinkyIsVoiceInstrument(mtProject.values.lastUsedInstrument);
 }
 
 void cInstrumentEditor::showPlinkyCpu(bool force)
@@ -2007,8 +2005,8 @@ void cInstrumentEditor::showPlinkyParams()
         display.setControlColors(label[i], display.getTheme().activeLabelsColors);
         display.setRemoveControlStyle(label[i], controlStyleLimitTextWidth);
         display.setControlStyle2(label[i], controlStyleCenterX | controlStyleCenterY | controlStyleFont2);
-        display.setControlText(label[i], p >= 0 ? paramInfo(p).name : "Next");
-        display.setControlText2(label[i], p >= 0 ? "" : (plinkyPage == 1 ? "p1/3" : (plinkyPage == 2 ? "p2/3" : "p3/3")));
+        display.setControlText(label[i], p >= 0 ? paramInfo(p).name : (p == -2 ? "" : "Next"));
+        display.setControlText2(label[i], p >= 0 || p == -2 ? "" : (plinkyPage == 1 ? "p1/3" : (plinkyPage == 2 ? "p2/3" : "p3/3")));
         display.setRemoveControlStyle(label[i], controlStyleShowBitmap);
         display.setRemoveControlStyle(label[i], controlStyleSpecialFx2);
         if (p >= 0)
@@ -2096,21 +2094,11 @@ bool cInstrumentEditor::plinkyButton(uint8_t button, uint8_t state)
             activateLabelsBorder();
             return true;
         }
+        if (kPlinkyPages[plinkyPage - 1][button] == -2)
+            return true;
         plinkyPage = plinkyPage < 3 ? plinkyPage + 1 : 1; // Next
         selectedPlace[mode] = 0;
         showPlinkyParams();
-        activateLabelsBorder();
-        return true;
-    }
-    const int i = mtProject.values.lastUsedInstrument;
-    if (button == 0 && state == buttonPress && buttons->isButtonPressed(interfaceButtonShift) && i >= MIDI_INSTRUMENTS_START_IDX &&
-        i < MIDI_INSTRUMENTS_START_IDX + kMidiInstrumentsCount)
-    {
-        // Shift + screen button 1: this MIDI instrument becomes the synth voice (its channel is the voice channel)
-        seqPlinkySet(plinkyvoice::P_CHANNEL, i - MIDI_INSTRUMENTS_START_IDX + 1);
-        plinkyPage = 1;
-        selectedPlace[mode] = 0;
-        showInstrumentMidiParams();
         activateLabelsBorder();
         return true;
     }

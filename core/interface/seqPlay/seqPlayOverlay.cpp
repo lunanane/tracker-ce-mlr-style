@@ -67,7 +67,9 @@ void SeqPlayOverlay::enter()
     active_ = true;
     if (sequencer.isRec())
         sequencer.recEnable(false);
-    PE().editMode = 0; // Rec is the sequencer's Rec now
+    PE().editMode = 0; // Rec is the sequencer's Rec now (a held editing key borrows the stock edit mode, v0.3.2)
+    editBorrowed_ = false;
+    keys_.clear();
     stripPage_ = seqplay::stripPageOfTrack(selected());
     hold_.clear();
     list_.cancel();
@@ -99,6 +101,8 @@ void SeqPlayOverlay::leave()
     recKey_.reset();
     recStopPending_ = false;
     plinkyOpen_ = false;
+    returnEdit();
+    keys_.clear();
     active_ = false;
     view_.mode = SeqPlayViewData::HIDDEN;
     view_.edge = 0;
@@ -218,26 +222,13 @@ void SeqPlayOverlay::closeList(bool apply)
         int type = list_.release(seqEngine.type(track), seqEngine.pendingType(track));
         if (type == seqlogic::TYPE_PLINKY && seqEngine.plinkyOwner() != 0xFF && seqEngine.plinkyOwner() != track)
         {
-            // one voice: the track that has it keeps it (the refusal is shown on the track that asked)
-            snprintf(ownerMsg_, sizeof(ownerMsg_), "voice on T%d", seqEngine.plinkyOwner() + 1);
+            // one Strings track (its setup is shared): the track that has it keeps it (the refusal is shown on the track that asked)
+            snprintf(ownerMsg_, sizeof(ownerMsg_), "Strings T%d", seqEngine.plinkyOwner() + 1);
             setMessage(ownerMsg_);
         }
         else if (type >= 0)
         {
-            if (seqEngine.postType(track, (uint8_t)type)) // at the next bar while the transport runs
-            {
-#ifdef FEATURE_PLINKY
-                if (type == seqlogic::TYPE_PLINKY)
-                {
-                    seqPlinkyClaim(); // the voice gets its channel now, before the first pad
-                    if (seqPlinkyGet(plinkyvoice::P_CHANNEL) != 0)
-                    {
-                        snprintf(ownerMsg_, sizeof(ownerMsg_), "on MIDI %d", seqPlinkyGet(plinkyvoice::P_CHANNEL));
-                        setMessage(ownerMsg_); // v0.3.1 minor 5: where the voice sits (the strip cell takes 11 characters; the overlay title says 'PolySynth T? on MIDI n')
-                    }
-                }
-#endif
-            }
+            seqEngine.postType(track, (uint8_t)type); // at the next bar while the transport runs
         }
     }
     else
@@ -304,6 +295,69 @@ void SeqPlayOverlay::recPressed()
     }
 }
 
+namespace {
+uint8_t editKeyIndex(uint8_t b)
+{
+    switch (b)
+    {
+        case interfaceButtonNote: return seqplay::EditKeys::K_NOTE;
+        case interfaceButtonInstr: return seqplay::EditKeys::K_INSTR;
+        case interfaceButtonFx1: return seqplay::EditKeys::K_FX1;
+        case interfaceButtonFx2: return seqplay::EditKeys::K_FX2;
+        case interfaceButtonCopy: return seqplay::EditKeys::K_COPY;
+        case interfaceButtonInsert: return seqplay::EditKeys::K_INSERT;
+        case interfaceButtonDelete: return seqplay::EditKeys::K_DELETE;
+        default: return seqplay::EditKeys::K_COUNT;
+    }
+}
+} // namespace
+
+// The stock editing keys. The stock handler runs (return false) with the stock edit mode borrowed while the key is down, so the jog
+// wheel edits the cursor step's column, Copy / Insert / Delete work and the popups commit as in the stock edit mode. The exception is
+// Instrument with a screen button held (or with the PolySynth overlay open): the PolySynth parameter overlay.
+bool SeqPlayOverlay::editKey(uint8_t b, uint8_t state)
+{
+    const uint8_t k = editKeyIndex(b);
+    const seqplay::EditKeys::Kind kind = state == buttonPress ? seqplay::EditKeys::PRESS :
+                                         state == buttonRelease ? seqplay::EditKeys::RELEASE : seqplay::EditKeys::HOLD;
+    switch (keys_.event(k, kind, routable(), plinkyOpen_, hold_.mask != 0))
+    {
+        case seqplay::EditKeys::PASS_EDIT:
+            borrowEdit();
+            return false;
+        case seqplay::EditKeys::TAKE_SYNTH:
+            if (kind == seqplay::EditKeys::PRESS)
+            {
+                closeList(false); // an open type list ends first; the screen-button release then applies no type
+                plinkyToggle();
+            }
+            return true;
+        case seqplay::EditKeys::TAKE:
+            if (kind == seqplay::EditKeys::PRESS && k == seqplay::EditKeys::K_DELETE && plinkyOpen_)
+                plinkyDefault();
+            return true;
+        default: return false;
+    }
+}
+
+void SeqPlayOverlay::borrowEdit()
+{
+    if (editBorrowed_)
+        return;
+    editBorrowed_ = true;
+    PE().editMode = 1;
+}
+
+void SeqPlayOverlay::returnEdit()
+{
+    if (!editBorrowed_)
+        return;
+    editBorrowed_ = false;
+    PE().editMode = 0;
+    PE().refreshPattern();
+    display.refreshControl(PE().patternControl);
+}
+
 bool SeqPlayOverlay::button(uint8_t b, uint8_t state)
 {
     if (b <= interfaceButton7)
@@ -331,6 +385,10 @@ bool SeqPlayOverlay::button(uint8_t b, uint8_t state)
         return false;
     }
 
+    // v0.3.2: Note / Instr / FX1 / FX2 / Copy / Insert / Delete are the stock keys (also their hold and release, whatever the popups do)
+    if (active_ && editKeyIndex(b) < seqplay::EditKeys::K_COUNT)
+        return editKey(b, state);
+
     if (!routable())
         return false;
 
@@ -355,18 +413,6 @@ bool SeqPlayOverlay::button(uint8_t b, uint8_t state)
             if (state == buttonPress)
                 plinkyNav(b);
             return true;
-        case interfaceButtonDelete:
-            if (plinkyOpen_ && state == buttonPress)
-                plinkyDefault();
-            return true;
-        case interfaceButtonInstr:
-            // Instrument Parameters (also with screen button 1 held): the Plinky parameter overlay of the selected Plinky track
-            if (state == buttonPress)
-            {
-                closeList(false); // v0.3.1: an open type list ends first; the screen-button release then applies no type
-                plinkyToggle();
-            }
-            return true;
         case interfaceButtonLeft:
         case interfaceButtonRight:
             if (plinkyOpen_)
@@ -388,12 +434,6 @@ bool SeqPlayOverlay::button(uint8_t b, uint8_t state)
             if (seqrecui::isToggle(state))
                 recPressed();
             return true; // hold events and the release are the sequencer's too, they do nothing
-        case interfaceButtonNote:
-        case interfaceButtonFx1:
-        case interfaceButtonFx2:
-        case interfaceButtonCopy:
-        case interfaceButtonInsert:
-            return true; // no popups or edits over the strip
         default: return false;
     }
 }
@@ -474,14 +514,17 @@ void SeqPlayOverlay::plinkyToggle()
         plinkyClose();
         return;
     }
-    if (seqEngine.type(selected()) == seqlogic::TYPE_PLINKY)
+#ifdef FEATURE_PLINKY
+    // v0.3.2: the overlay belongs to the PolySynth instrument, whatever sequencer type the track has
+    if (seqPlinkyTrackUsesVoice(selected()))
     {
         plinkyOpen_ = true;
         plinkyCur_.fix();
         legend_.screenButton(); // no Shift legend over it
     }
     else
-        setMessage("not a synth");
+#endif
+        setMessage("not PolySynth");
 }
 
 void SeqPlayOverlay::plinkyNav(uint8_t button)
@@ -554,9 +597,10 @@ void SeqPlayOverlay::refreshStrip(bool force)
         if (t == recTrack)
             c.hint = seqplay::recHintText(hints & seqrec::HINT_OVERFLOW, hints & seqrec::HINT_NEED_MIDI, hints & seqrec::HINT_REDUCED);
         c.msg = (c.selected && msg_) ? msg_ : nullptr;
+        c.shiftHint = c.selected && c.type != seqlogic::TYPE_OFF; // v0.3.2: "Shift: pads" where nothing else needs the line
 #ifdef FEATURE_PLINKY
-        if (!c.msg && c.type == seqlogic::TYPE_PLINKY && seqPlinkyInstrument() < 0)
-            c.msg = "voice off"; // v0.3.1 minor 6: the PolySynth track plays nothing without a channel
+        c.synthHint = c.selected && seqPlinkyTrackUsesVoice(t);
+        c.alt = ((seqNowMs() / 2000u) & 1u) != 0;
 #endif
 
         // only the cells whose content changed are rewritten
@@ -565,7 +609,7 @@ void SeqPlayOverlay::refreshStrip(bool force)
         mix(t);
         mix(c.type | (c.pending << 4) | ((uint32_t)c.takenOver << 12) | ((uint32_t)c.rec << 13) | ((uint32_t)c.launched << 14) |
             ((uint32_t)c.cut << 15) | ((uint32_t)c.selected << 16) | ((uint32_t)(c.msg != nullptr) << 17) |
-            ((uint32_t)(c.hint ? c.hint[0] : 0) << 18));
+            ((uint32_t)(c.hint ? c.hint[0] : 0) << 18) | ((uint32_t)c.shiftHint << 26) | ((uint32_t)c.synthHint << 27) | ((uint32_t)(c.synthHint && c.alt) << 28));
         if (!force && key == cellKey_[i])
             continue;
         cellKey_[i] = key;
@@ -614,8 +658,10 @@ void SeqPlayOverlay::refreshView()
     uint8_t sel = selected();
     view_.edge = (active_ && !list_.open) ? seqplay::edgeSide(sel, stripPage_) : 0;
     view_.edgeTrack = (uint8_t)(sel + 1);
-    if (plinkyOpen_ && (!routable() || seqEngine.type(sel) != seqlogic::TYPE_PLINKY))
-        plinkyClose(); // another track, another type or a popup: the overlay ends
+#ifdef FEATURE_PLINKY
+    if (plinkyOpen_ && (!routable() || !seqPlinkyTrackUsesVoice(sel)))
+        plinkyClose(); // another track, another instrument or a popup: the overlay ends
+#endif
     if (plinkyOpen_)
     {
 #ifdef FEATURE_PLINKY
@@ -626,7 +672,6 @@ void SeqPlayOverlay::refreshView()
         m.sec = plinkyCur_.sec;
         m.idx = plinkyCur_.idx;
         m.track = (uint8_t)(sel + 1);
-        m.channel = (uint8_t)seqPlinkyGet(plinkyvoice::P_CHANNEL);
         m.cpu = (uint8_t)(seqPlinkyCpu() + 0.5f);
         m.peak = (uint8_t)(seqPlinkyCpuPeak() + 0.5f);
         m.newer = seqPlinkyNewerFile() ? 1 : 0;
@@ -639,7 +684,7 @@ void SeqPlayOverlay::refreshView()
         view_.sel = list_.sel;
         view_.cur = seqEngine.type(seqplay::stripSlotTrack(stripPage_, list_.cell));
     }
-    else if (active_ && legend_.visible(seqNowMs()) && seqEngine.type(sel) != seqlogic::TYPE_OFF)
+    else if (seqplay::viewKind(false, active_, false, legend_.visible(seqNowMs()), seqEngine.type(sel) == seqlogic::TYPE_OFF) == SeqPlayViewData::LEGEND)
     {
         view_.mode = SeqPlayViewData::LEGEND;
         view_.type = seqEngine.type(sel);
@@ -707,6 +752,9 @@ void SeqPlayOverlay::update()
     if (!active_)
         return;
     uint32_t now = seqNowMs();
+
+    if (editBorrowed_ && !keys_.editWanted())
+        returnEdit(); // the last editing key was released and its stock handler has run
 
     // Shift: the legend (after 250 ms) and cancel an open type list
     bool shift = PE().buttons->isButtonPressed(interfaceButtonShift);
