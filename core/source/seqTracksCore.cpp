@@ -405,7 +405,11 @@ void Engine::setPlaying(bool p)
             if (t.type == TYPE_MONO)
                 t.mo.stop(); // Chord/Arp keeps running while stopped (free-running clock)
             else if (isHrType(t.type) && t.hr.get())
-                t.hr.get()->stop(); // every HYPER_RASP script: starting is selective (followsTransport), stopping is not (pad_script.py)
+            {
+                // every HYPER_RASP script: starting is selective (followsTransport), stopping is not (pad_script.py Transport._set_playback)
+                t.hr.get()->stop();
+                t.hr.get()->transportStopped();
+            }
             refresh((uint8_t)i);
         }
     }
