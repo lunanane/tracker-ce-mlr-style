@@ -1,5 +1,6 @@
 // Plan 009 P#4: the delay (real effect_shortDelay.cpp, host stub of AudioStream) against the frozen pre-change copy (ref/delay).
 // Included by test_cpu.cpp.
+#include <new>
 #include "effect_shortDelay.h"
 #include "ref_shortDelay.h"
 
@@ -148,5 +149,83 @@ static void testDelay()
         DelayRun a = runDelay(rd, in, false, evRef);
         DelayRun b = runDelay(nd, in, true, evNew);
         CHECK(sameOut(a, b));
+    }
+}
+
+// ---- Plan 009 P#5: limiter (real effect_limiter.cpp, stubbed project values) against the frozen old one (ref/limiter) ----
+#include "mtStructs.h" // the stub in stubs/
+#include "effect_limiter.h"
+#include "ref_limiter.h"
+StubProject mtProject;
+
+template<typename L>
+static std::vector<int16_t> runLimiter(L& lim, const std::vector<int16_t>& main, const std::vector<int16_t>* side, bool sidechainOn,
+                                       std::vector<int16_t>* sideOut = nullptr)
+{
+    std::vector<int16_t> out(main.size());
+    lim.setSidechainEnable(sidechainOn);
+    for (size_t b = 0; b < main.size() / 128; b++)
+    {
+        audio_block_t* m = (audio_block_t*)calloc(1, sizeof(audio_block_t));
+        m->ref_count = 1;
+        memcpy(m->data, &main[b * 128], 256);
+        stubIn[0] = m;
+        if (side)
+        {
+            audio_block_t* sc = (audio_block_t*)calloc(1, sizeof(audio_block_t));
+            sc->ref_count = 1;
+            memcpy(sc->data, &(*side)[b * 128], 256);
+            stubIn[1] = sc;
+        }
+        if (stubOut[0])
+        {
+            free(stubOut[0]);
+            stubOut[0] = nullptr;
+        }
+        lim.update();
+        memcpy(&out[b * 128], stubOut[0]->data, 256);
+        (void)sideOut;
+    }
+    return out;
+}
+
+static void testLimiter()
+{
+    struct Case { uint16_t attack, release, thr; uint8_t mode; const char* name; };
+    const Case cases[] = { { 10, 100, 20000, limiterModeSubtle, "subtle, thr 20000" },
+                           { 3, 400, 4000, limiterModeSubtle, "subtle, low threshold" },
+                           { 20, 200, 30000, limiterModeHard, "hard" } };
+    for (const Case& c : cases)
+    {
+        const int blocks = 900;
+        std::vector<int16_t> main(blocks * 128), side(blocks * 128);
+        for (size_t i = 0; i < main.size(); i++)
+        {
+            // loud noise bursts, quiet noise and full-scale extremes (-32768 included)
+            int ph = (int)(i / 128 / 60) % 4;
+            int amp = ph == 0 ? 32767 : ph == 1 ? 600 : ph == 2 ? 15000 : 0;
+            main[i] = amp ? (int16_t)((int)(rnd() % (2 * amp + 1)) - amp) : 0;
+            side[i] = (int16_t)((int)(rnd() % 40001) - 20000);
+            if (rnd() % 997 == 0) main[i] = -32768;
+        }
+        mtProject.values.limiterAttack = c.attack;
+        mtProject.values.limiterRelease = c.release;
+        mtProject.values.limiterThreshold = c.thr;
+        mtProject.values.limiterMode = c.mode;
+        for (int pass = 0; pass < 2; pass++) // 0: main stream, 1: sidechain
+        {
+            // fresh zeroed objects like the statics on the device (the old begin() cleared the input ring only)
+            AudioEffectLimiter& nl = *new (calloc(1, sizeof(AudioEffectLimiter))) AudioEffectLimiter();
+            RefLimiter& rl = *new (calloc(1, sizeof(RefLimiter))) RefLimiter();
+            nl.begin();
+            rl.begin();
+            std::vector<int16_t> a = runLimiter(rl, main, pass ? &side : nullptr, pass == 1);
+            std::vector<int16_t> b = runLimiter(nl, main, pass ? &side : nullptr, pass == 1);
+            CHECK(a == b);
+            size_t nz = 0;
+            for (size_t i = 0; i < a.size(); i++) nz += a[i] != 0;
+            CHECK(nz > a.size() / 4);
+        }
+        printf("  limiter %-24s: identical\n", c.name);
     }
 }
