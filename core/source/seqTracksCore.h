@@ -77,8 +77,10 @@ class Engine
 
     // ---- project sidecar (main loop, with the audio engine idle or stopped) ----
     // File = "SQTR", version, track count, payload length (u16), per track [type, lenCA, CA, lenMono, Mono, (version 2:) lenHR, HR], CRC16.
-    // Version 1 files (no HR block) still load; saving writes version 2. The HR block is the settings of the track's HYPER_RASP script.
-    enum { kSidecarVersion = 2, kSidecarMax = 8 + seqlogic::kTracks * (4 + seqgen::ChordArp::kSerialSize + seqgen::Mono::kSerialSize + seqgen::HrScript::kMaxSerial) + 2 };
+    // Version 1 and 2 share one layout; version 2 may carry the HR trailer. Both load. Saving writes version 1 while no track uses a
+    // HYPER_RASP type (so older mod versions can still read the file) and version 2 otherwise. The HR block is the settings of the
+    // track's HYPER_RASP script.
+    enum { kSidecarVersionV1 = 1, kSidecarVersion = 2, kSidecarMax = 8 + seqlogic::kTracks * (4 + seqgen::ChordArp::kSerialSize + seqgen::Mono::kSerialSize + seqgen::HrScript::kMaxSerial) + 2 };
     size_t saveState(uint8_t* buf, size_t cap) const; // 0 = buffer too small
     bool loadState(const uint8_t* buf, size_t len);   // false = invalid frame (nothing changed); a bad track block only turns that track Off
     void resetState();                                // all tracks Off, fresh state
