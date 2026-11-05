@@ -175,7 +175,7 @@ AUDIO_CORE_RAM void AudioEffectPolyverb::runType(int16_t* l, int16_t* r)
     }
     else
     {
-        reverb.Process(l, r, AUDIO_BLOCK_SAMPLES);
+        reverb.ProcessOrSkip(l, r, AUDIO_BLOCK_SAMPLES); // plan 009 P#7: nothing to do while idle and the tail is gone
     }
 }
 
