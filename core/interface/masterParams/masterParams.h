@@ -65,6 +65,8 @@ class cMasterParams : public ModuleBase
     void showReverbDiffusion();
     void showReverbType();
     void showReverbCpu();
+    void showReverbShimmer();       // plan 010 A3: item 7 of the reverb screen, only with the Plinky type (else the CPU readout is there)
+    void showReverbSixth();         // lays out item 7: Shimmer (Plinky) or the CPU readout (Stock)
     // limiter
     void showLimiterScreen();
     void showLimiterAttack();
@@ -257,6 +259,8 @@ class cMasterParams : public ModuleBase
     void changeReverbPredelay(int16_t val);
     void changeReverbDiffusion(int16_t val);
     void changeReverbType(int16_t val);
+    void changeReverbShimmer(int16_t val);
+    void setDefaultReverbShimmer();
     // equalizer
     void changeEqualizerBandAdjust(uint8_t n, int16_t val);
 
@@ -411,8 +415,9 @@ class cMasterParams : public ModuleBase
     char reverbDampVal[4];
     char reverbPredelayVal[4];
     char reverbDiffusionVal[4];
-    char reverbTypeVal[8];
+    char reverbTypeVal[16];
     char reverbCpuVal[24];
+    char reverbShimmerVal[8];
 
     char limitAttackVal[8];
     char limitReleaseVal[8];

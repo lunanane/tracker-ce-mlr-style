@@ -2,6 +2,10 @@
 // Host tests of the v0.2.4 FX additions (plan 007): the state variable filter (bandpass width, highpass, smoothing, clicks), the
 // control mappings (jog steps, Q, highpass index, ring reverb parameters), the sidecar seqfx.bin (version / compatibility), the
 // reverb type switch and the ring reverb itself (silence, decay, stability, all-pass equivalence with the original, pre-delay).
+#ifndef M_PI
+#define M_PI 3.14159265358979323846 // the stock reverb (cosine_oscillator.h) uses it; -std=c++11 does not define it
+#endif
+#include "reverb.h"
 #include "ring_reverb.h"
 #include "seqFxDsp.h"
 #include "seqFxLogic.h"
@@ -216,9 +220,11 @@ static void test_band_mix_top_octave()
 // Top of the reverb size / delay feedback range (owner report: crackle at the top step on the v0.2.3 hardware)
 static void test_caps_and_soft_limit()
 {
-    CHECK(kReverbSizeCap == 0.90f && kDelayFeedbackCap == 88);
-    CHECK(capReverbSize(1.0f) == 0.90f && capReverbSize(0.5f) == 0.5f && capReverbSize(0.0f) == 0.0f);
-    CHECK(capDelayFeedback(99) == 88 && capDelayFeedback(88) == 88 && capDelayFeedback(50) == 50 && capDelayFeedback(0) == 0);
+    // plan 010 A2 (owner decision): the caps are 95 % now (they were 0.90 / 88)
+    CHECK(kReverbSizeCap == 0.95f && kDelayFeedbackCap == 95);
+    CHECK(capReverbSize(1.0f) == 0.95f && capReverbSize(0.5f) == 0.5f && capReverbSize(0.0f) == 0.0f);
+    CHECK(capDelayFeedback(99) == 95 && capDelayFeedback(95) == 95 && capDelayFeedback(88) == 88 && capDelayFeedback(50) == 50 &&
+          capDelayFeedback(0) == 0);
     // soft limit: identity up to 3/4 scale, odd, monotone, never above the 16 bit range for the largest feedback sum
     CHECK(softLimit(20480) == 20480 && softLimit(-20480) == -20480 && softLimit(100) == 100 && softLimit(0) == 0);
     CHECK(softLimit(20484) == 20481 && softLimit(-20484) == -20481);
@@ -243,7 +249,7 @@ static void test_caps_and_soft_limit()
             const int D = 22050;
             std::vector<int16_t> line(D, 0);
             int head = 0, rails = 0;
-            long peak = 0, maxStep = 0;
+            long peak = 0, maxStep = 0, nearRailStep = 0;
             int32_t prev = 0;
             for (int n = 0; n < 44100 * 8; n++)
             {
@@ -259,14 +265,22 @@ static void test_caps_and_soft_limit()
                     peak = labs(nv);
                 if (n > 0 && labs(nv - prev) > maxStep)
                     maxStep = labs(nv - prev);
+                if (n > 0 && (labs(nv) > 28000 || labs(prev) > 28000) && labs(nv - prev) > nearRailStep)
+                    nearRailStep = labs(nv - prev);
                 prev = nv;
             }
             CHECK(rails == 0);
             CHECK(peak < 32000);
             // no rail-to-rail jumps: the waveform of the compressed tone stays continuous (a hard clip of the loud sum would not)
             CHECK(maxStep < peak / 2);
-            if (fb <= kDelayFeedbackCap)
+            // (plan 010 A2: the bound of the old cap, 88, is kept for every value up to 88; the 95 % loop sustains a steeper
+            // compressed waveform through its zero crossings, measured 0.356 of the peak at 95 % / 32000, so the bound is 0.4 up to the
+            // new cap. The strict part is the next check: nothing near the rails ever steps - a hard clip would.)
+            if (fb <= 88)
                 CHECK(maxStep < peak * 3 / 10);
+            else if (fb <= kDelayFeedbackCap)
+                CHECK(maxStep < peak * 4 / 10);
+            CHECK(nearRailStep < peak / 8);
         }
 
     // the ring reverb at the largest size the controls can reach, with a loud sustained low tone + noise: the output stays inside
@@ -482,16 +496,18 @@ static void test_jog_mappings()
         lastQ = q;
     }
 
-    // highpass index: 0 = off, 30 Hz .. ~1.8 kHz
+    // highpass index: 0 = off, 30 Hz .. ~5.1 kHz (plan 010 A1: the range ended at 72 = 1.8 kHz before)
     CHECK(hpHz(0) == 0.0f);
     CHECK_NEAR(hpHz(1), 30.0, 1e-3);
     CHECK_NEAR(hpHz(13), 60.0, 1e-2);
-    CHECK_NEAR(hpHz(kHpMax), 30.0 * pow(2.0, 71.0 / 12.0), 0.5);
-    CHECK(hpHz(kHpMax) > 1700 && hpHz(kHpMax) < 1900);
+    CHECK(hpHz(72) > 1800 && hpHz(72) < 1830); // the old top is still index 72 (old seqfx.bin values keep their meaning)
+    CHECK(kHpMax == 90);
+    CHECK_NEAR(hpHz(kHpMax), 30.0 * pow(2.0, 89.0 / 12.0), 0.5);
+    CHECK(hpHz(kHpMax) > 4800 && hpHz(kHpMax) < 5300);
     for (int i = 2; i <= kHpMax; i++)
         CHECK(hpHz((uint8_t)i) > hpHz((uint8_t)(i - 1)));
     CHECK(jogHp(0, -3) == 0 && jogHp(0, 3) == 3);
-    CHECK(jogHp(70, 5) == kHpMax && jogHp(kHpMax, 1) == kHpMax);
+    CHECK(jogHp(70, 5) == 75 && jogHp(88, 5) == kHpMax && jogHp(kHpMax, 1) == kHpMax);
     CHECK(jogHp(200, 0) == kHpMax);
     CHECK(clampHp(-5) == 0 && clampHp(1000) == kHpMax);
 }
@@ -617,7 +633,7 @@ static void test_sidecar()
     // while the centre is below the "open" end)
     Params none;
     CHECK(none.type == RT_STOCK && none.hp == 0 && hpHz(none.hp) == 0.0f);
-    CHECK(strcmp(reverbTypeName(RT_STOCK), "Stock") == 0 && strcmp(reverbTypeName(RT_PLINKY), "Plinky") == 0);
+    CHECK(strcmp(reverbTypeName(RT_STOCK), "Stock") == 0 && strcmp(reverbTypeName(RT_PLINKY), "ShimmerReverb") == 0);
     CHECK(strcmp(reverbTypeName(77), "Stock") == 0);
 }
 
@@ -735,7 +751,15 @@ static void test_ring_allpass_equals_original()
         int32_t d = b[j];
         int32_t acc2 = acc;
         acc2 -= d >> 1;
-        b[ib] = (int16_t)(acc2 < -32768 ? -32768 : (acc2 > 32767 ? 32767 : acc2));
+        // plan 010 A2: the stage writes through the soft limit (identity up to 20480; a quarter of the slope above, then the 16 bit rails)
+        {
+            int32_t w = acc2;
+            if (w > 20480)
+                w = 20480 + ((w - 20480) >> 2);
+            else if (w < -20480)
+                w = -20480 - ((-w - 20480) >> 2);
+            b[ib] = (int16_t)(w < -32768 ? -32768 : (w > 32767 ? 32767 : w));
+        }
         acc2 = (acc2 >> 1) + d;
         ib = j;
         if (ra != acc2 || ia != ib)
@@ -1043,8 +1067,318 @@ static void test_ring_geometry()
     CHECK(ringverb::RingReverb::preBytes() == 2 * ringverb::kPreSize * 2);
 }
 
+// ---------------------------------------------------------------- plan 010 A2: soft saturation, 95 % loops
+static void test_soft_sat()
+{
+    CHECK(softSat(0.0f) == 0.0f && softSat(0.5f) == 0.5f && softSat(-0.625f) == -0.625f && softSat(0.625f) == 0.625f);
+    CHECK(softSat16(20480.0f) == 20480.0f && softSat16(-12345.5f) == -12345.5f && softSat16(0.0f) == 0.0f);
+    // continuous at the knee with slope 1, odd, monotone, bounded below 1 (the 16 bit rails) for any input
+    CHECK_NEAR(softSat(0.6251f) - softSat(0.625f), 0.0001, 1e-6);
+    float last = -2.0f;
+    bool mono = true, odd = true, bounded = true;
+    for (float v = -50.0f; v <= 50.0f; v += 0.013f)
+    {
+        float y = softSat(v);
+        mono = mono && y >= last;
+        odd = odd && softSat(-v) == -y;
+        bounded = bounded && fabsf(y) <= 1.0f;
+        last = y;
+    }
+    CHECK(mono && odd && bounded);
+    CHECK(softSat(2.0f) < 0.95f && softSat(2.0f) > 0.9f && softSat(1e9f) <= 1.0f);
+    CHECK(fabsf(softSat16(65536.0f)) < 32767.0f && fabsf(softSat16(-1e7f)) <= 32768.0f);
+    CHECK_NEAR(softSat16(30000.0f), softSat(30000.0f / 32768.0f) * 32768.0f, 0.5);
+}
+
+// The stock reverb (the real Reverb of core/libs/Audio/Polyverb) at 90 and 95 % size with loud sustained input: bounded, nothing near
+// the rails, and no hard-clip steps. Mono input = both channels the same (the worst case for the tank).
+static void test_stock_reverb_loud()
+{
+    static uint16_t b1[Reverb::kBuffer1Words], b2[Reverb::kBuffer2Words];
+    static Reverb rv;
+    const int blocks = 44100 * 8 / 128;
+    for (float size : { 0.90f, 0.95f })
+        for (float damp : { 0.2f, 0.5f })
+            for (int src = 0; src < 5; src++) // sines 8000 / 20000 / 32000 at 80 Hz, 32000 at 1 kHz, full-scale noise
+            {
+                memset(b1, 0, sizeof(b1));
+                memset(b2, 0, sizeof(b2));
+                rv.Init(b1, b2);
+                rv.SetInputGain(0.1f);
+                rv.SetDiffusion(0.625f);
+                rv.SetTime(size);
+                rv.SetLP(damp);
+                rv.SetAmount(1.0f);
+                rv.SetPredelayLength(0.0f);
+                rv.ResetState();
+                int16_t l[128], r[128];
+                long peak = 0, nearRailStep = 0, maxStep = 0;
+                double e1 = 0, e2 = 0;
+                int prev = 0;
+                uint32_t rng = 99;
+                for (int b = 0; b < blocks; b++)
+                {
+                    for (int i = 0; i < 128; i++)
+                    {
+                        long n = (long)b * 128 + i;
+                        double a = src == 0 ? 8000 : (src == 1 ? 20000 : 32000);
+                        double f = src == 3 ? 1000.0 : 80.0;
+                        if (src == 4)
+                        {
+                            rng = rng * 1664525u + 1013904223u;
+                            l[i] = r[i] = (int16_t)((int)((rng >> 8) % 65535) - 32767);
+                        }
+                        else
+                            l[i] = r[i] = (int16_t)(a * sin(2.0 * 3.14159265358979 * f * n / 44100.0));
+                    }
+                    rv.Process(l, r, 128);
+                    for (int i = 0; i < 128; i++)
+                    {
+                        long y = l[i];
+                        long ay = labs(y);
+                        if (ay > peak)
+                            peak = ay;
+                        if (b > 0 || i > 0)
+                        {
+                            long st = labs(y - prev);
+                            if (st > maxStep)
+                                maxStep = st;
+                            if ((ay > 26000 || labs((long)prev) > 26000) && st > nearRailStep)
+                                nearRailStep = st;
+                        }
+                        prev = (int)y;
+                        if (b >= blocks / 2 && b < blocks * 3 / 4)
+                            e1 += (double)y * y;
+                        if (b >= blocks * 3 / 4)
+                            e2 += (double)y * y;
+                    }
+                }
+                printf("  stock reverb size %.2f damp %.1f src %d: peak %ld maxStep %ld nearRailStep %ld energy ratio %.2f\n", size, damp, src, peak, maxStep,
+                       nearRailStep, e1 > 0 ? e2 / e1 : 0.0);
+                // bounded: well inside the 16 bit range (the soft return stays below 31000), and settled (the energy of seconds 6-8 is not above that of seconds 4-6: no runaway)
+                CHECK(peak < 31000);
+                CHECK(e2 <= e1 * 1.2 + 1.0);
+                if (src != 4)
+                {
+                    // a sine in gives a smooth wave out: no step near the rails (a hard clip or a wrapped conversion would jump there)
+                    CHECK(nearRailStep < 3500);
+                    CHECK(maxStep < 20000);
+                }
+                else
+                {
+                    CHECK(nearRailStep < 20000); // noise: steps are natural, but never a wrap from + to - rail
+                }
+            }
+}
+
+// shimmer mapping (plan 010 A3): percent <-> the ring's 0 .. 127, the default is exactly the former fixed value
+static void test_shimmer_mapping()
+{
+    CHECK(kShimmerDefaultRaw == 32 && shimmerPercent(32) == 25 && shimmerFromPercent(25) == 32);
+    CHECK(shimmerFromPercent(0) == 0 && shimmerFromPercent(100) == 127 && shimmerPercent(0) == 0 && shimmerPercent(127) == 100);
+    CHECK(shimmerFromPercent(-5) == 0 && shimmerFromPercent(500) == 127 && shimmerPercent(255) == 100);
+    uint8_t last = 0;
+    bool mono = true, round = true;
+    for (int p = 0; p <= 100; p++)
+    {
+        uint8_t raw = shimmerFromPercent(p);
+        mono = mono && raw >= last;
+        round = round && shimmerPercent(raw) == p; // every percent has its own raw value and reads back
+        last = raw;
+    }
+    CHECK(mono && round);
+    CHECK(jogShimmer(32, 1) == shimmerFromPercent(26) && jogShimmer(32, -1) == shimmerFromPercent(24));
+    CHECK(jogShimmer(0, -3) == 0 && jogShimmer(127, 3) == 127 && jogShimmer(127, -1) < 127);
+}
+
+// the ring: shimmer follows its target in small steps (no click), the default is the old fixed behaviour
+static void test_ring_shimmer()
+{
+    ringverb::RingReverb* a = new ringverb::RingReverb();
+    ringverb::RingReverb* b = new ringverb::RingReverb();
+    std::vector<int16_t> ra(ringverb::kRingSize, 0), rb(ringverb::kRingSize, 0), pa(2 * ringverb::kPreSize, 0), pb(2 * ringverb::kPreSize, 0);
+    a->init(ringverb::PlainRing{ ra.data() }, pa.data());
+    b->init(ringverb::PlainRing{ rb.data() }, pb.data());
+    a->setParams(ringFade(0.7f), ringColor(0.4f), ringApGain(0.68f), 0);
+    b->setParams(ringFade(0.7f), ringColor(0.4f), ringApGain(0.68f), 0);
+    CHECK(a->shimmer() == 32);
+    b->setShimmer(32); // explicitly the default: identical output
+    std::vector<int16_t> la(128), lb(128), xa(128), xb(128);
+    bool same = true;
+    srand(5);
+    for (int blk = 0; blk < 600; blk++)
+    {
+        for (int i = 0; i < 128; i++)
+            la[i] = lb[i] = xa[i] = xb[i] = (int16_t)(rand() % 8001 - 4000);
+        a->process(la.data(), xa.data(), 128);
+        b->process(lb.data(), xb.data(), 128);
+        same = same && la == lb && xa == xb;
+    }
+    CHECK(same);
+    // a jump of the target: reached in 2 per block (48 blocks for 32 -> 127), monotone, never a step bigger than 2
+    b->setShimmer(127);
+    int blocks = 0, prev = b->shimmer();
+    bool monotone = true;
+    int maxJump = 0;
+    while (b->shimmer() != 127 && blocks < 200)
+    {
+        for (int i = 0; i < 128; i++)
+            lb[i] = xb[i] = 0;
+        b->process(lb.data(), xb.data(), 128);
+        monotone = monotone && b->shimmer() >= prev;
+        if (b->shimmer() - prev > maxJump)
+            maxJump = b->shimmer() - prev;
+        prev = b->shimmer();
+        blocks++;
+    }
+    CHECK(monotone && maxJump <= 2 && blocks >= 40 && blocks <= 60);
+    b->setShimmer(500); // clamps
+    for (int k = 0; k < 5; k++)
+        b->process(lb.data(), xb.data(), 128);
+    CHECK(b->shimmer() == 127);
+    delete a;
+    delete b;
+}
+
+// the ring at 95 %: the near-unity loop writes through the soft limit. Loud sustained input stays bounded with no rail contact
+static void test_ring_loud_95()
+{
+    ringverb::RingReverb* r = new ringverb::RingReverb();
+    std::vector<int16_t> ring(ringverb::kRingSize, 0), pre(2 * ringverb::kPreSize, 0);
+    r->init(ringverb::PlainRing{ ring.data() }, pre.data());
+    for (int shim : { 32, 127 })
+        for (int src = 0; src < 4; src++)
+        {
+            std::fill(ring.begin(), ring.end(), 0);
+            r->resetState();
+            r->setShimmer(shim);
+            r->setParams(ringFade(kReverbSizeCap), ringColor(0.3f), ringApGain(0.85f), 0);
+            int16_t l[128], rr[128];
+            long peak = 0, railHits = 0, nearStep = 0;
+            int prev = 0;
+            uint32_t rng = 3;
+            for (int b = 0; b < 44100 * 8 / 128; b++)
+            {
+                for (int i = 0; i < 128; i++)
+                {
+                    long n = (long)b * 128 + i;
+                    if (src == 3)
+                    {
+                        rng = rng * 1664525u + 1013904223u;
+                        l[i] = rr[i] = (int16_t)((int)((rng >> 8) % 65535) - 32767);
+                    }
+                    else
+                        l[i] = rr[i] = (int16_t)((src == 0 ? 8000 : (src == 1 ? 20000 : 32000)) * sin(2.0 * 3.14159265358979 * 80.0 * n / 44100.0));
+                }
+                r->process(l, rr, 128);
+                for (int i = 0; i < 128; i++)
+                {
+                    long ay = labs(l[i]);
+                    peak = ay > peak ? ay : peak;
+                    railHits += (l[i] >= 32767 || l[i] <= -32768 || rr[i] >= 32767 || rr[i] <= -32768);
+                    if (src != 3 && (ay > 26000 || labs((long)prev) > 26000) && labs(l[i] - prev) > nearStep)
+                        nearStep = labs(l[i] - prev);
+                    prev = l[i];
+                }
+            }
+            printf("  ring 95%% shimmer %d src %d: peak %ld rail hits %ld near-rail step %ld\n", shim, src, peak, railHits, nearStep);
+            CHECK(railHits == 0);
+            if (src != 3)
+                CHECK(nearStep < 6000);
+        }
+    delete r;
+}
+
+// the sidecar, version 2 (plan 010): shimmer and the track selection; a version 1 file loads with the defaults
+static void test_sidecar_v2()
+{
+    CHECK(kVersion == 2);
+    Params q;
+    q.bw = 20;
+    q.hp = 88; // above the old top
+    q.type = RT_PLINKY;
+    q.shim = shimmerFromPercent(80);
+    q.sel = 0x8005;
+    uint8_t buf[64];
+    size_t n = q.save(buf, sizeof(buf));
+    CHECK(n == (size_t)kFileMax && buf[4] == 2);
+    Params r;
+    CHECK(r.load(buf, n) && r == q && r.hasSel && r.hp == 88 && r.shim == q.shim && r.sel == 0x8005);
+    CHECK(q.hash() != Params().hash());
+    Params s = q;
+    s.sel = 0x0005;
+    CHECK(s.hash() != q.hash() && !(s == q));
+    Params d;
+    CHECK(d.isDefault() && d.shim == 32 && d.sel == 0);
+    d.shim = 40;
+    CHECK(!d.isDefault());
+    d = Params();
+    d.sel = 1;
+    CHECK(!d.isDefault());
+
+    // a version 1 file (what v0.2.x wrote: zeros after the first three bytes): defaults for the new fields, hasSel false
+    uint8_t pl[8] = { 18, 60, RT_PLINKY, 0, 0, 0, 0, 0 };
+    uint8_t old[64];
+    size_t on = seqsidecar::frameWrite(old, sizeof(old), kMagic, 1, pl, 8);
+    Params o;
+    o.shim = 99;
+    o.sel = 77;
+    CHECK(o.load(old, on) && o.bw == 18 && o.hp == 60 && o.type == RT_PLINKY);
+    CHECK(o.shim == kShimmerDefaultRaw && o.sel == 0 && !o.hasSel);
+    // an old file with hp values up to the old top 72 stays valid, and so does the new top; beyond is the off default
+    pl[1] = 72;
+    on = seqsidecar::frameWrite(old, sizeof(old), kMagic, 1, pl, 8);
+    CHECK(o.load(old, on) && o.hp == 72);
+    pl[1] = kHpMax;
+    on = seqsidecar::frameWrite(old, sizeof(old), kMagic, 2, pl, 8);
+    CHECK(o.load(old, on) && o.hp == kHpMax);
+    pl[1] = kHpMax + 1;
+    on = seqsidecar::frameWrite(old, sizeof(old), kMagic, 2, pl, 8);
+    CHECK(o.load(old, on) && o.hp == 0);
+    // a shimmer byte out of range falls back to the default
+    pl[1] = 0;
+    pl[3] = 200;
+    on = seqsidecar::frameWrite(old, sizeof(old), kMagic, 2, pl, 8);
+    CHECK(o.load(old, on) && o.shim == kShimmerDefaultRaw && o.hasSel);
+}
+
+// the track selection rules (plan 010 A5)
+static void test_track_selection()
+{
+    uint8_t st[16] = { 0 };
+    st[0] = st[2] = st[15] = 1;
+    CHECK(selFromStates(st, 16) == 0x8005);
+    CHECK(selFromStates(st, 8) == 0x0005); // a smaller engine array
+    uint8_t back[16];
+    selToStates(0x8005, back, 16);
+    CHECK(memcmp(st, back, 16) == 0);
+    // a turn-off clears the engine's states: the stored mask puts them back (what Stop / leaving / project load do)
+    memset(st, 0, sizeof(st));
+    selToStates(0x8005, st, 16);
+    CHECK(selFromStates(st, 16) == 0x8005);
+    // project load: the first file after power-on supplies the selection, later loads keep it
+    bool known = false;
+    CHECK(selAfterLoad(&known, 0, false, 0) == 0 && !known);        // no file yet: nothing known
+    CHECK(selAfterLoad(&known, 0, true, 0x0030) == 0x0030 && known); // first file read: persisted selection adopted
+    CHECK(selAfterLoad(&known, 0x0030, true, 0x0001) == 0x0030);    // another project's file: the user's selection stays
+    CHECK(selAfterLoad(&known, 0x0030, false, 0) == 0x0030);        // a project without the file: stays
+    bool user = false; // the user toggled a track before any file: also known
+    user = true;
+    CHECK(selAfterLoad(&user, 0x0002, true, 0x00F0) == 0x0002);
+    // an empty selection is a valid user setting and is kept as well
+    known = true;
+    CHECK(selAfterLoad(&known, 0, true, 0x00F0) == 0);
+}
+
 int main()
 {
+    test_track_selection();
+    test_soft_sat();
+    test_stock_reverb_loud();
+    test_shimmer_mapping();
+    test_ring_shimmer();
+    test_ring_loud_95();
+    test_sidecar_v2();
     test_bandpass_width();
     test_caps_and_soft_limit();
     test_highpass();

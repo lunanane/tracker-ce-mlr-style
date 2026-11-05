@@ -414,6 +414,9 @@ void audioEngine::connectVoiceToMixer(AudioVoice* voice, MixerAndFxs<kVoices>* m
 }
 #endif
 
+// The line-in gates are always connected to the pre-FX mixers (even with nothing plugged in): they keep the delay / reverb bus
+// clocked, so the FX blocks always receive an input block. (plan 010: the reverb and the limiter treat a missing block as silence
+// as well, so a tail never cuts off if this ever changes.)
 void audioEngine::connectInputToMixer(AudioInput* input, MixerAndFxs<kVoices>* mixerAndFxs)
 {
     constexpr int kLeftInputMixerChannel = 8;
@@ -1103,6 +1106,10 @@ void audioEngine::setDelayFilterWidth(uint8_t twelfthsOfAnOctave)
 void audioEngine::setReverbHighpass(uint8_t index)
 {
     polyverb->setHighpass(index);
+}
+void audioEngine::setReverbShimmer(uint8_t raw)
+{
+    polyverb->setShimmer(raw);
 }
 void audioEngine::setReverbType(uint8_t type)
 {

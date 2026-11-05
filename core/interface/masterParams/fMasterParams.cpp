@@ -5,6 +5,7 @@
 #include "mtSequencer.h"
 #include "seqLauncher.h"
 #include "seqFx.h"
+#include "seqHooks.h"
 
 #include "patternEditor/patternEditor.h"
 #include "performanceMode/performanceMode.h"
@@ -63,6 +64,7 @@ static void functSelectReverbDamp();
 static void functSelectReverbPredelay();
 static void functSelectReverbDiffusion();
 static void functSelectReverbType();
+static void functSelectReverbShimmer();
 static void functReverbLineIn();
 static void functReverbCancel();
 // limiter
@@ -538,6 +540,7 @@ static void functEncoder(int16_t value)
             case 3: MP->changeReverbDiffusion(value); break;
             case 4: MP->changeLineInReverbSend(value); break;
             case 5: MP->changeReverbType(value); break;
+            case 6: MP->changeReverbShimmer(value); break;
             default: break;
         }
     }
@@ -774,6 +777,7 @@ static void functUp()
             case 3: MP->changeReverbDiffusion(1); break;
             case 4: MP->changeLineInReverbSend(1); break;
             case 5: MP->changeReverbType(1); break;
+            case 6: MP->changeReverbShimmer(1); break;
             default: break;
         }
     }
@@ -879,6 +883,7 @@ static void functDown()
             case 3: MP->changeReverbDiffusion(-1); break;
             case 4: MP->changeLineInReverbSend(-1); break;
             case 5: MP->changeReverbType(-1); break;
+            case 6: MP->changeReverbShimmer(-1); break;
             default: break;
         }
     }
@@ -985,6 +990,7 @@ static void functDelete()
             case 3: MP->setDefaultReverbDiffusion(); break;
             case 4: MP->setDefaultLineInReverbSend(); break;
             case 5: MP->setDefaultReverbType(); break;
+            case 6: MP->setDefaultReverbShimmer(); break;
             default: break;
         }
     }
@@ -1110,7 +1116,7 @@ static void functSelectStereoBoost()
 
 static void functSwitchModule(uint8_t button)
 {
-    if (!performanceMode.canPerformanceModeContinueAfterSwitchingTo(button) && !seqSessionOwnsPerformance())
+    if (!performanceMode.canPerformanceModeContinueAfterSwitchingTo(button) && !seqSessionOwnsPerformance() && !seqFaderKept())
     {
         performanceMode.turnOffAtEndOfPattern();
     }
@@ -1292,6 +1298,7 @@ void cMasterParams::switchToReverbScreen()
     ip->setButtonObj(interfaceButton3, buttonPress, functSelectReverbDiffusion);
     ip->setButtonObj(interfaceButton4, buttonPress, functReverbLineIn);
     ip->setButtonObj(interfaceButton5, buttonPress, functSelectReverbType);
+    ip->setButtonObj(interfaceButton6, buttonPress, functSelectReverbShimmer);
     ip->setButtonObj(interfaceButton7, buttonPress, functReverbCancel);
 
     keyboardManager.deactivateKeyboard();
@@ -1461,6 +1468,14 @@ static void functSelectReverbDiffusion()
 static void functSelectReverbType()
 {
     MP->selectedPlaceReverb = 5;
+    MP->refreshReverbFrame();
+}
+
+static void functSelectReverbShimmer()
+{
+    if (seqFxReverbType() != seqfx::RT_PLINKY)
+        return;
+    MP->selectedPlaceReverb = 6;
     MP->refreshReverbFrame();
 }
 
@@ -2755,12 +2770,31 @@ void cMasterParams::changeReverbType(int16_t val)
     else if (val < 0)
         seqFxSetReverbType(seqfx::RT_STOCK);
     showReverbType();
+    showReverbSixth(); // item 7: Shimmer with the Plinky type, the CPU readout with Stock
+}
+
+// plan 010 A3: shimmer (Plinky type only), jog = 1 % per click, saved in seqfx.bin
+void cMasterParams::changeReverbShimmer(int16_t val)
+{
+    if (seqFxReverbType() != seqfx::RT_PLINKY)
+        return;
+    seqFxSetShimmer(seqfx::jogShimmer(seqFxShimmer(), val));
+    showReverbShimmer();
+}
+
+void cMasterParams::setDefaultReverbShimmer()
+{
+    if (seqFxReverbType() != seqfx::RT_PLINKY)
+        return;
+    seqFxSetShimmer(seqfx::kShimmerDefaultRaw);
+    showReverbShimmer();
 }
 
 void cMasterParams::setDefaultReverbType()
 {
     seqFxSetReverbType(seqfx::RT_STOCK);
     showReverbType();
+    showReverbSixth();
 }
 
 void cMasterParams::changeLineInReverbSend(int16_t val)

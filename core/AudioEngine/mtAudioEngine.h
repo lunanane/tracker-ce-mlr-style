@@ -92,6 +92,7 @@ class audioEngine
     // plan 007 (values of the mod sidecar seqfx.bin, see seqFxLogic.h)
     void setDelayFilterWidth(uint8_t twelfthsOfAnOctave);
     void setReverbHighpass(uint8_t index);
+    void setReverbShimmer(uint8_t raw); // plan 010 A3: Plinky ring shimmer 0 .. 127
     void setReverbType(uint8_t type);
     float getReverbCpuPercent();     // CPU of the reverb block in the audio interrupt, % of the block period (average)
     float getReverbCpuPeakPercent(); // ... and its slowly decaying peak

@@ -1,8 +1,9 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 // Alt Performance page: four 8-step pad faders (plans/004-perform-faders.md, plan 005 R3). Entered with Shift + the top-row
 // Performance button (from the stock page and from other modules); a Performance press leaves to the stock page.
-// Dialled-in FX are not saved with the project; they keep sounding when the page is left for the mod's own views (Pattern /
-// Play mode, Song / clip launcher, MLR) and end on DISENGAGE, UNLATCH or the Stop panic (seqPanicFx).
+// Dialled-in FX are not saved with the project; since v0.3 they keep sounding when the page is left for ANY other module and end on
+// DISENGAGE, UNLATCH or the Stop panic (seqPanicFx). The track selection is the user's last setting (seqFxTrackSel): Stop, disengage,
+// module switches, re-entry and project loads never clear it.
 #ifndef INTERFACE_SEQPERFORM_H_
 #define INTERFACE_SEQPERFORM_H_
 
@@ -33,7 +34,8 @@ class cSeqPerform : public ModuleBase
     bool shiftHeld();
     void flushSave();
     void projectLoaded();                 // a project was loaded: nothing of ours is dialled in any more
-    void endKeptStockRule();              // kept FX followed on to a page that does not keep them: stock rule
+    void saveSel();                       // plan 010 A5: the engine's track states -> the persistent selection (seqfx.bin)
+    void restoreSel();                    // plan 010 A5: the persistent selection -> the engine's track states (no FX is touched)
     void releaseAll();
     void releaseMomentary();
     void refreshScreen();

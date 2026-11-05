@@ -323,22 +323,24 @@ enum Dest : uint8_t
     DEST_STOCK_PERFORMANCE = 0, // Performance: back to the stock page (it takes over its own state)
     DEST_STOCK_KEEPS,           // Master / Params: stock keeps performance mode running through them
     DEST_SEQ_VIEWS,             // Pattern (Play mode) / Song (clip launcher, MLR): the mod's own views
-    DEST_OTHER                  // everything else
+    DEST_OTHER                  // everything else (v0.3: dialled-in FX stay engaged here as well)
 };
 enum Leave : uint8_t
 {
-    LEAVE_END = 0,     // stock rule: the fader FX end (at the pattern end while playing)
+    LEAVE_END = 0,     // nothing is dialled in: the stock turn-off of performance mode (the fader FX have nothing to keep)
     LEAVE_HAND_OVER,   // the target keeps the performance mode; the fader FX end, the stock page's own state stays
     LEAVE_KEEP_RUNNING // dialled-in FX keep sounding; only held pads end; disengage / unlatch / Stop end them later
 };
+// Plan 010 A4 (owner): dialled-in perform FX stay engaged on EVERY module switch. They end only by DISENGAGE, UNLATCH or the Stop
+// panic (and a project load, whose FX belong to the old project). The stock page is the one exception that is not a "switch away":
+// it takes the state over itself (LEAVE_HAND_OVER).
 inline Leave leaveFor(Dest d, bool anyEngaged)
 {
     switch (d)
     {
-        case DEST_STOCK_PERFORMANCE:
-        case DEST_STOCK_KEEPS: return LEAVE_HAND_OVER;
-        case DEST_SEQ_VIEWS: return anyEngaged ? LEAVE_KEEP_RUNNING : LEAVE_END;
-        default: return LEAVE_END;
+        case DEST_STOCK_PERFORMANCE: return LEAVE_HAND_OVER;
+        case DEST_STOCK_KEEPS: return anyEngaged ? LEAVE_KEEP_RUNNING : LEAVE_HAND_OVER;
+        default: return anyEngaged ? LEAVE_KEEP_RUNNING : LEAVE_END;
     }
 }
 

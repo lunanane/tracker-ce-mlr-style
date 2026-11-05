@@ -78,6 +78,23 @@ size_t Profiler::freeRamBytes()
     return mallinfo().fordblks;
 }
 
+// plan 010: the lowest free heap seen so far (device test: read it after a project open / save, a sample export, big file browser lists).
+// Called from the main loop; mallinfo() walks the free list, so it is sampled every 16th pass only.
+static size_t s_minFreeHeap = (size_t)-1;
+void Profiler::sampleHeap()
+{
+    static uint8_t divider = 0;
+    if ((++divider & 15) != 0)
+        return;
+    const size_t f = mallinfo().fordblks;
+    if (f < s_minFreeHeap)
+        s_minFreeHeap = f;
+}
+size_t Profiler::minFreeHeapBytes()
+{
+    return s_minFreeHeap == (size_t)-1 ? freeRamBytes() : s_minFreeHeap;
+}
+
 size_t Profiler::maxStackBytes()
 {
 #ifdef PLATFORM_IMX

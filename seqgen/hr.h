@@ -71,6 +71,7 @@ class HrScript : public SeqBase {
   virtual void pulse() = 0;                    // event_midi(248, ...): 24 PPQN clock pulse
   virtual void start() {}                      // start_playback
   virtual void stop() {}                       // stop_playback
+  virtual void transportStopped() {}           // the Tracker transport stopped (called after stop(), for every script; host-side state only)
   virtual bool followsTransport() const { return true; }  // FOLLOWS_TRANSPORT: the Tracker transport calls start() / stop()
   virtual void silence() { stop(); }           // the track changes type / is cleared: end everything this script sounds
   virtual void tick() {}                       // framework_tick (30 ms)

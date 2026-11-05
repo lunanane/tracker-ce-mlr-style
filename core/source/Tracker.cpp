@@ -23,7 +23,9 @@
 // clang-format off
 __attribute__((section(".sample_memory"), used)) int16_t externalRamSampleMemory[SAMPLE_MEMORY_SIZE / 2];
 __attribute__((section(".delay_memory"), used)) int16_t externalRamDelayBuff[DELAY_MEMORY_SIZE / 2];
+#ifdef PLATFORM_IMX // plan 010: only the Tracker Plus / Mini use it (second buffer of the stock reverb); the Original gave the 32 KB back
 __attribute__((section(".reverb_memory"), used)) uint16_t externalRamReverbBuff[REVERB_MEMORY_SIZE / 2];
+#endif
 __attribute__((section(".scratch_memory"), aligned(32), used)) uint8_t externalRamScratchBuff[SHARED_SCRATCH_MEMORY_SIZE];
 
 // clang-format on
@@ -170,6 +172,7 @@ void TrackerImpl::update()
     sequencer.update();
     seqTracksUpdate();
     seqSessionUpdate();
+    Profiler::getInstance()->sampleHeap(); // plan 010: lowest free heap (shown on the Config page)
 }
 
 void TrackerImpl::updateAudioBuffers(void* left, void* right, int length)

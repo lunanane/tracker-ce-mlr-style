@@ -323,10 +323,10 @@ static void test_plinky_sidecar()
     g->idleTick();
     uint8_t b2[Engine::kSidecarMax];
     size_t n2 = g->saveState(b2, sizeof(b2));
-    CHECK(n2 > 0 && b2[4] == Engine::kSidecarVersion);
+    CHECK(n2 > 0 && b2[4] == Engine::kSidecarVersionV1); // no track needs a trailer: version 1, as before
     CHECK(g->loadState(b2, n2) && g->type(1) == TYPE_CHORDARP);
-    // with a Plinky track the file is longer (the optional trailer) but keeps the version: old files and old loaders are not affected
-    CHECK(n > n2 && buf[4] == Engine::kSidecarVersion);
+    // with a Plinky track the file is longer (the optional trailer) and is version 2; files without a trailer stay version 1
+    CHECK(n > n2 && buf[4] == Engine::kSidecarVersion); // the PolySynth setup needs the trailer: version 2
     delete e; delete f; delete g;
 }
 

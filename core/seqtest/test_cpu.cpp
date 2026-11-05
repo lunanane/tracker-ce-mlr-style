@@ -64,6 +64,33 @@ static void testReverbSram()
     }
 }
 
+// ---- plan 010 A2: the soft saturation of the tank and the return is the identity below 5/8 of full scale: bit-identical to the old code
+// at the new 95 % size, with quiet and with moderate input (the loud cases above stay identical as well)
+static void testReverbBelowKnee()
+{
+    const float tp[3][4] = { { 0.95f, 0.2f, 0.8f, 0.0f }, { 0.95f, 0.5f, 1.0f, 0.5f }, { 0.9f, 0.05f, 0.6f, 0.25f } };
+    uint32_t seed = 4242; // own generator: the other tests' inputs (and so their results) do not depend on this one
+    auto rn = [&seed]() { seed = seed * 1664525u + 1013904223u; return seed >> 8; };
+    for (int k = 0; k < 3; k++)
+    {
+        const int blocks = 1200;
+        std::vector<int16_t> il(blocks * 128), ir(blocks * 128);
+        for (size_t i = 0; i < il.size(); i++)
+        {
+            il[i] = (int16_t)(2500.0 * sin(2.0 * 3.14159265358979 * 110.0 * i / 44100.0) + (int)(rn() % 801) - 400);
+            ir[i] = (int16_t)(1800.0 * sin(2.0 * 3.14159265358979 * 330.0 * i / 44100.0) + (int)(rn() % 801) - 400);
+        }
+        std::vector<int16_t> al = il, ar = ir, bl = il, br = ir;
+        ref_reverb_run(al.data(), ar.data(), blocks, tp[k][0], tp[k][1], tp[k][2], tp[k][3], false);
+        new_reverb_run(bl.data(), br.data(), blocks, tp[k][0], tp[k][1], tp[k][2], tp[k][3], false);
+        CHECK(al == bl && ar == br);
+        long peak = 0;
+        for (size_t i = 0; i < al.size(); i++)
+            peak = labs(al[i]) > peak ? labs(al[i]) : peak;
+        CHECK(peak > 1000 && peak < 20000); // really below the knee, and not silent
+    }
+}
+
 // ---- #7 idle skip: identical while there is signal, the skipped tail is below -76 dBFS ----
 static void testReverbIdleSkip()
 {
@@ -129,12 +156,14 @@ int main()
 {
     setvbuf(stdout, nullptr, _IONBF, 0);
     testReverbSram();
+    testReverbBelowKnee();
     testReverbIdleSkip();
     testDelay();
     testLimiter();
     testIdleVoices();
     testOutputStage();
     testRmsWatch();
+    testLimiterMissingBlock(); // plan 010 (last: it draws from the shared generator)
     printf("%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

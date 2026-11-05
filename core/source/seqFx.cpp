@@ -21,6 +21,7 @@ bool s_hadFile = false;          // a seqfx.bin was loaded or written for this p
 uint16_t s_savedHash = 0;        // hash of the values last written / loaded
 uint32_t s_loadedId = 0;         // project folder whose sidecar was loaded (valid or not)
 bool s_loadedValid = false;
+bool s_selKnown = false;         // the track selection was set by the user or read from a file this session: later project loads keep it
 bool s_newerFile = false;        // the loaded sidecar was written by a newer mod version: it is left alone (no downgrade, nothing written)
 
 const char kWorkspaceFile[] = "Workspace/seqfx.bin";
@@ -43,6 +44,29 @@ bool writeValues(const char* path)
 uint8_t seqFxBandwidth() { return s_params.bw; }
 uint8_t seqFxHighpass() { return s_params.hp; }
 uint8_t seqFxReverbType() { return s_params.type; }
+uint8_t seqFxShimmer() { return s_params.shim; }
+uint16_t seqFxTrackSel() { return s_params.sel; }
+
+void seqFxSetShimmer(uint8_t raw)
+{
+    raw = seqfx::clampShimmer(raw);
+    engine.setReverbShimmer(raw);
+    if (raw != s_params.shim)
+    {
+        s_params.shim = raw;
+        s_dirty.mark();
+    }
+}
+
+void seqFxSetTrackSel(uint16_t mask)
+{
+    s_selKnown = true;
+    if (mask != s_params.sel)
+    {
+        s_params.sel = mask;
+        s_dirty.mark();
+    }
+}
 
 void seqFxSetBandwidth(uint8_t twelfths)
 {
@@ -83,6 +107,7 @@ void seqFxApplyToEngine()
     engine.setDelayFilterWidth(s_params.bw);
     engine.setReverbHighpass(s_params.hp);
     engine.setReverbType(s_params.type);
+    engine.setReverbShimmer(s_params.shim);
     engine.setDelayFilterFrequency(mtProject.values.delayFilterFrequency); // the width is applied with the centre
 }
 
@@ -102,6 +127,7 @@ void seqFxUpdate()
 
 void seqFxLoadWorkspace()
 {
+    const uint16_t keptSel = s_params.sel;
     s_params = seqfx::Params();
     s_hadFile = false;
     s_loadedValid = false;
@@ -121,6 +147,9 @@ void seqFxLoadWorkspace()
     }
     s_loadedId = seqlogic::projectId(newFileManager.getCurrentProjectPath(), newFileManager.getCurrentProjectName());
     s_savedHash = s_params.hash();
+    // plan 010 A5: the track selection is a performance preference, not a project property. The first file read after power-on
+    // supplies it (persisted across sessions); once it is known (read, or set by the user) a project load keeps it.
+    s_params.sel = seqfx::selAfterLoad(&s_selKnown, keptSel, s_params.hasSel, s_params.sel);
     s_wsWritePending = false;
     s_dirty.dirty = false;
     seqFxApplyToEngine(); // a project without the file sounds exactly like before v0.2.4 (Stock, no highpass)

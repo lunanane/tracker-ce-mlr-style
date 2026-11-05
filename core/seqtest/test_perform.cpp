@@ -268,9 +268,12 @@ static void test_leave_rules()
     // owner decision: Pattern / Song (Play mode, clip launcher, MLR) keep dialled-in FX; nothing dialled in = stock rule
     CHECK(leaveFor(DEST_SEQ_VIEWS, true) == LEAVE_KEEP_RUNNING);
     CHECK(leaveFor(DEST_SEQ_VIEWS, false) == LEAVE_END);
-    CHECK(leaveFor(DEST_OTHER, true) == LEAVE_END && leaveFor(DEST_OTHER, false) == LEAVE_END);
+    // plan 010 A4 (owner): dialled-in FX stay engaged on EVERY module switch (these two lines were LEAVE_END / LEAVE_HAND_OVER before)
+    CHECK(leaveFor(DEST_OTHER, true) == LEAVE_KEEP_RUNNING && leaveFor(DEST_OTHER, false) == LEAVE_END);
     CHECK(leaveFor(DEST_STOCK_PERFORMANCE, true) == LEAVE_HAND_OVER && leaveFor(DEST_STOCK_PERFORMANCE, false) == LEAVE_HAND_OVER);
-    CHECK(leaveFor(DEST_STOCK_KEEPS, true) == LEAVE_HAND_OVER);
+    CHECK(leaveFor(DEST_STOCK_KEEPS, true) == LEAVE_KEEP_RUNNING && leaveFor(DEST_STOCK_KEEPS, false) == LEAVE_HAND_OVER);
+    for (int d = DEST_STOCK_KEEPS; d <= DEST_OTHER; d++)
+        CHECK(leaveFor((Dest)d, true) == LEAVE_KEEP_RUNNING); // no destination ends engaged FX
     // what keeps sounding on leave: latched rows and stock-latched rows; a row that only plays under a held pad does not
     State s;
     s.clear();

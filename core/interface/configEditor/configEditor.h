@@ -196,7 +196,7 @@ class cConfigEditor : public ModuleBase
 #endif
     char audioPerformanceText[30];
     char audioPerformanceText2[30];
-    char heapUsageText[30];
+    char heapUsageText[48];
     char stackUsageText[30];
     //----------------------------------
     // listy
