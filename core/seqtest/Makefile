@@ -7,8 +7,8 @@ HRSRC = ../../seqgen/hr.cpp ../../seqgen/hr_stab.cpp ../../seqgen/hr_arpseq.cpp 
 GLUE = ../source/seqTracksCore.cpp ../source/seqCut.cpp ../interface/seqSession/cutLayer.cpp
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
 
-.PHONY: test clean preview
-test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE) build/seq_plinky_tests$(EXE) build/seq_trace_tests$(EXE)
+.PHONY: test clean preview amp-preview
+test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE) build/seq_plinky_tests$(EXE) build/seq_trace_tests$(EXE) build/seq_amp_tests$(EXE)
 	build/seq_cpu_tests$(EXE)
 	build/seq_glue_tests$(EXE)
 	build/seq_perform_tests$(EXE)
@@ -17,6 +17,7 @@ test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tes
 	build/seq_fx_tests$(EXE)
 	build/seq_plinky_tests$(EXE)
 	build/seq_trace_tests$(EXE)
+	build/seq_amp_tests$(EXE)
 
 build/seq_glue_tests$(EXE): test_main.cpp test_session.cpp test_cut.inc ../source/seqSessionLogic.h ../source/seqClipsLogic.h ../source/seqCut.h ../source/seqCutLogic.h ../interface/seqSession/cutLayer.h ../interface/seqSession/cutSessionLayer.h ../interface/seqSession/laneDraw.h ../interface/seqSession/laneView.h ../source/seqTracksCore.h ../source/seqTracksLogic.h ../source/seqTracksRec.h ../source/seqRecLogic.h test_rec.inc test_hr.inc test_plinkyseq.inc ../source/seqPlinkySeqLogic.h ../source/seqPlinkyUiLogic.h $(GLUE) $(SEQ)
 	mkdir -p build
@@ -35,6 +36,13 @@ preview: build/seq_glue_tests$(EXE)
 	mkdir -p build/preview
 	SEQ_LANE_PREVIEW=build/preview build/seq_glue_tests$(EXE) > /dev/null
 	python lane_preview.py build/preview
+	$(MAKE) amp-preview
+
+# PNG previews of the amplitude view (plan 014 B; needs Pillow)
+amp-preview: build/seq_amp_tests$(EXE)
+	mkdir -p build/preview
+	SEQ_AMP_PREVIEW=build/preview build/seq_amp_tests$(EXE) > /dev/null
+	python amp_preview.py build/preview
 
 build/seq_play_tests$(EXE): test_play.cpp ../source/seqPlayLogic.h ../source/seqTracksLogic.h $(HRSRC)
 	mkdir -p build
@@ -50,9 +58,14 @@ build/seq_plinky_tests$(EXE): test_plinky.cpp ../libs/Audio/PlinkyVoice/plinky_v
 	$(CXX) $(CXXFLAGS) -O2 -I../libs/Audio/PlinkyVoice -I../libs/Audio test_plinky.cpp -o $@
 
 # plan 013: pitch trace (engine ring, follower, layout, display list size), amplitude view, launcher budgets
-build/seq_trace_tests$(EXE): test_trace.cpp ../libs/Audio/PlinkyVoice/plinky_voice.h ../source/seqPitchTraceLogic.h ../source/seqAmpViewLogic.h ../source/seqPalette.h ../source/seqSessionLogic.h
+build/seq_trace_tests$(EXE): test_trace.cpp ../libs/Audio/PlinkyVoice/plinky_voice.h ../source/seqPitchTraceLogic.h ../source/seqPalette.h ../source/seqSessionLogic.h
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -O2 -I../libs/Audio/PlinkyVoice test_trace.cpp -o $@
+
+# plan 014 B: amplitude view (dB table, bucket cascade, age -> x, per-track lanes, layout / display-list budget)
+build/seq_amp_tests$(EXE): test_amp.cpp ../source/seqAmpViewLogic.h ../source/seqPalette.h
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) -O2 test_amp.cpp -o $@
 
 clean:
 	rm -rf build

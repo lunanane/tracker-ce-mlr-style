@@ -41,6 +41,19 @@ inline uint32_t mix(uint32_t a, uint32_t b, int t)
 }
 // The same colour dimmed towards the background (the ADSR curve / quiet parts)
 inline uint32_t dim(uint32_t c) { return mix(c, kBg, 128); }
+// Fainter still (the peak lines of the amplitude view behind the level lines)
+inline uint32_t faint(uint32_t c) { return mix(c, kBg, 176); }
+
+// Line colour of track 0..15 (plan 014 B): tracks 1-4 the four key colours, 5-8 the same hues lightened towards white, 9-16 the
+// first eight dimmed towards the background
+inline uint32_t trackColor(int t)
+{
+    static const uint32_t key[4] = { kNote, kInstr, kFx1, kFx2 };
+    uint32_t c = key[t & 3];
+    if (t & 4) c = mix(c, 0xFFFFFF, 110);
+    if (t & 8) c = mix(c, kBg, 90);
+    return c;
+}
 } // namespace seqpal
 
 #endif
