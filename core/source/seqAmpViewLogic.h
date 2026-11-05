@@ -286,7 +286,7 @@ template <class C> void draw(C& c, const Follower& f, const char* title, const c
                 o[i * 2 + 1] = (int16_t)yOf(db);
             }
             const uint32_t col = ln == kTracks ? seqpal::kTitle : seqpal::trackColor(ln);
-            c.color(pass == 0 ? seqpal::dim(col) : col);
+            c.color(pass == 0 ? seqpal::faint(col) : col);
             c.width(pass == 0 ? 12 : (ln == kTracks ? 12 : 20));
             c.strip(o, nb);
         }

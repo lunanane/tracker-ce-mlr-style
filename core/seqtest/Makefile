@@ -7,7 +7,7 @@ HRSRC = ../../seqgen/hr.cpp ../../seqgen/hr_stab.cpp ../../seqgen/hr_arpseq.cpp 
 GLUE = ../source/seqTracksCore.cpp ../source/seqCut.cpp ../interface/seqSession/cutLayer.cpp
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
 
-.PHONY: test clean preview
+.PHONY: test clean preview amp-preview
 test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE) build/seq_plinky_tests$(EXE) build/seq_trace_tests$(EXE) build/seq_amp_tests$(EXE)
 	build/seq_cpu_tests$(EXE)
 	build/seq_glue_tests$(EXE)
@@ -36,6 +36,13 @@ preview: build/seq_glue_tests$(EXE)
 	mkdir -p build/preview
 	SEQ_LANE_PREVIEW=build/preview build/seq_glue_tests$(EXE) > /dev/null
 	python lane_preview.py build/preview
+	$(MAKE) amp-preview
+
+# PNG previews of the amplitude view (plan 014 B; needs Pillow)
+amp-preview: build/seq_amp_tests$(EXE)
+	mkdir -p build/preview
+	SEQ_AMP_PREVIEW=build/preview build/seq_amp_tests$(EXE) > /dev/null
+	python amp_preview.py build/preview
 
 build/seq_play_tests$(EXE): test_play.cpp ../source/seqPlayLogic.h ../source/seqTracksLogic.h $(HRSRC)
 	mkdir -p build

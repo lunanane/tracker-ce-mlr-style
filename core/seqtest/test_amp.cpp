@@ -312,8 +312,8 @@ static void test_layout_and_budget()
         xok = xok && c.stripX[s].back() == kX1;
     }
     CHECK(xok);
-    CHECK(c.stripColor[0] == seqpal::dim(seqpal::trackColor(0))); // pass 0: the dim peak lines in track order
-    CHECK(c.stripColor[7] == seqpal::dim(seqpal::trackColor(7)));
+    CHECK(c.stripColor[0] == seqpal::faint(seqpal::trackColor(0))); // pass 0: the dim peak lines in track order
+    CHECK(c.stripColor[7] == seqpal::faint(seqpal::trackColor(7)));
     CHECK(c.stripColor[8] == seqpal::trackColor(0) && c.stripColor[15] == seqpal::trackColor(7));
     CHECK(c.stripColor[16] == seqpal::kTitle);
     CHECK(c.stripWidth[16] <= c.stripWidth[8]); // the master thinner
@@ -349,8 +349,95 @@ static void test_layout_and_budget()
     CHECK(o.stripY[1].back() > o.stripY[1].front()); // newest (right) is lower than the old loud part
 }
 
+// `make preview`: dump the draw ops of three scenes for amp_preview.py (SEQ_AMP_PREVIEW=<dir>)
+struct DumpCtx
+{
+    FILE* f;
+    void color(uint32_t rgb) { fprintf(f, "C %06X\n", (unsigned)rgb); }
+    void width(int w) { fprintf(f, "W %d\n", w); }
+    void rect(int x0, int y0, int x1, int y1) { fprintf(f, "R %d %d %d %d\n", x0, y0, x1, y1); }
+    void lines(const int16_t* s, int n)
+    {
+        fprintf(f, "L");
+        for (int i = 0; i < n * 4; i++) fprintf(f, " %d", s[i]);
+        fprintf(f, "\n");
+    }
+    void strip(const int16_t* xy, int n)
+    {
+        fprintf(f, "S");
+        for (int i = 0; i < n * 2; i++) fprintf(f, " %d", xy[i]);
+        fprintf(f, "\n");
+    }
+    void textPhase() {}
+    void text(int x, int y, int font, int opt, const char* s) { fprintf(f, "T %d %d %d %d %s\n", x, y, font, opt, s); }
+    void finish() {}
+};
+
+static void dumpScene(const char* dir, const char* name, const Follower& fl)
+{
+    char path[512];
+    snprintf(path, sizeof path, "%s/%s.ops", dir, name);
+    DumpCtx c;
+    c.f = fopen(path, "w");
+    if (!c.f) return;
+    ampview::draw(c, fl, "Track levels, dB", "Amp view: close");
+    fclose(c.f);
+}
+
+static void dumpPreviews(const char* dir)
+{
+    // 8 tracks, different rhythms (track t: a hit every (t + 2) * 250 ms with a decay), 130 s: quiet for 40 s, normal until 90 s, a loud drop after
+    Follower busy;
+    busy.due(0);
+    for (int n = 0; n < 3250; n++)
+    {
+        const double sec = n * 0.04;
+        const double gain = sec < 40 ? 0.06 : (sec < 90 ? 0.35 : 0.95);
+        uint16_t lv[kLanes];
+        double mix = 0;
+        for (int t = 0; t < kTracks; t++)
+        {
+            const double period = (t + 2) * 0.25;
+            const double ph = fmod(sec, period) / period;
+            const double env = exp(-ph * (3.0 + t)) * (0.55 + 0.04 * t);
+            double v = gain * env * 32768.0 * (sec < 20 && t > 3 ? 0.0 : 1.0); // tracks 5-8 come in at 20 s
+            lv[t] = (uint16_t)(v < 0 ? 0 : (v > 32768 ? 32768 : v));
+            mix += v;
+        }
+        lv[kTracks] = (uint16_t)(mix * 0.5 > 32768 ? 32768 : mix * 0.5);
+        busy.push(40 * (n + 1), lv);
+    }
+    busy.info.playing = 1; busy.info.pattern = 12; busy.info.pos = 33; busy.info.len = 64; busy.info.bpm10 = 1275;
+    dumpScene(dir, "amp1_eight_tracks", busy);
+
+    Follower quiet;
+    quiet.due(0);
+    uint16_t z[kLanes] = { 0 };
+    for (int n = 0; n < 500; n++) quiet.push(40 * (n + 1), z);
+    quiet.info.pattern = 1; quiet.info.bpm10 = 1200;
+    dumpScene(dir, "amp2_silence", quiet);
+
+    Follower one;
+    one.due(0);
+    for (int n = 0; n < 1500; n++)
+    {
+        uint16_t v[kLanes] = { 0 };
+        const double sec = n * 0.04;
+        v[2] = (uint16_t)(32768 * pow(10.0, -(fmod(sec, 2.0)) * 0.9) * (sec < 30 ? 0.5 : 1.0));
+        v[kTracks] = v[2];
+        one.push(40 * (n + 1), v);
+    }
+    one.info.playing = 1; one.info.pattern = 3; one.info.pos = 5; one.info.len = 16; one.info.bpm10 = 900;
+    dumpScene(dir, "amp3_one_track", one);
+}
+
 int main()
 {
+    if (const char* dir = getenv("SEQ_AMP_PREVIEW"))
+    {
+        dumpPreviews(dir);
+        return 0;
+    }
     printf("amp view (plan 014 B)\n");
     test_db_table();
     test_cascade();
