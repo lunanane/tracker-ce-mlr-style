@@ -154,12 +154,12 @@ static_assert(sizeof(kHrShort) / sizeof(kHrShort[0]) == seqlogic::kHrScripts && 
 inline const char* typeShort(uint8_t type)
 {
     if (seqlogic::isHrType(type)) return kHrShort[type - seqlogic::TYPE_HR_FIRST];
-    return type == seqlogic::TYPE_CHORDARP ? "CHRD" : type == seqlogic::TYPE_MONO ? "MONO" : type == seqlogic::TYPE_PLINKY ? "PLNK" : "---";
+    return type == seqlogic::TYPE_CHORDARP ? "CHRD" : type == seqlogic::TYPE_MONO ? "MONO" : type == seqlogic::TYPE_PLINKY ? "POLY" : "---";
 }
 inline const char* typeName(uint8_t type)
 {
     if (seqlogic::isHrType(type)) return kHrName[type - seqlogic::TYPE_HR_FIRST];
-    return type == seqlogic::TYPE_CHORDARP ? "Chord/Arp" : type == seqlogic::TYPE_MONO ? "Mono" : type == seqlogic::TYPE_PLINKY ? "Plinky" : "Off";
+    return type == seqlogic::TYPE_CHORDARP ? "Chord/Arp" : type == seqlogic::TYPE_MONO ? "Mono" : type == seqlogic::TYPE_PLINKY ? "PolySynth" : "Off";
 }
 
 // line 1: "6 MONO*"; the selected track in brackets: "[6 MONO*]"
@@ -502,7 +502,7 @@ inline const char* legendCaption(uint8_t type)
     if (seqlogic::isHrType(type)) return typeName(type);
     if (type == seqlogic::TYPE_CHORDARP) return "CHORD/ARP";
     if (type == seqlogic::TYPE_MONO) return "MONO";
-    if (type == seqlogic::TYPE_PLINKY) return "PLINKY";
+    if (type == seqlogic::TYPE_PLINKY) return "POLYSYNTH";
     return "";
 }
 
@@ -526,7 +526,7 @@ inline void legendTitle(const LegendState& st, char* out, size_t n)
     else if (st.type == seqlogic::TYPE_PLINKY)
     {
         static const char* const kPc[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-        snprintf(out, n, "PLINKY   %s   %s %s   Octave %d   Strings +%d degrees", st.plMenu ? "Setup" : "Notes", kPc[st.pl.root % 12],
+        snprintf(out, n, "POLYSYNTH   %s   %s %s   Octave %d   Strings +%d degrees", st.plMenu ? "Setup" : "Notes", kPc[st.pl.root % 12],
                  seqplinky::scaleDef(st.pl.scale).name, (int)st.pl.octave, (int)st.pl.interval);
     }
     else if (seqlogic::isHrType(st.type) && st.hr)

@@ -251,10 +251,10 @@ class audioEngine
     AudioPlaySdWav playerWavFromSD;
     AudioSynthWaveform testWaveform;
     AudioPlayMemory metronomeTick;
-    MixerAndFxs<kVoices> mixerAndFxs;
 #ifdef FEATURE_PLINKY
-    AudioSynthPlinky plinky;
+    AudioSynthPlinky plinky; // declared (so constructed, so updated) before the mixers it feeds: no extra block of latency
 #endif
+    MixerAndFxs<kVoices> mixerAndFxs;
 
 #ifdef FEATURE_SYNTH
     SynthVoice synthVoice;

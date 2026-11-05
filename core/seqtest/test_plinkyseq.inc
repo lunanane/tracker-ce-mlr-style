@@ -130,11 +130,11 @@ static void test_plinky_pad_map()
     for (int sc = 0; sc < kScales; sc++) CHECK(strlen(scaleDef((uint8_t)sc).shortName) <= 6);
     char title[96];
     seqplay::legendTitle(st, title, sizeof title);
-    CHECK(strstr(title, "PLINKY") && strstr(title, "Minor") && strlen(seqplay::legendHelp(st)) <= 88);
+    CHECK(strstr(title, "POLYSYNTH") && strstr(title, "Minor") && strlen(seqplay::legendHelp(st)) <= 88);
     st.plMenu = 0;
     CHECK(strlen(seqplay::legendHelp(st)) <= 88);
     // strip texts and the type name
-    CHECK(strcmp(seqplay::typeName(seqlogic::TYPE_PLINKY), "Plinky") == 0 && strcmp(seqplay::typeShort(seqlogic::TYPE_PLINKY), "PLNK") == 0);
+    CHECK(strcmp(seqplay::typeName(seqlogic::TYPE_PLINKY), "PolySynth") == 0 && strcmp(seqplay::typeShort(seqlogic::TYPE_PLINKY), "POLY") == 0);
     CHECK(!seqlogic::isHrType(seqlogic::TYPE_PLINKY) && seqlogic::TYPE_PLINKY == seqlogic::TYPE_HR_FIRST + seqlogic::kHrScripts &&
           seqlogic::TYPE_COUNT == seqlogic::TYPE_PLINKY + 1);
     seqplay::StripCell cell;
@@ -142,7 +142,7 @@ static void test_plinky_pad_map()
     char l1[16], l2[16];
     seqplay::stripLine1(l1, sizeof l1, cell);
     seqplay::stripLine2(l2, sizeof l2, cell);
-    CHECK(strcmp(l1, "1 PLNK") == 0 && strcmp(l2, "voice") == 0);
+    CHECK(strcmp(l1, "1 POLY") == 0 && strcmp(l2, "voice") == 0);
     cell.takenOver = true;
     seqplay::stripLine2(l2, sizeof l2, cell);
     CHECK(strcmp(l2, "live") == 0);
@@ -423,7 +423,7 @@ static void test_plinky_overlay_draw_budget()
     m = Model();
     PlCtx z;
     draw(z, m, pal);
-    printf("  Plinky overlay display list: worst %d bytes, empty bars %d bytes, %d rects, %d texts\n", worst, z.bytes(), z.rects, z.texts);
+    printf("  PolySynth overlay display list: worst %d bytes, empty bars %d bytes, %d rects, %d texts\n", worst, z.bytes(), z.rects, z.texts);
     // the frame holds the pattern editor under the overlay as well: the overlay keeps to a share of the 8172 bytes
     CHECK(worst <= 3600);
     // cells and rows do not overlap and fit: 6 cells in the widest row

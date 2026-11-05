@@ -10,6 +10,8 @@
 #include "fileManager.h"
 #include "fileManagerDefs.h"
 #include "config.h"
+#include "mtConfig.h"
+#include "mtMidi.h"
 
 extern Sequencer sequencer;
 extern strMtProject mtProject;
@@ -64,10 +66,12 @@ bool seqPlinkyNote(uint8_t channel, uint8_t note, uint8_t velo, bool on)
 {
     if (eng().param(P_CHANNEL) != channel)
         return false;
-    if (on)
-        eng().noteOn(note, velo ? velo : 1);
-    else
-        eng().noteOff(note);
+    // the same "middle C" shift the MIDI outputs get (sendMidiNoteOn), so the voice plays what an external synth would
+    int n = note + 12 * (2 - (int)mtConfig.midi.middleC);
+    n = n < 0 ? 0 : (n > 127 ? 127 : n);
+    if (on && velo > 0)
+        return eng().noteOn((uint8_t)n, velo); // false: the event queue was full, the note is not played (the caller sends it on)
+    eng().noteOff((uint8_t)n); // velocity 0 is a note-off; a release never gets lost (remembered when the queue is full)
     return true;
 }
 
@@ -118,6 +122,8 @@ int seqPlinkyGet(int param)
 void seqPlinkySet(int param, int value)
 {
     const uint8_t before = eng().param(param);
+    if (param == P_CHANNEL && clampParam(P_CHANNEL, value) != before && clampParam(P_CHANNEL, value) != 0)
+        sendCC(123, 0, clampParam(P_CHANNEL, value), false); // the notes still sounding on the MIDI outputs of the new voice channel end first
     eng().setParam(param, value);
     if (eng().param(param) != before)
     {
@@ -138,8 +144,20 @@ float seqPlinkyCpu() { return engine.getPlinkyCpuPercent(); }
 float seqPlinkyCpuPeak() { return engine.getPlinkyCpuPeakPercent(); }
 int seqPlinkyVoicesActive() { return eng().activeVoices(); }
 
+bool seqPlinkyNewerFile() { return s_newerFile; }
+
 void seqPlinkyUpdate()
 {
+    {   // CC 91 / 93 change the effective sends in the audio context: the mixer gains follow here (main loop)
+        static int lastRev = -1, lastDly = -1;
+        const int rev = eng().effective(P_REVERB), dly = eng().effective(P_DELAY);
+        if (rev != lastRev || dly != lastDly)
+        {
+            lastRev = rev;
+            lastDly = dly;
+            engine.applyPlinkySends();
+        }
+    }
     // never ask for a write while the transport plays: the dirty flag waits for the stop
     if (!s_newerFile && !s_wsWritePending && s_dirty.take(sequencer.isPlay()))
     {

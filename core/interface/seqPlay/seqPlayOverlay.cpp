@@ -219,7 +219,7 @@ void SeqPlayOverlay::closeList(bool apply)
         if (type == seqlogic::TYPE_PLINKY && seqEngine.plinkyOwner() != 0xFF && seqEngine.plinkyOwner() != track)
         {
             // one voice: the track that has it keeps it (the refusal is shown on the track that asked)
-            snprintf(ownerMsg_, sizeof(ownerMsg_), "Plinky: T%d", seqEngine.plinkyOwner() + 1);
+            snprintf(ownerMsg_, sizeof(ownerMsg_), "voice on T%d", seqEngine.plinkyOwner() + 1);
             setMessage(ownerMsg_);
         }
         else if (type >= 0)
@@ -471,7 +471,7 @@ void SeqPlayOverlay::plinkyToggle()
         legend_.screenButton(); // no Shift legend over it
     }
     else
-        setMessage("not Plinky");
+        setMessage("not a synth");
 }
 
 void SeqPlayOverlay::plinkyNav(uint8_t button)
@@ -615,6 +615,7 @@ void SeqPlayOverlay::refreshView()
         m.channel = (uint8_t)seqPlinkyGet(plinkyvoice::P_CHANNEL);
         m.cpu = (uint8_t)(seqPlinkyCpu() + 0.5f);
         m.peak = (uint8_t)(seqPlinkyCpuPeak() + 0.5f);
+        m.newer = seqPlinkyNewerFile() ? 1 : 0;
 #endif
     }
     else if (active_ && list_.open)

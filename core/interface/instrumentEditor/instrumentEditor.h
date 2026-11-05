@@ -386,7 +386,7 @@ class cInstrumentEditor : public ModuleBase
     uint8_t plinkyPage = 1;                           // 1 .. 3
     uint32_t plinkyLastMs = 0;
     char plinkyVal[8][12];
-    char plinkyTitle[32];
+    char plinkyTitle[64];
 #endif
 
     void showParamsVelocity();

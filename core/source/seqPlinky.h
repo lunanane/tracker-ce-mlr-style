@@ -17,6 +17,7 @@ void seqPanicPlinky();                                   // transport Stop: all 
 // set already is kept. Returns the MIDI instrument index the type plays through (the voice channel), or -1 while the voice is off.
 void seqPlinkyClaim();
 int seqPlinkyInstrument(); // any context
+bool seqPlinkyNewerFile(); // plinky.bin was written by a newer mod version: edits are not saved
 
 // ---- values (main loop) ----
 int seqPlinkyGet(int param);

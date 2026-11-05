@@ -1113,8 +1113,8 @@ void audioEngine::setReverbType(uint8_t type)
 void audioEngine::applyPlinkySends()
 {
     typedef MixerAndFxs<kVoices> M;
-    const float rev = 0.5f * (float)plinky.engine().param(plinkyvoice::P_REVERB) * 0.01f;
-    const float dly = 0.5f * (float)plinky.engine().param(plinkyvoice::P_DELAY) * 0.01f;
+    const float rev = 0.5f * (float)plinky.engine().effective(plinkyvoice::P_REVERB) * 0.01f; // effective: MIDI CC 91 / 93 move the sends too
+    const float dly = 0.5f * (float)plinky.engine().effective(plinkyvoice::P_DELAY) * 0.01f;
     mixerAndFxs.getPreFxMixer(M::kReverb)->gain(M::kPlinkySendChannel, rev);
     mixerAndFxs.getPreFxMixer(M::kReverb)->gain(M::kPlinkySendChannel + 1, rev);
     mixerAndFxs.getPreFxMixer(M::kDelay)->gain(M::kPlinkySendChannel, dly);
