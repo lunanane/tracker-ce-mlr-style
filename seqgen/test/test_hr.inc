@@ -625,3 +625,39 @@ TEST(hr_legend_words_fit_the_cells_and_describe_every_script) {
     CHECK(words >= 24);
   }
 }
+
+// ======================= Euclid helper (m3: iterative, bit-exact with the recursive original) =======================
+namespace {
+struct RefBj {  // the original recursive form of pad_script._bjorklund
+  uint8_t counts[40], rem[40]; uint8_t* out; int n;
+  void build(int lvl) {
+    if (lvl == 0) out[n++] = 0;
+    else if (lvl == -1) out[n++] = 1;
+    else { for (int i = 0; i < counts[lvl]; ++i) build(lvl - 1); if (rem[lvl] != 0) build(lvl - 2); }
+  }
+};
+void refEuclid(int k, int n, uint8_t* out) {
+  if (k <= 0) { for (int i = 0; i < n; ++i) out[i] = 0; return; }
+  if (k >= n) { for (int i = 0; i < n; ++i) out[i] = 1; return; }
+  RefBj b; uint8_t raw[128]; b.out = raw; b.n = 0;
+  for (int i = 0; i < 40; ++i) b.counts[i] = b.rem[i] = 0;
+  b.rem[1] = (uint8_t)k;
+  int divisor = n - k, level = 1;
+  while (b.rem[level] > 1) { b.counts[level] = (uint8_t)(divisor / b.rem[level]); b.rem[level + 1] = (uint8_t)(divisor % b.rem[level]); divisor = b.rem[level]; ++level; }
+  b.counts[level] = (uint8_t)divisor;
+  b.build(level);
+  int first = 0;
+  for (int i = 0; i < b.n; ++i) if (raw[i]) { first = i; break; }
+  for (int i = 0; i < n; ++i) out[i] = raw[(i + first) % b.n];
+}
+}  // namespace
+
+TEST(hr_euclid_helper_matches_the_recursive_original_for_every_k_and_n) {
+  for (int n = 1; n <= 64; ++n)
+    for (int k = -1; k <= n + 1; ++k) {
+      uint8_t a[128], b[128];
+      hrEuclid(k, n, a);
+      refEuclid(k, n, b);
+      for (int i = 0; i < n; ++i) CHECK_EQ(a[i], b[i]);
+    }
+}

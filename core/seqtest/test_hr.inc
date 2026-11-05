@@ -72,6 +72,138 @@ static void test_hr_clock_runs_only_while_the_transport_plays()
     delete e;
 }
 
+static void padHold(Engine& e, uint8_t track, int col, int row, bool down)
+{
+    e.applyPad(track, (uint8_t)(row * 12 + col), down);
+}
+
+// M1: the arranger of the HYPER_RASP chord_arp (not a FOLLOWS_TRANSPORT script) plays a chord; the transport Stop ends it
+static void test_hr_arranger_chord_ends_on_transport_stop()
+{
+    MockHost h;
+    Engine* e = mk(h);
+    e->applyType(3, kHrChordArpType);
+    e->hr(3)->setParam(seqgen::HrChordArp::P_LATCH, 0); // not latched: only the arranger sounds
+    pressPad(*e, 3, 0, 0);              // view 1: a root, released -> remembered as the last root
+    pressPad(*e, 3, 7, 3);              // function column row 4: view 4 (arranger)
+    pressPad(*e, 3, 0, 0);              // step 1 = the last root, chord, duration 1
+    int u = 1;
+    playUSteps(*e, 16, u);              // the transport plays
+    padHold(*e, 3, 7, 0, true);         // function column rows 1 + 2: tracker play
+    padHold(*e, 3, 7, 1, true);
+    padHold(*e, 3, 7, 1, false);
+    padHold(*e, 3, 7, 0, false);
+    CHECK(e->soundingCount(3) > 0 && e->takenOver(3)); // the arranger chord sounds
+    idle(*e, 10);                       // transport Stop
+    CHECK(e->soundingCount(3) == 0);
+    CHECK(h.count('+', 3) == h.count('-', 3));
+    CHECK(!e->takenOver(3));
+    // a second press of the combo starts the arranger again (the stop reset the host-running state)
+    u = 1;
+    playUSteps(*e, 16, u);
+    padHold(*e, 3, 7, 0, true);
+    padHold(*e, 3, 7, 1, true);
+    padHold(*e, 3, 7, 1, false);
+    padHold(*e, 3, 7, 0, false);
+    CHECK(e->soundingCount(3) > 0);
+    delete e;
+}
+
+// M2: Euclid Drums, Grid Seq, Bassline Seq, Step Follower must not take their track over (mute the pattern, clear a take) while the
+// transport runs but they have nothing to play
+static void test_hr_idle_script_does_not_take_over()
+{
+    const uint8_t types[4] = { (uint8_t)(TYPE_HR_FIRST + seqgen::HR_BASS), (uint8_t)(TYPE_HR_FIRST + seqgen::HR_EUCLID),
+                               (uint8_t)(TYPE_HR_FIRST + seqgen::HR_GRIDSEQ), (uint8_t)(TYPE_HR_FIRST + seqgen::HR_STEPFOLLOW) };
+    for (int k = 0; k < 4; k++)
+    {
+        MockHost h;
+        Engine* e = mk(h);
+        e->applyType(2, types[k]);
+        Head hd;
+        playRec(*e, h, hd, 48 * 4);
+        CHECK(!e->takenOver(2));                    // running transport, empty script
+        e->postRec(2, Engine::REC_PUNCH);
+        playRec(*e, h, hd, 48 * 6);
+        e->postRec(2, Engine::REC_STOP);
+        playRec(*e, h, hd, 48);
+        int clears = 0, notes = 0;
+        for (const seqrec::Op& o : drainOps(*e))
+        {
+            clears += o.kind == seqrec::OP_CLEAR;
+            notes += o.kind == seqrec::OP_NOTE;
+        }
+        CHECK(clears == 0 && notes == 0);           // the take left the pattern untouched
+        CHECK(!e->takenOver(2) && h.count('B', 2) == 0);
+        delete e;
+    }
+    // with something to play the track IS taken over (and the take then replaces the steps it passes)
+    {
+        MockHost h;
+        Engine* e = mk(h);
+        e->applyType(2, TYPE_HR_FIRST + seqgen::HR_GRIDSEQ);
+        pressPad(*e, 2, 0, 0); // step 1 of the first row
+        Head hd;
+        CHECK(!e->takenOver(2)); // transport not running yet
+        playRec(*e, h, hd, 48 * 4);
+        CHECK(e->takenOver(2));
+        e->postRec(2, Engine::REC_PUNCH);
+        playRec(*e, h, hd, 48 * 6);
+        e->postRec(2, Engine::REC_STOP);
+        playRec(*e, h, hd, 48);
+        int clears = 0;
+        for (const seqrec::Op& o : drainOps(*e))
+            clears += o.kind == seqrec::OP_CLEAR;
+        CHECK(clears > 0);
+        delete e;
+    }
+    // Bass: a held key is performing; Step Follower / Euclid: a set degree / a preset
+    {
+        MockHost h;
+        Engine* e = mk(h);
+        e->applyType(0, TYPE_HR_FIRST + seqgen::HR_BASS);
+        e->applyType(1, TYPE_HR_FIRST + seqgen::HR_EUCLID);
+        e->applyType(3, TYPE_HR_FIRST + seqgen::HR_STEPFOLLOW);
+        Head hd;
+        playRec(*e, h, hd, 48 * 2);
+        CHECK(!e->takenOver(0) && !e->takenOver(1) && !e->takenOver(3));
+        e->applyPad(0, 0, true);          // a scale key held
+        CHECK(e->takenOver(0));
+        e->applyPad(0, 0, false);
+        pressPad(*e, 1, 0, 3);            // Euclid row 4 ... a preset pad
+        pressPad(*e, 3, 0, 0);            // a degree of the step follower
+        playRec(*e, h, hd, 48 * 2);
+        CHECK(e->takenOver(1) || e->takenOver(3));
+        delete e;
+    }
+}
+
+// m2: a loaded key-lock Chord/Arp publishes its key to the followers; m1: the legend snapshot runs inside the critical section
+static void test_hr_load_publishes_key_lock_and_snapshot_is_protected()
+{
+    MockHost h;
+    Engine* a = mk(h);
+    a->applyType(5, kHrChordArpType);
+    a->hr(5)->setParam(seqgen::HrChordArp::P_KEYLOCK, 2);
+    a->hr(5)->setParam(seqgen::HrChordArp::P_KEY, 7); // G
+    uint8_t buf[Engine::kSidecarMax];
+    size_t n = a->saveState(buf, sizeof(buf));
+    MockHost h2;
+    Engine* b = mk(h2);
+    b->applyType(0, kArpType);
+    b->hr(0)->setParam(seqgen::HrStab::P_ROLE, 2); // follower
+    CHECK(b->hrBus().scale[0] != 7);
+    CHECK(b->loadState(buf, n) && b->type(5) == kHrChordArpType);
+    CHECK(b->hrBus().nScale == 7 && b->hrBus().scale[0] == 7); // G major, published at load
+    int enters = h2.critEnters;
+    struct Probe { int calls; bool has; } pr = { 0, false };
+    b->withHr(5, [](const seqgen::HrScript* s, void* u) { static_cast<Probe*>(u)->calls++; static_cast<Probe*>(u)->has = s != 0; }, &pr);
+    CHECK(pr.calls == 1 && pr.has && h2.critEnters == enters + 1 && h2.critDepth == 0 && h2.tokenOk);
+    b->withHr(6, [](const seqgen::HrScript* s, void* u) { static_cast<Probe*>(u)->has = s != 0; }, &pr);
+    CHECK(!pr.has);
+    delete a; delete b;
+}
+
 static void test_hr_type_change_silences_and_releases()
 {
     MockHost h;
@@ -143,12 +275,14 @@ static void test_hr_sidecar_roundtrip_and_old_files()
     size_t n2 = b->saveState(buf2, sizeof(buf2));
     CHECK(n2 == n && memcmp(buf, buf2, n) == 0);
 
-    // a file without any HR type has no trailer: exactly the layout of the earlier firmware (16 records of type + two blocks)
+    // a file without any HR type has no trailer and is written as version 1: exactly what the earlier firmware (v0.2.5 and
+    // before) wrote and reads (16 records of type + two blocks)
     Engine* c = mk(h2);
     c->applyType(0, TYPE_MONO);
     c->applyType(3, TYPE_CHORDARP);
     uint8_t old[Engine::kSidecarMax];
     size_t on = c->saveState(old, sizeof(old));
+    CHECK(old[4] == Engine::kSidecarVersionV1 && buf[4] == Engine::kSidecarVersion); // v1 without HR track, v2 with
     size_t p = 8;
     for (int i = 0; i < kTracks; i++)
     {
@@ -160,6 +294,41 @@ static void test_hr_sidecar_roundtrip_and_old_files()
     // ... and it loads (it is what every file written before plan 008 D looks like)
     Engine* d = mk(h2);
     CHECK(d->loadState(old, on) && d->type(0) == TYPE_MONO && d->type(3) == TYPE_CHORDARP && d->hr(0) == 0);
+    // a REAL v1 frame (version byte 1, CRC recomputed over the changed header) loads with identical state
+    {
+        uint8_t v1[Engine::kSidecarMax];
+        memcpy(v1, old, on);
+        v1[4] = 1;
+        uint16_t cr = seqsidecar::crc16(v1, on - 2);
+        v1[on - 2] = (uint8_t)(cr & 0xFF);
+        v1[on - 1] = (uint8_t)(cr >> 8);
+        Engine* e1 = mk(h2);
+        CHECK(e1->loadState(v1, on) && e1->type(0) == TYPE_MONO && e1->type(3) == TYPE_CHORDARP && e1->type(1) == TYPE_OFF);
+        CHECK(e1->stateHash() == c->stateHash() && e1->stateHash() == d->stateHash());
+        uint8_t v1b[Engine::kSidecarMax];
+        CHECK(e1->saveState(v1b, sizeof(v1b)) == on && memcmp(v1b, v1, on) == 0); // loads and writes back version 1 unchanged
+        // the same payload tagged version 2 (no trailer) loads too
+        v1[4] = 2;
+        cr = seqsidecar::crc16(v1, on - 2);
+        v1[on - 2] = (uint8_t)(cr & 0xFF);
+        v1[on - 1] = (uint8_t)(cr >> 8);
+        Engine* e2 = mk(h2);
+        CHECK(e2->loadState(v1, on) && e2->stateHash() == c->stateHash());
+        // a version 3 frame is refused, nothing changed
+        v1[4] = 3;
+        cr = seqsidecar::crc16(v1, on - 2);
+        v1[on - 2] = (uint8_t)(cr & 0xFF);
+        v1[on - 1] = (uint8_t)(cr >> 8);
+        CHECK(!mk(h2)->loadState(v1, on));
+        // a frame with the HR trailer must not claim version 1
+        uint8_t hv[Engine::kSidecarMax];
+        memcpy(hv, buf, n);
+        hv[4] = 1;
+        cr = seqsidecar::crc16(hv, n - 2);
+        hv[n - 2] = (uint8_t)(cr & 0xFF);
+        hv[n - 1] = (uint8_t)(cr >> 8);
+        CHECK(!mk(h2)->loadState(hv, n));
+    }
 
     // a damaged HR block turns only that track Off
     uint8_t bad[Engine::kSidecarMax];

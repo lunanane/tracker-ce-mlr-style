@@ -24,7 +24,7 @@ class HrStepFollow : public HrScript {
   void start() override { startPlayback(); }
   void stop() override { stopPlayback(); }
   void silence() override { stopPlayback(); stopSounding(); }
-  bool live() const override { return playing_ || nSounding_ != 0; }
+  bool live() const override { return (playing_ && nLit_ != 0) || nSounding_ != 0; }  // running AND a degree set
   int getParam(int id) const override;
   void setParam(int id, int v) override;
   size_t serialize(uint8_t* buf, size_t cap) const override;

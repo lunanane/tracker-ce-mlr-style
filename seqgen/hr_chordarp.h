@@ -27,6 +27,7 @@ class HrChordArp : public HrScript {
   void pulse() override;
   void start() override { startPlayback(); }   // start_playback: the tracker (arranger) plays
   void stop() override { stopPlayback(); }     // stop_playback
+  void transportStopped() override { hostRunning_ = 0; }  // the Tracker transport stopped: the next 1+2 combo starts the arranger again
   bool followsTransport() const override { return false; }  // no FOLLOWS_TRANSPORT in chord_arp.lua: the tracker has its own play combo
   void silence() override;
   bool live() const override { return hasRoot_ || arpActive_ || nActive_ > 0 || playing_ || nPlayback_ > 0; }

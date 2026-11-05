@@ -139,7 +139,8 @@ void HrGridSeq::pulse() {
 }
 
 bool HrGridSeq::live() const {
-  if (playing_) return true;
+  if (playing_)  // running AND at least one step set
+    for (int r = 0; r < kRows; ++r) if (steps_[r]) return true;
   for (int r = 0; r < kRows; ++r) if (sounding_[r] >= 0) return true;
   return false;
 }

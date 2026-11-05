@@ -525,10 +525,17 @@ void SeqPlayOverlay::refreshView()
         else if (seqlogic::isHrType(view_.type))
         {
             // HYPER_RASP script: it reports its own legend (title, help, 12 x 4 cells)
-            if (const seqgen::HrScript* hs = seqEngine.hr(sel))
-                seqplay::fillHrSnap(view_.hr, *hs);
-            else
-                memset(&view_.hr, 0, sizeof(view_.hr));
+            // (inside the engine's critical section: a pending type change may rebuild the script in the audio interrupt)
+            seqEngine.withHr(
+                sel,
+                [](const seqgen::HrScript* hs, void* user) {
+                    seqplay::HrSnap& snap = *static_cast<seqplay::HrSnap*>(user);
+                    if (hs)
+                        seqplay::fillHrSnap(snap, *hs);
+                    else
+                        memset(&snap, 0, sizeof(snap));
+                },
+                &view_.hr);
         }
         else
         {

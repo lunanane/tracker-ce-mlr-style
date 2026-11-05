@@ -375,6 +375,14 @@ void Engine::startTrack(uint8_t track)
     }
 }
 
+void Engine::withHr(uint8_t t, void (*fn)(const seqgen::HrScript*, void*), void* user) const
+{
+    uint32_t cs = host_ ? host_->critEnter() : 0;
+    fn(hr(t), user);
+    if (host_)
+        host_->critExit(cs);
+}
+
 void Engine::applyPending()
 {
     for (int i = 0; i < kTracks; i++)
@@ -404,8 +412,12 @@ void Engine::setPlaying(bool p)
             epoch_++;
             if (t.type == TYPE_MONO)
                 t.mo.stop(); // Chord/Arp keeps running while stopped (free-running clock)
-            else if (isHrType(t.type) && t.hr.get() && t.hr.get()->followsTransport())
-                t.hr.get()->stop(); // HYPER_RASP scripts that follow the transport: stop_playback
+            else if (isHrType(t.type) && t.hr.get())
+            {
+                // every HYPER_RASP script: starting is selective (followsTransport), stopping is not (pad_script.py Transport._set_playback)
+                t.hr.get()->stop();
+                t.hr.get()->transportStopped();
+            }
             refresh((uint8_t)i);
         }
     }
@@ -714,7 +726,10 @@ size_t Engine::saveState(uint8_t* buf, size_t cap) const
     buf[1] = 'Q';
     buf[2] = 'T';
     buf[3] = 'R';
-    buf[4] = kSidecarVersion;
+    bool anyHr = false;
+    for (int i = 0; i < kTracks; i++)
+        anyHr = anyHr || isHrType(t_[i].type);
+    buf[4] = anyHr ? kSidecarVersion : kSidecarVersionV1;
     buf[5] = kTracks;
     size_t p = 8;
     for (int i = 0; i < kTracks; i++)
@@ -732,9 +747,6 @@ size_t Engine::saveState(uint8_t* buf, size_t cap) const
             host_->critExit(cs);
     }
     // trailer (only when a track runs a HYPER_RASP script): [lenHR, HR] per track
-    bool anyHr = false;
-    for (int i = 0; i < kTracks; i++)
-        anyHr = anyHr || isHrType(t_[i].type);
     if (anyHr)
         for (int i = 0; i < kTracks; i++)
         {
@@ -824,7 +836,7 @@ void Engine::resetState()
 
 bool Engine::loadState(const uint8_t* buf, size_t len)
 {
-    if (!buf || len < 10 || buf[0] != 'S' || buf[1] != 'Q' || buf[2] != 'T' || buf[3] != 'R' || buf[4] != kSidecarVersion ||
+    if (!buf || len < 10 || buf[0] != 'S' || buf[1] != 'Q' || buf[2] != 'T' || buf[3] != 'R' || (buf[4] != kSidecarVersionV1 && buf[4] != kSidecarVersion) ||
         buf[5] != kTracks)
         return false;
     size_t plen = (size_t)buf[6] | ((size_t)buf[7] << 8);
@@ -852,6 +864,8 @@ bool Engine::loadState(const uint8_t* buf, size_t len)
                 return false;
             p += n;
         }
+        if (p != end && buf[4] == kSidecarVersionV1) // version 1 has no trailer
+            return false;
         if (p != end) // an optional trailer: one [lenHR, HR] block per track
         {
             for (int i = 0; i < kTracks; i++)

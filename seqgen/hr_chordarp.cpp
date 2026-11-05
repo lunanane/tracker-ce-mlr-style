@@ -570,6 +570,7 @@ bool HrChordArp::deserialize(const uint8_t* b, size_t len) {
   published_ = 0;
   for (int i = 0; i < 8; ++i) steps_[i] = st[i];
   render();
+  publishKeyLock();  // followers get the key after a load
   return true;
 }
 
