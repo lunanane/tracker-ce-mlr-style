@@ -384,8 +384,15 @@ static void test_drop_on_leave_resume_panic_load()
     CHECK(k.pre[1][2] == 0 && k.preRate == 0 && !k.engaged(PAGE_REV, 3));
 }
 
+static void test_export_ends_fx()
+{
+    CHECK(!exportEndsFx(false, false));
+    CHECK(exportEndsFx(true, false) && exportEndsFx(false, true) && exportEndsFx(true, true));
+}
+
 int main()
 {
+    test_export_ends_fx();
     test_pad_map();
     test_bar();
     test_pages_and_slots();

@@ -9,6 +9,7 @@
 #include "mtPadBoard.h"
 #include "mtPadsBacklight.h"
 #include "mtSequencer.h"
+#include "seqHooks.h"
 
 #include "core/interfaceDefs.h"
 #include "core/interfaceMenuPopup.h"
@@ -1929,6 +1930,8 @@ void cPatternEditor::startExportSelection()
 
     keyboardManager.deactivateKeyboard();
 
+    if (seqEndPerformFxForExport()) // v0.3.1 M1: the export renders the pattern as written
+        mtPopups.show(0, "Perform FX ended for export");
     if (newFileManager.exportSoundRenderSelection(PTE->keyboardManager.getName()))
     {
         // PE->ip->setButtonObj(interfaceButton7, buttonPress, functExportCancel);

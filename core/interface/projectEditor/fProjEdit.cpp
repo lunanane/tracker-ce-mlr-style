@@ -1,4 +1,5 @@
 #include "mtSliceDetector.h"
+#include "seqHooks.h"
 #include <mtAudioExport.h>
 #include <mtRandomNameGenerator.h>
 
@@ -1383,6 +1384,8 @@ bool cProjectEditor::checkClockConfig(uint8_t source)
 
 void cProjectEditor::startExport(uint8_t source)
 {
+    if (seqEndPerformFxForExport()) // v0.3.1 M1: the export renders the song as written
+        mtPopups.show(0, "Perform FX ended for export");
     if (newFileManager.exportSound(source))
     {
         PE->ip->setButtonObj(interfaceButton7, buttonPress, functExportCancel);
