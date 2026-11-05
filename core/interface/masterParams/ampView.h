@@ -1,6 +1,6 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
-// Master amplitude view (plan 013 M): the one entry point of the Master page. A scrolling dB history of the final left / right output
-// (L above the centre line, R below), see seqAmpViewLogic.h.
+// Master amplitude view (plan 013 M, redesigned in plan 014 B): the one entry point of the Master page. A dB history of the 8 sample
+// tracks (their RMS meters) and the master (limiter peak tap) on an exponential time axis, see seqAmpViewLogic.h.
 //
 //   ampView.createControl();   // first thing in cMasterParams::initDisplayControls (lowest index = drawn on top)
 //   ampView.forget();          // cMasterParams::stop

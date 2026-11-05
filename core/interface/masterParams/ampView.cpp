@@ -1,11 +1,13 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
-// Master amplitude view (plan 013 M): feeds the follower with the block peaks of the final output, refreshes the control (ampView.h).
+// Master amplitude view (plan 013 M / 014 B): feeds the follower with the track levels and the master peak, refreshes the control (ampView.h).
 #include "masterParams/ampView.h"
 
 #include <string.h>
 
 #include "display.h"
 #include "mtAudioEngine.h"
+#include "mtSequencer.h"
+#include "mtStructs.h"
 #include "seqTracks.h"
 
 AmpView ampView;
@@ -58,7 +60,7 @@ void AmpView::toggle()
     follower_.reset();
     data_.kind = TraceViewData::AMP;
     data_.amp = &follower_;
-    strncpy(data_.title, "Master level, dB  (L above, R below)", sizeof(data_.title) - 1);
+    strncpy(data_.title, "Track levels, dB", sizeof(data_.title) - 1);
     data_.title[sizeof(data_.title) - 1] = 0;
     strncpy(data_.hint, "Amp view: close", sizeof(data_.hint) - 1);
     data_.hint[sizeof(data_.hint) - 1] = 0;
@@ -80,7 +82,20 @@ void AmpView::update(bool pageOk)
     const uint32_t now = seqNowMs();
     if (!follower_.due(now))
         return;
-    follower_.push(now, (uint16_t)engine.takeMasterPeak(0), (uint16_t)engine.takeMasterPeak(1));
+    // the 8 sample tracks: the RMS meters are lazy (armed by the first read, -1 until a block was measured; the read also empties them)
+    uint16_t lv[ampview::kLanes];
+    for (int t = 0; t < ampview::kTracks; t++)
+        lv[t] = ampview::levelOfRms(instrumentPlayer[t].getRMSValue());
+    const uint32_t pl = engine.takeMasterPeak(0), pr = engine.takeMasterPeak(1);
+    const uint32_t pm = pl > pr ? pl : pr;
+    lv[ampview::kTracks] = (uint16_t)(pm > 65535u ? 65535u : pm);
+    follower_.push(now, lv);
+    ampview::Info& in = follower_.info;
+    in.playing = sequencer.isPlay() ? 1 : 0;
+    in.pattern = (uint8_t)mtProject.values.actualPattern;
+    in.pos = (uint8_t)(sequencer.getActualPos() + 1);
+    in.len = (uint8_t)sequencer.getPatternLength();
+    in.bpm10 = (uint16_t)(sequencer.getCurrentTempo() * 10.0f + 0.5f);
     display.refreshControl(control_);
     display.synchronizeRefresh();
 }

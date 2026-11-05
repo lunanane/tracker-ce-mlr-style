@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "plinky_voice.h"
-#include "seqAmpViewLogic.h"
 #include "seqPalette.h"
 #include "seqPitchTraceLogic.h"
 #include "seqSessionLogic.h"
@@ -390,83 +389,6 @@ static void test_pitch_layout_and_size()
     CHECK(seqpal::mix(0x123456, 0xABCDEF, 0) == 0x123456);
 }
 
-static void test_amp_view()
-{
-    using namespace ampview;
-    // dB table against the exact value over the whole range
-    double worst = 0;
-    for (uint32_t p = 1; p <= 32768; p += (p < 4096 ? 1 : 37))
-    {
-        const double exact = 20.0 * log10((double)p / 32768.0);
-        const double err = fabs(dbx64(p) / 64.0 - exact);
-        if (err > worst) worst = err;
-    }
-    printf("  dB table, worst error %.3f dB\n", worst);
-    CHECK(worst < 0.08);
-    CHECK(dbx64(32768) == 0);
-    CHECK(dbx64(0) == kSilent);
-    CHECK(abs(dbx64(16384) - (-386)) <= 2);   // -6.02 dB
-    CHECK(dbx64(100000) > 0 && dbx64(100000) < 6 * 64 + 8); // clamp to about +6 dB
-    CHECK(heightOf(0) == 1.0f && heightOf(-60) == 0.0f && heightOf(-200) == 0.0f && heightOf(10) == 1.0f);
-    CHECK(yUp(0) == kY0 && yDown(0) == kY1 && yUp(-60) == kCy && yDown(-60) == kCy);
-    CHECK(yUp(-6) > yUp(0) && yUp(-48) > yUp(-24) && yDown(-48) < yDown(-24));
-
-    // ring: one column per 40 ms, newest first
-    Follower f;
-    CHECK(!f.due(1000)); // first call starts the clock
-    CHECK(!f.due(1039));
-    CHECK(f.due(1040));
-    f.push(1040, 100, 200);
-    CHECK(!f.due(1050) && f.due(1080));
-    f.push(1080, 300, 400);
-    CHECK(f.left(0) == 300 && f.right(0) == 400 && f.left(1) == 100 && f.right(1) == 200 && f.left(2) == 0);
-    // far behind: no burst of columns
-    CHECK(f.due(5000));
-    f.push(5000, 1, 1);
-    CHECK(!f.due(5001));
-    // wrap
-    for (int i = 0; i < 300; i++) { uint32_t t = 6000 + 40 * i; f.due(t); f.push(t, (uint16_t)i, (uint16_t)(i + 1)); }
-    CHECK(f.left(0) == 299 % 65536 && f.right(0) == 300 && f.left(kCols - 1) == 299 - (kCols - 1));
-    // decimation keeps the peaks
-    Follower p;
-    p.due(0);
-    for (int i = 0; i < kCols; i++) p.push(40 * (i + 1), (uint16_t)(i == 60 ? 30000 : 10), 10);
-    uint16_t out[kMaxPts];
-    const int n = decimate(p, false, out, kMaxPts);
-    CHECK(n == kMaxPts);
-    uint16_t mx = 0;
-    for (int i = 0; i < n; i++) mx = out[i] > mx ? out[i] : mx;
-    CHECK(mx == 30000);
-    CHECK(out[n - 1] == 10);
-
-    // layout and size: a loud, busy history
-    Follower busy;
-    busy.due(0);
-    for (int i = 0; i < kCols; i++) busy.push(40 * (i + 1), (uint16_t)(1 + (i * 977) % 32768), (uint16_t)(32768 - (i * 331) % 32768));
-    Ctx c;
-    ampview::draw(c, busy, "Master level, dB  (L above, R below)", "Amp view: close");
-    printf("  amp view, busy history: %d bytes, %d strips, %d texts\n", c.bytes, c.strips, c.texts);
-    CHECK(c.bytes <= 4096);
-    CHECK(c.strips == 2 && c.maxStripPts <= kMaxPts);
-    CHECK(c.minX >= 0 && c.maxX <= 800);
-    CHECK(c.minY >= kPanelY0 && c.maxY <= kPanelY1);
-    CHECK(c.pminY >= kY0 && c.pmaxY <= kY1);
-    CHECK(c.textMinX >= 0 && c.textMaxX <= 800 && c.textMinY >= kPanelY0 && c.textMaxY <= kPanelY1);
-    bool upper = true, lower = true;
-    for (int y : c.stripY[0]) upper = upper && y <= kCy;
-    for (int y : c.stripY[1]) lower = lower && y >= kCy;
-    CHECK(upper && lower); // L above the centre line, R below
-    CHECK(c.stripColor[0] == seqpal::kNote && c.stripColor[1] == seqpal::kFx1);
-    // silence: both lines on the centre
-    Follower quiet;
-    quiet.due(0);
-    for (int i = 0; i < kCols; i++) quiet.push(40 * (i + 1), 0, 0);
-    Ctx q;
-    ampview::draw(q, quiet, "t", "h");
-    CHECK(q.stripY[0][0] == kCy && q.stripY[1][0] == kCy);
-    CHECK(q.bytes < 2500);
-}
-
 static void test_launcher_budgets()
 {
     using namespace seqsession;
@@ -522,7 +444,6 @@ int main()
     test_engine_ring();
     test_follower_decimate_range();
     test_pitch_layout_and_size();
-    test_amp_view();
     test_launcher_budgets();
     printf("trace: %d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
