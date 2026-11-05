@@ -72,7 +72,7 @@ $(OBJ_DIR)/%.o: %.S
 	$(TOOLCHAIN)gcc -c -x assembler-with-cpp $(DEFINES) $(INCLUDES) -g -o "$@" "$<"
  
 $(TARGET): $(OBJS)
-	$(TOOLCHAIN)c++ -L ./3rdparty/teensy_core -L ./3rdparty/Audio -L ${TRACKER_DIR}/build-MK66-$(PRODUCT) -Xlinker --defsym=__rtc_localtime=0 -Xlinker -print-memory-usage -Xlinker --gc-sections -mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -T mk66fx1m0.ld -o "$(BUILD_DIR)/$(TARGET).axf" $(OBJS) $(LIBS) 
+	$(TOOLCHAIN)c++ -L ./3rdparty/teensy_core -L ./3rdparty/Audio -L ${TRACKER_DIR}/build-MK66-$(PRODUCT) -Xlinker --defsym=__rtc_localtime=0 -Xlinker -print-memory-usage -Xlinker --gc-sections -mcpu=cortex-m4 -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -specs=nano.specs -Wl,-u,_printf_float -T mk66fx1m0.ld -o "$(BUILD_DIR)/$(TARGET).axf" $(OBJS) $(LIBS) 
 	$(MAKE) --no-print-directory post-build
 	
 # Main rules
