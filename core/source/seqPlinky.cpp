@@ -70,7 +70,12 @@ bool seqPlinkyNote(uint8_t channel, uint8_t note, uint8_t velo, bool on)
     int n = note + 12 * (2 - (int)mtConfig.midi.middleC);
     n = n < 0 ? 0 : (n > 127 ? 127 : n);
     if (on && velo > 0)
-        return eng().noteOn((uint8_t)n, velo); // false: the event queue was full, the note is not played (the caller sends it on)
+    {
+        // v0.3.1 minor 4: a note-on the full event queue refused is DROPPED, not sent on: its note-off is absorbed here too, so an external
+        // synth would have been left hanging
+        eng().noteOn((uint8_t)n, velo);
+        return true;
+    }
     eng().noteOff((uint8_t)n); // velocity 0 is a note-off; a release never gets lost (remembered when the queue is full)
     return true;
 }
