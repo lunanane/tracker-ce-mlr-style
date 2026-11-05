@@ -27,6 +27,7 @@ cPatternEditor& PE() { return patternEditor; }
 constexpr uint32_t kMessageMs = 2000;
 constexpr uint32_t kLedMs = 30;
 constexpr uint32_t kStripMs = 50;
+constexpr uint32_t kFrameBudget = 8172 - 64; // display.cpp step3 appends controls while the sum stays under 8172
 } // namespace
 
 //##############################################################################################
@@ -60,6 +61,8 @@ void SeqPlayOverlay::moduleStart()
 void SeqPlayOverlay::moduleStop()
 {
     leave();
+    patternHidden_ = false;
+    budgetHidden_ = false;
     control_ = -1; // the interface destroys the module's controls right after stop()
 #ifdef FEATURE_PLINKY
     pitchTraceView.forget(); // plan 013 V
@@ -95,6 +98,10 @@ void SeqPlayOverlay::enter()
     lastTrack_ = selected();
     ledTime_ = 0;
     padsBacklight.clearGlobalPads(1, 1, 1); // the stock pad lights give way to the sequencer's
+    ledGuard_.invalidate();
+    ledWasRoutable_ = true;
+    patternHidden_ = false;
+    budgetHidden_ = false;
     view_.mode = SeqPlayViewData::HIDDEN;
     viewShownValid_ = false;
 }
@@ -107,12 +114,13 @@ void SeqPlayOverlay::leave()
     applyPlan(seqplay::EV_LEAVE);
     recKey_.reset();
     recStopPending_ = false;
-    plinkyClose(); // also ends the pitch trace view (plan 013 V)
+    plinkyClose(); // also ends the pitch trace view (plan 013 V), restores the pattern control
     returnEdit();
     keys_.clear();
     active_ = false;
     view_.mode = SeqPlayViewData::HIDDEN;
     view_.edge = 0;
+    syncPattern(); // the pattern control comes back (also when it was hidden for the frame budget)
     refreshView();
     padsBacklight.clearGlobalPads(1, 1, 1);
     seqTracksViewLeft();
@@ -224,6 +232,7 @@ void SeqPlayOverlay::closeList(bool apply)
         return;
     }
     uint8_t track = seqplay::stripSlotTrack(stripPage_, list_.cell);
+    ledGuard_.invalidate(); // the list closes: the pads are written again
     if (apply)
     {
         int type = list_.release(seqEngine.type(track), seqEngine.pendingType(track));
@@ -259,7 +268,14 @@ void SeqPlayOverlay::screenButton(uint8_t index, uint8_t state)
     }
     else if (state == buttonRelease)
     {
+        const bool wasOn = legend_.visible();
         legend_.released(index);
+        if (!wasOn && legend_.visible() && seqEngine.type(selected()) == seqlogic::TYPE_OFF)
+        {
+            // v0.3.6 A5: an Off track has no pads and no legend: say what to do instead of showing nothing
+            legend_.close();
+            setMessage("pick type first");
+        }
         if (list_.open && hold_.listBtn == (int8_t)index)
             closeList(true); // (the hold state already forgot the button, the list still knows it)
     }
@@ -271,11 +287,13 @@ void SeqPlayOverlay::jog(int16_t value)
     if (btn < 0)
         return;
     value = interfaceGlobals.invertValForList ? -value : value;
-    legend_.wheel(); // the legend gives way to the type list (and this press will not toggle it)
     uint8_t track = seqplay::stripSlotTrack(stripPage_, (uint8_t)btn);
     list_.wheel((uint8_t)btn, seqEngine.type(track), seqEngine.pendingType(track), value);
     if (list_.open)
+    {
         hold_.listBtn = (int8_t)btn;
+        legend_.wheel(); // v0.3.6 A5: only a wheel that really opened the list (not a nudge during a tap) cancels the tap toggle
+    }
 }
 
 // Rec is a toggle (plan 008 A): a press starts a take on the selected track (instant punch-in; Shift + Rec: exactly one loop),
@@ -333,6 +351,7 @@ bool SeqPlayOverlay::editKey(uint8_t b, uint8_t state)
     switch (keys_.event(k, kind, routable(), plinkyOpen_, hold_.mask != 0))
     {
         case seqplay::EditKeys::PASS_EDIT:
+            ledGuard_.invalidate(); // the stock handler may light the pads
             borrowEdit();
             return false;
         case seqplay::EditKeys::TAKE_SYNTH:
@@ -573,6 +592,49 @@ void SeqPlayOverlay::plinkyClose()
 #ifdef FEATURE_PLINKY
     pitchTraceView.show(false, nullptr); // plan 013 V
 #endif
+    syncPattern();
+}
+
+// v0.3.6 A1 (owner decision: a view switch, not an overlay). While the PolySynth view (parameter page or pitch view) is shown the
+// pattern control is not drawn at all: the frame is then the page + title + strip only. Before, the pattern view's display list plus the
+// overlay exceeded the 8172 byte frame budget and display.cpp step3 dropped the lowest-index controls: our overlay, the title bar, the
+// labels. The same applies to any other overlay (legend, type list) when the shown controls would exceed the budget. A stock refresh
+// cannot undo it: this runs every pass and the pattern control is hidden again when a stock path showed it. Restored exactly on close.
+void SeqPlayOverlay::syncPattern()
+{
+    cPatternEditor& pe = PE();
+    bool want = active_ && plinkyOpen_;
+    if (active_ && !want && !patternHidden_ && view_.mode != SeqPlayViewData::HIDDEN && display.shownRamBytes() > kFrameBudget)
+    {
+        want = true;
+        budgetHidden_ = true;
+    }
+    if (budgetHidden_ && patternHidden_ && view_.mode == SeqPlayViewData::HIDDEN)
+        budgetHidden_ = false;
+    if (budgetHidden_ && patternHidden_)
+        want = true; // stays hidden for as long as the overlay that needed the room is shown
+    if (want)
+    {
+        display.setControlHide(pe.patternControl); // idempotent; also undoes a stock show
+        if (!patternHidden_)
+        {
+            patternHidden_ = true;
+            display.refreshControl(pe.patternControl);
+            display.synchronizeRefresh();
+        }
+        return;
+    }
+    if (!patternHidden_)
+        return;
+    patternHidden_ = false;
+    budgetHidden_ = false;
+    if (!mtMenuPopup.isPopupVisible() && pe.fillState == 0) // a stock popup that hid the pattern shows it again itself
+    {
+        display.setControlShow(pe.patternControl);
+        pe.refreshPattern();
+        display.refreshControl(pe.patternControl);
+        display.synchronizeRefresh();
+    }
 }
 
 void SeqPlayOverlay::plinkyToggle()
@@ -589,6 +651,7 @@ void SeqPlayOverlay::plinkyToggle()
         plinkyOpen_ = true;
         plinkyCur_.fix();
         legend_.close(); // no legend over it
+        syncPattern();
     }
     else
 #endif
@@ -668,7 +731,7 @@ void SeqPlayOverlay::refreshStrip(bool force)
         c.shiftHint = c.selected && c.type != seqlogic::TYPE_OFF; // v0.3.2: "Shift: pads" where nothing else needs the line
 #ifdef FEATURE_PLINKY
         c.synthHint = c.selected && seqPlinkyTrackUsesVoice(t);
-        c.alt = ((seqNowMs() / 2000u) & 1u) != 0;
+        c.alt = (seqNowMs() % 4000u) < 700u; // v0.3.6 A5: "tap: help" stays on the cell, the synth hint only flashes in
 #endif
 
         // only the cells whose content changed are rewritten
@@ -706,17 +769,21 @@ void SeqPlayOverlay::refreshStrip(bool force)
 void SeqPlayOverlay::refreshPads()
 {
     uint8_t out[48];
-    seqEngine.leds(selected(), out);
-    for (int i = 0; i < 48; i++)
+    const uint8_t sel = selected();
+    seqEngine.leds(sel, out);
+    // v0.3.6 A4: the stock editor (popups, instrument select, lightUpPadBoard) overwrites the LEDs behind the diff cache's back: after a
+    // popup / list closed, a track or type change and every 500 ms all 48 are written again; nothing is written while a popup owns the pads
+    const bool rt = routable();
+    const bool full = ledGuard_.full(seqNowMs(), rt, list_.open, sel, seqEngine.type(sel));
+    if (!rt)
     {
-        uint8_t level = out[i] > 15 ? 15 : out[i];
-        uint8_t pwm = (uint8_t)(level * 2);
-        if (pwm != ledShown_[i])
-        {
-            ledShown_[i] = pwm;
-            padsBacklight.setBackLayer(pwm > 0 ? 1 : 0, pwm, i);
-        }
+        ledWasRoutable_ = false;
+        return;
     }
+    if (full && !ledWasRoutable_)
+        padsBacklight.clearGlobalPads(1, 1, 1); // the popup's lights give way again
+    ledWasRoutable_ = true;
+    seqplay::ledPass(ledShown_, out, full, [](int i, uint8_t pwm) { padsBacklight.setBackLayer(pwm > 0 ? 1 : 0, pwm, i); });
 }
 
 void SeqPlayOverlay::refreshView()
@@ -729,39 +796,26 @@ void SeqPlayOverlay::refreshView()
 #ifdef FEATURE_PLINKY
     if (plinkyOpen_ && (!routable() || !seqPlinkyTrackUsesVoice(sel)))
         plinkyClose(); // another track, another instrument or a popup: the overlay ends
+    // v0.3.6 A1: the pitch view replaces the parameter page in the same view (its own control is on top; both together would not fit the
+    // frame budget), so this control draws nothing then
+    const bool pitchOnly = plinkyOpen_ && pitchTraceView.visible();
+#else
+    const bool pitchOnly = false;
 #endif
-    if (plinkyOpen_)
+    if (pitchOnly)
+    {
+        view_.mode = SeqPlayViewData::HIDDEN;
+        view_.edge = 0;
+    }
+    else if (plinkyOpen_)
     {
 #ifdef FEATURE_PLINKY
         view_.mode = SeqPlayViewData::PLINKY;
         seqplinky::Model& m = view_.plinky;
-        for (int i = 0; i <= plinkyvoice::P_COUNT; i++)
-            m.v[i] = (uint8_t)seqPlinkyGet(i); // the last one is the morph time (plan 012)
-        {
-            uint16_t ms = 0;
-            uint8_t mp = 0;
-            m.morphPat = seqPlinkyMorphStatus(&ms, &mp) ? mp : 0;
-            m.morphMs = ms;
-            m.mark = seqPlinkyMarks();
-            for (int i = 0; i < seqnotes::kVoices; i++)
-            {
-                uint8_t n = 0, lv = 0, rel = 0;
-                if (seqPlinkyVoice(i, &n, &lv, &rel))
-                {
-                    m.voice[i].note = n;
-                    m.voice[i].level = lv;
-                    m.voice[i].rel = rel;
-                }
-                else
-                    m.voice[i] = seqnotes::VoiceView();
-            }
-        }
+        seqPlinkyFillModel(m); // shared with the instrument page
         m.sec = plinkyCur_.sec;
         m.idx = plinkyCur_.idx;
         m.track = (uint8_t)(sel + 1);
-        m.cpu = (uint8_t)(seqPlinkyCpu() + 0.5f);
-        m.peak = (uint8_t)(seqPlinkyCpuPeak() + 0.5f);
-        m.newer = seqPlinkyNewerFile() ? 1 : 0;
 #endif
     }
     else if (active_ && list_.open)
@@ -823,7 +877,9 @@ void SeqPlayOverlay::refreshView()
     {
         // v0.3.3: the notes the selected track's sequencer sounds (a band above the strip), read at most every 33 ms
         const uint32_t nowMs = seqNowMs();
-        if (active_ && (uint32_t)(nowMs - notesTime_) >= 33)
+        if (pitchOnly)
+            notesBand_ = seqnotes::Band();
+        else if (active_ && (uint32_t)(nowMs - notesTime_) >= 33)
         {
             notesTime_ = nowMs;
             uint8_t mask[16];
@@ -861,6 +917,7 @@ void SeqPlayOverlay::update()
 #ifdef FEATURE_PLINKY
     pitchTraceView.update(); // plan 013 V: cheap while hidden, <= 25 fps while visible
 #endif
+    syncPattern();
 
     if (editBorrowed_ && !keys_.editWanted())
         returnEdit(); // the last editing key was released and its stock handler has run

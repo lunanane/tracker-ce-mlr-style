@@ -29,7 +29,8 @@ enum
     kY1 = 404,
     kPanelY0 = 30,    // background panel (same band as the PolySynth parameter overlay)
     kPanelY1 = 424,
-    kMaxGridSpan = 40 // above this span only the octave lines are drawn
+    kMaxGridSpan = 40, // above this span only the octave lines are drawn
+    kMinRun = 5        // v0.3.6: a note stays on the screen for at least this many samples (~175 ms): staccato stabs are visible
 };
 constexpr float kEnvSemis = 3.0f; // full envelope lifts the second line by this many semitones
 constexpr float kMinSpan = 14.0f;
@@ -60,6 +61,12 @@ class Follower
                 s_[v][i].env = 0;
                 s_[v][i].on = 0;
             }
+        for (int v = 0; v < kVoices; v++)
+        {
+            run_[v] = 0;
+            hold_[v] = 0;
+            lastOn_[v] = Sample();
+        }
         head_ = 0;
         have_ = false;
         last_ = 0;
@@ -111,9 +118,30 @@ class Follower
             while (steps--) push(none);
         }
     }
+    // Minimum visible length (v0.3.6): a sounding run shorter than kMinRun samples is continued with copies of its last point (the
+    // envelope falling off) until it is kMinRun long. Longer runs end exactly where the engine says.
     void push(const Sample* col)
     {
-        for (int v = 0; v < kVoices; v++) s_[v][head_] = col[v];
+        for (int v = 0; v < kVoices; v++)
+        {
+            Sample s = col[v];
+            if (s.on)
+            {
+                if (run_[v] < 255) run_[v]++;
+                lastOn_[v] = s;
+                hold_[v] = run_[v] < kMinRun ? (uint8_t)(kMinRun - run_[v]) : 0;
+            }
+            else if (hold_[v] > 0)
+            {
+                hold_[v]--;
+                run_[v]++;
+                lastOn_[v].env = (uint8_t)(lastOn_[v].env * 3 / 5);
+                s = lastOn_[v];
+            }
+            else
+                run_[v] = 0;
+            s_[v][head_] = s;
+        }
         head_ = (uint8_t)((head_ + 1) % kWin);
     }
     // age 0 = newest .. kWin - 1 = oldest
@@ -121,6 +149,9 @@ class Follower
 
   private:
     Sample s_[kVoices][kWin];
+    uint8_t run_[kVoices];
+    uint8_t hold_[kVoices];
+    Sample lastOn_[kVoices];
     uint8_t head_;
     bool have_;
     uint16_t last_;
@@ -134,7 +165,16 @@ inline int decimate(const Follower& f, int v, Sample* out, int maxPts)
     for (int i = 0; i < n; i++)
     {
         const int src = (i + 1) * kWin / n - 1; // oldest-first index
+        const int first = i * kWin / n;
         out[i] = f.at(v, kWin - 1 - src);
+        // v0.3.6: a bucket that contains a sounding sample is "on" (the last sounding one), so a short note is never decimated away
+        if (!out[i].on)
+            for (int j = src - 1; j >= first; j--)
+                if (f.at(v, kWin - 1 - j).on)
+                {
+                    out[i] = f.at(v, kWin - 1 - j);
+                    break;
+                }
     }
     return n;
 }

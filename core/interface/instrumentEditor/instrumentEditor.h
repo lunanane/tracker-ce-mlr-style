@@ -11,6 +11,10 @@
 #include "Synth.h"
 #endif
 #include <map>
+#ifdef FEATURE_PLINKY
+#include "seqPlay/seqPlay.h" // v0.3.6: SeqPlayViewData / cSeqPlayLegend (the PolySynth view as the instrument page)
+#include "seqPlinkyUiLogic.h"
+#endif
 
 enum mtInstrumentEditorMode
 {
@@ -377,19 +381,24 @@ class cInstrumentEditor : public ModuleBase
     // of the MIDI settings; the CPU of the voice is in the title. (v0.3.2: the voice instrument is fixed, no claim gesture.)
     bool plinkyActive() const;
     void showPlinkyParams();
-    void showPlinkyValue(uint8_t place);
-    void plinkyPlaceName(uint8_t place);
     void showPlinkyCpu(bool force);
     void plinkyChange(int d);
     void plinkyDefault();
+    bool plinkyNav(uint8_t button);                   // Left / Right / Up / Down: the view's cursor (v0.3.6)
+    void plinkyTogglePitch();                         // FX2 / labelled button: pitch view <-> parameters
+    void plinkyUpdateView(bool force);
     bool plinkyButton(uint8_t button, uint8_t state); // true = consumed
     void plinkyRefresh();                             // main loop: CPU in the title every 50 ms
-    uint8_t plinkyPage = 1;                           // 1 .. 4 (4 = Pitch view)
-    bool plinkyPitchView = false;                     // plan 013 V: page 3 place 7 "Pitch view" / "Params"
+    bool plinkyPitchView = false;                     // plan 013 V / v0.3.6: FX2 toggles the pitch view
     uint32_t plinkyLastMs = 0;
-    char plinkyVal[8][12];
-    char plinkyName[8][12];
     char plinkyTitle[64];
+    // v0.3.6 (plan 014 A2): the same view as the Play-mode PolySynth view, drawn by a cSeqPlayLegend control (mode PLINKY)
+    hControl plinkyViewControl = -1;
+    SeqPlayViewData plinkyView;
+    seqplinky::Cursor plinkyCur;
+    seqplinky::Model plinkyShownModel;
+    uint8_t plinkyShownMode = 0;
+    bool plinkyShownValid = false;
 #endif
 
     void showParamsVelocity();

@@ -196,16 +196,20 @@ template <class C> void draw(C& c, const Model& m, const Palette& p)
     // ---- texts ----
     c.textPhase();
     c.color(p.text);
+    // m.track 0 = the instrument page (v0.3.6: same drawing, no track number, no "Instr close": the page has its own key)
     if (m.morphPat)
     {
         char mt[24];
         plinkymorph::titleText(mt, sizeof mt, m.morphMs, m.morphPat);
-        snprintf(buf, sizeof buf, "T%d  %s", m.track, mt);
+        if (m.track) snprintf(buf, sizeof buf, "T%d  %s", m.track, mt);
+        else snprintf(buf, sizeof buf, "PolySynth  %s", mt);
     }
-    else
+    else if (m.track)
         snprintf(buf, sizeof buf, "PolySynth T%d CPU %d%%", m.track, m.cpu); // peak CPU is on the instrument page title (budget for the FX2 hint)
+    else
+        snprintf(buf, sizeof buf, "PolySynth  CPU %d%%  pk %d%%", m.cpu, m.peak);
     c.text(12, 42, 3, 2, buf);
-    c.text(12, 398, 1, 2, "Jog edit, Shift fine, Del reset, Instr close, FX2 pitch");
+    c.text(12, 398, 1, 2, m.track ? "Jog edit, Shift fine, Del reset, Instr close, FX2 pitch" : "Jog edit, Shift fine, Del reset, FX2 pitch view");
     if (m.newer)
         c.text(12, 412, 1, 2, "Newer synth file: edits are not saved");
     if (!m.newer)

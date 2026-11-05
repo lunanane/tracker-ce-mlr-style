@@ -27,6 +27,10 @@ void seqPlinkyDefault(int param);
 float seqPlinkyCpu();                    // % of the 128 sample block period: average ...
 float seqPlinkyCpuPeak();                // ... and slowly decaying peak
 int seqPlinkyVoicesActive();
+// v0.3.6: fills the parameter view model (values, marks, morph, voices, CPU, newer-file flag) for the Play-mode view and the instrument
+// page; the caller sets sec / idx / track (0 = the instrument page, no track)
+namespace seqplinky { struct Model; }
+void seqPlinkyFillModel(seqplinky::Model& m);
 // pitch trace ring of the engine (plan 013 V; read only, any context): sample k of a voice is ring[k & (len - 1)], head = next index
 const void* seqPlinkyTraceRing(int voice);
 unsigned seqPlinkyTraceLen();

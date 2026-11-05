@@ -770,8 +770,129 @@ static void test_legend_words_and_captions()
     CHECK(t[0] == 0);
 }
 
+// v0.3.6 A4: the stock editor overwrites pad LEDs behind the diff cache; popup close, list close, track / type change and the 500 ms
+// guard rewrite all 48
+static void test_led_guard()
+{
+    uint8_t hw[48], shown[48], out[48];
+    for (int i = 0; i < 48; i++)
+        out[i] = (uint8_t)(i % 16);
+    for (int i = 0; i < 48; i++)
+        shown[i] = 0xFF;
+    LedGuard g;
+    uint32_t now = 1000;
+    auto pass = [&](bool routable, bool list, uint8_t track, uint8_t type) {
+        const bool full = g.full(now, routable, list, track, type);
+        if (!routable)
+            return 0; // the overlay writes nothing while a popup owns the pads
+        return ledPass(shown, out, full, [&](int i, uint8_t pwm) { hw[i] = pwm; });
+    };
+    auto hwOk = [&]() {
+        for (int i = 0; i < 48; i++)
+            if (hw[i] != (uint8_t)((out[i] > 15 ? 15 : out[i]) * 2))
+                return false;
+        return true;
+    };
+    CHECK(pass(true, false, 2, 3) == 48 && hwOk()); // first pass: everything
+    now += 30;
+    CHECK(pass(true, false, 2, 3) == 0); // nothing changed, nothing written
+    // a stock popup (instrument select) runs: its lights replace ours; the overlay stays away while it is open
+    now += 30;
+    CHECK(pass(false, false, 2, 3) == 0);
+    for (int i = 0; i < 48; i++)
+        hw[i] = 0;
+    now += 30;
+    CHECK(pass(false, false, 2, 3) == 0);
+    for (int i = 0; i < 48; i++)
+        hw[i] = (uint8_t)(i & 1 ? 40 : 0); // whatever the popup left
+    // the popup closes: all pads written again at once (the old cache said "already shown")
+    now += 30;
+    CHECK(pass(true, false, 2, 3) == 48 && hwOk());
+    // the type list: opening and closing it
+    now += 30;
+    CHECK(pass(true, true, 2, 3) == 0);
+    for (int i = 0; i < 48; i++)
+        hw[i] = 0;
+    now += 30;
+    CHECK(pass(true, false, 2, 3) == 48 && hwOk());
+    // a type change / track change
+    for (int i = 0; i < 48; i++)
+        hw[i] = 7;
+    now += 30;
+    CHECK(pass(true, false, 2, 4) == 48 && hwOk());
+    for (int i = 0; i < 48; i++)
+        hw[i] = 7;
+    now += 30;
+    CHECK(pass(true, false, 3, 4) == 48 && hwOk());
+    // a stock overwrite nobody announced (Instrument + jog, lightUpPadBoard): healed by the periodic rewrite within 500 ms
+    for (int i = 0; i < 48; i++)
+        hw[i] = 0;
+    int healed = -1;
+    for (int t = 1; t <= 40; t++)
+    {
+        now += 30;
+        if (pass(true, false, 3, 4) == 48)
+        {
+            healed = t * 30;
+            break;
+        }
+    }
+    CHECK(healed > 0 && healed <= 540 && hwOk());
+    // an explicit invalidate (a stock edit key was used) rewrites on the next pass
+    for (int i = 0; i < 48; i++)
+        hw[i] = 0;
+    g.invalidate();
+    now += 30;
+    CHECK(pass(true, false, 3, 4) == 48 && hwOk());
+    // levels above 15 are clamped
+    out[5] = 200;
+    now += 30;
+    CHECK(pass(true, false, 3, 4) == 1 && hw[5] == 30);
+}
+
+// v0.3.6 A5: "tap: help" stays on the selected cell (the synth hint only flashes in); a tap that only nudged the wheel without
+// opening the list still toggles; the tap on an Off track is answered by the overlay (message), not by an empty legend
+static void test_tap_legend_robust()
+{
+    LegendGate g;
+    g.pressed(2, true);
+    g.released(2);
+    CHECK(g.visible());
+    g.pressed(2, true);
+    g.released(2);
+    CHECK(!g.visible());
+    // quick taps one after the other
+    for (int i = 0; i < 6; i++)
+    {
+        g.pressed(5, true);
+        g.released(5);
+    }
+    CHECK(!g.visible());
+    // after another track was selected the next tap on the selected one works
+    g.pressed(1, false);
+    g.released(1);
+    CHECK(!g.visible());
+    g.pressed(1, true);
+    g.released(1);
+    CHECK(g.visible());
+    // the strip text on the selected cell is "tap: help" whenever the legend exists (synth hint off the flash)
+    StripCell c;
+    c.type = seqlogic::TYPE_MONO;
+    c.selected = true;
+    c.shiftHint = true;
+    c.synthHint = true;
+    c.alt = false;
+    char b[16];
+    stripLine2(b, sizeof b, c);
+    CHECK(strcmp(b, "tap: help") == 0);
+    // an Off track shows no legend
+    CHECK(viewKind(false, true, false, true, true) == 0);
+}
+
 int main()
 {
+    test_led_guard();
+    test_tap_legend_robust();
     test_strip_paging();
     test_view_window();
     test_type_list_first_detent_only_opens();
