@@ -1,0 +1,124 @@
+// Parameters of the synth voice (plan 009 S): the list, ranges, defaults, names and the sidecar file plinky.bin.
+// No Polyend includes, host-testable (core/seqtest/test_plinky.cpp). The DSP is in plinky_voice.h.
+//
+// Voice design after the synth voice of the Plinky firmware (plinky_public, MIT, see plinky_voice.h): detuned or pulse-width
+// saw pairs, a noise source, a two pole "low pass gate" whose cutoff follows the envelope, one ADSR, a shared LFO.
+// Sequencer tracks mod, PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md); the Plinky parts are MIT (see plinky_voice.h).
+#pragma once
+#include "seqSidecarLogic.h"
+#include <stddef.h>
+#include <stdint.h>
+
+namespace plinkyvoice {
+
+enum Param : uint8_t
+{
+    P_CHANNEL,   // 0 = off, 1..16 = the MIDI instrument / channel that plays the voice (instrument 1..16 of the MIDI list)
+    P_VOICES,    // 1..4
+    P_LEVEL,
+    P_REVERB,    // send
+    P_DELAY,     // send
+    P_GLIDE,
+    P_WIDTH,     // 0 = mono (renders one oscillator pair: about half the CPU)
+    P_SHAPE,     // 0 = two detuned saws, 1..100 = pulse (two saws, phase offset): wide .. narrow
+    P_DETUNE,
+    P_INTERVAL,  // stored 0..24 = -12 .. +12 semitones between the two oscillator pairs
+    P_NOISE,
+    P_CUTOFF,
+    P_RESO,
+    P_DRIVE,
+    P_ATTACK,
+    P_DECAY,
+    P_SUSTAIN,
+    P_RELEASE,
+    P_LFO_RATE,
+    P_LFO_DEPTH,
+    P_LFO_DEST,  // 0 pitch, 1 shape, 2 cutoff
+    P_COUNT
+};
+
+struct ParamInfo
+{
+    uint8_t min, max, def;
+    const char* name;
+};
+
+inline const ParamInfo& paramInfo(int i)
+{
+    static const ParamInfo t[P_COUNT] = {
+        { 0, 16, 0, "Channel" },   { 1, 4, 4, "Voices" },    { 0, 100, 70, "Level" },  { 0, 100, 0, "Reverb" },
+        { 0, 100, 0, "Delay" },    { 0, 100, 0, "Glide" },   { 0, 100, 60, "Width" },  { 0, 100, 0, "Shape" },
+        { 0, 100, 30, "Detune" },  { 0, 24, 12, "Interval" }, { 0, 100, 0, "Noise" },  { 0, 100, 60, "Cutoff" },
+        { 0, 100, 20, "Reso" },    { 0, 100, 30, "Drive" },  { 0, 100, 10, "Attack" }, { 0, 100, 50, "Decay" },
+        { 0, 100, 60, "Sustain" }, { 0, 100, 40, "Release" }, { 0, 100, 40, "LFO rate" }, { 0, 100, 0, "LFO depth" },
+        { 0, 2, 0, "LFO to" },
+    };
+    return t[i < 0 ? 0 : (i >= P_COUNT ? P_COUNT - 1 : i)];
+}
+
+inline uint8_t clampParam(int i, int v)
+{
+    const ParamInfo& p = paramInfo(i);
+    return (uint8_t)(v < p.min ? p.min : (v > p.max ? p.max : v));
+}
+
+// ---------------------------------------------------------------- sidecar plinky.bin
+constexpr char kMagic[4] = { 'P', 'L', 'V', 'X' };
+enum { kVersion = 1, kPayload = 24, kFileMax = kPayload + seqsidecar::kOverhead };
+
+struct Params
+{
+    uint8_t v[P_COUNT];
+    Params() { setDefaults(); }
+    void setDefaults()
+    {
+        for (int i = 0; i < P_COUNT; i++)
+            v[i] = paramInfo(i).def;
+    }
+    bool isDefault() const
+    {
+        for (int i = 0; i < P_COUNT; i++)
+            if (v[i] != paramInfo(i).def)
+                return false;
+        return true;
+    }
+    bool operator==(const Params& o) const
+    {
+        for (int i = 0; i < P_COUNT; i++)
+            if (v[i] != o.v[i])
+                return false;
+        return true;
+    }
+    uint16_t hash() const { return seqsidecar::crc16(v, P_COUNT); }
+
+    size_t save(uint8_t* buf, size_t cap) const
+    {
+        if (cap < (size_t)kFileMax)
+            return 0;
+        uint8_t* p = buf + seqsidecar::kHeader;
+        for (int i = 0; i < kPayload; i++)
+            p[i] = i < P_COUNT ? v[i] : 0; // the rest is reserved
+        return seqsidecar::frameWrite(buf, cap, kMagic, kVersion, p, kPayload);
+    }
+    // false: missing / bad frame / short payload (nothing changed). *newer: a later mod version wrote it (leave the file alone).
+    // A value outside its range falls back to its default; a longer payload of a later version is read as far as it is known.
+    bool load(const uint8_t* buf, size_t len, bool* newer = nullptr)
+    {
+        const uint8_t* p = nullptr;
+        size_t n = 0;
+        uint8_t ver = 0;
+        seqsidecar::FrameStatus st = seqsidecar::frameRead(buf, len, kMagic, kVersion, &p, &n, &ver);
+        if (newer)
+            *newer = st == seqsidecar::FRAME_NEWER;
+        if (st != seqsidecar::FRAME_OK || n < (size_t)P_COUNT)
+            return false;
+        for (int i = 0; i < P_COUNT; i++)
+        {
+            const ParamInfo& pi = paramInfo(i);
+            v[i] = (p[i] >= pi.min && p[i] <= pi.max) ? p[i] : pi.def;
+        }
+        return true;
+    }
+};
+
+}  // namespace plinkyvoice

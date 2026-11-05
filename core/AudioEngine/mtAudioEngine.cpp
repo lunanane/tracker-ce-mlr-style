@@ -143,6 +143,27 @@ audioEngine::audioEngine()
     connectSynthToExportQueue(&synthVoice, &exportQueues);
     connectSynthToOutput(&synthVoice, &output);
 #endif
+#ifdef FEATURE_PLINKY
+    {
+        // plan 009 S: dry left / right into the tracks mixers, left + right into the reverb and delay send mixers
+        typedef MixerAndFxs<kVoices> M;
+        connections.push_back(new AudioConnection(
+          &plinky, 0, mixerAndFxs.getTracksMixer(MixerAndFxChannelType::kLeft), M::kPlinkyTracksChannel));
+        connections.push_back(new AudioConnection(
+          &plinky, 1, mixerAndFxs.getTracksMixer(MixerAndFxChannelType::kRight), M::kPlinkyTracksChannel));
+        for (int fx = 0; fx < M::kFxCount; fx++)
+        {
+            connections.push_back(
+              new AudioConnection(&plinky, 0, mixerAndFxs.getPreFxMixer((M::FxType)fx), M::kPlinkySendChannel));
+            connections.push_back(
+              new AudioConnection(&plinky, 1, mixerAndFxs.getPreFxMixer((M::FxType)fx), M::kPlinkySendChannel + 1));
+        }
+        mixerAndFxs.getPreFxMixer(M::kDelay)->gain(M::kPlinkySendChannel, 0.0f);
+        mixerAndFxs.getPreFxMixer(M::kDelay)->gain(M::kPlinkySendChannel + 1, 0.0f);
+        mixerAndFxs.getPreFxMixer(M::kReverb)->gain(M::kPlinkySendChannel, 0.0f);
+        mixerAndFxs.getPreFxMixer(M::kReverb)->gain(M::kPlinkySendChannel + 1, 0.0f);
+    }
+#endif
 
     connectInputToOutput(&input, &output);
     connectInputToMixer(&input, &mixerAndFxs);
@@ -1087,6 +1108,19 @@ void audioEngine::setReverbType(uint8_t type)
 {
     polyverb->setType(type);
 }
+#ifdef FEATURE_PLINKY
+// plan 009 S: reverb / delay send of the synth voice (parameters 0 .. 100), half on each of the two stereo inputs of the mono mixers
+void audioEngine::applyPlinkySends()
+{
+    typedef MixerAndFxs<kVoices> M;
+    const float rev = 0.5f * (float)plinky.engine().param(plinkyvoice::P_REVERB) * 0.01f;
+    const float dly = 0.5f * (float)plinky.engine().param(plinkyvoice::P_DELAY) * 0.01f;
+    mixerAndFxs.getPreFxMixer(M::kReverb)->gain(M::kPlinkySendChannel, rev);
+    mixerAndFxs.getPreFxMixer(M::kReverb)->gain(M::kPlinkySendChannel + 1, rev);
+    mixerAndFxs.getPreFxMixer(M::kDelay)->gain(M::kPlinkySendChannel, dly);
+    mixerAndFxs.getPreFxMixer(M::kDelay)->gain(M::kPlinkySendChannel + 1, dly);
+}
+#endif
 float audioEngine::getReverbCpuPercent()
 {
     return polyverb->cpuPercent();

@@ -372,6 +372,22 @@ class cInstrumentEditor : public ModuleBase
     uint8_t getActualMidiInstrumentCCValue(int ccIndex);
 
     void showInstrumentMidiParams();
+#ifdef FEATURE_PLINKY
+    // plan 009 S: a MIDI instrument whose channel is the synth voice channel shows the voice parameters (3 pages of 8) instead
+    // of the MIDI settings; the CPU of the voice is in the title. Shift + screen button 1 on a MIDI instrument claims its channel.
+    bool plinkyActive() const;
+    void showPlinkyParams();
+    void showPlinkyValue(uint8_t place);
+    void showPlinkyCpu(bool force);
+    void plinkyChange(int d);
+    void plinkyDefault();
+    bool plinkyButton(uint8_t button, uint8_t state); // true = consumed
+    void plinkyRefresh();                             // main loop: CPU in the title every 50 ms
+    uint8_t plinkyPage = 1;                           // 1 .. 3
+    uint32_t plinkyLastMs = 0;
+    char plinkyVal[8][12];
+    char plinkyTitle[32];
+#endif
 
     void showParamsVelocity();
     void showParamsOffset();

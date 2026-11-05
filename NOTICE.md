@@ -51,3 +51,9 @@ Polyend Tracker Community Edition (CE) incorporates or links against the followi
 * **License**: MIT License (the full notice is kept at the top of the ported file)
 * **Copyright**: Copyright (c) the authors of the Plinky firmware (the repository states: "The rest of the software of plinky is licensed under the MIT License")
 * **Note**: only the reverb algorithm is used. The Plinky name, logo and front panel design are not part of the MIT grant; this firmware is not a Plinky product. The name appears only as the label of the reverb type, to credit the algorithm.
+
+## 11. Synth voice of the Plinky firmware (the "Plinky" synth voice, Original Tracker)
+* **Location**: `core/libs/Audio/PlinkyVoice/plinky_voice.h` (the oscillator model, integer phase polyBLEP saw, pulse from two saws, low pass gate recursion, envelope smoothing and per-block ramps follow `RunVoice` in `sw/Core/Src/plinky.c` of <https://github.com/plinkysynth/plinky_public>)
+* **License**: MIT License (the full notice is kept at the top of the ported file)
+* **Copyright**: Copyright (c) the authors of the Plinky firmware (the repository states: "The rest of the software of plinky is licensed under the MIT License")
+* **Note**: only the base synth voice is used (no sampler, arpeggiator, sequencer, effects, wavetables or touch strips). Voice allocation, event queue, pitch maths, LFO, parameter set, scaling and the CPU optimisations are written for the Tracker and are part of the sequencer tracks mod (PolyForm Noncommercial 1.0.0). The Plinky name, logo and front panel design are not part of the MIT grant; this firmware is not a Plinky product. The name appears only as the credit of the algorithm.

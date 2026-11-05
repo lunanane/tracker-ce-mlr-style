@@ -566,6 +566,39 @@ Pads: the ping-pong and sync pads (PING page, column 10, rows 3-4) are dark when
 
 Known (v0.2.4): the ping-pong and sync switches are two pads on the PING page now (the jog wheel changed its job); the stock 10 s autosave still writes while playing when the delay center is changed (a stock project value); width, low cut and type are written only after Stop.
 
+## 11f. Synth voice (plan 009 S, Original Tracker)
+A polyphonic synth voice (4 voices max) that a MIDI instrument plays. It exists only in the Original Tracker build. Headphones or monitors, level low at first.
+
+**How to make a Plinky instrument**
+1. Instrument list: select a MIDI instrument (MIDI 1 .. 16), open the Instrument parameters page (the stock "MIDI Instrument Parameters" page: Velocity, Offset, CC A-F). Hold **Shift** and press screen button 1: this instrument becomes the synth voice (its channel is the voice channel) and the page shows the voice parameters, page 1 of 3, instead of the MIDI settings. The title shows `Plinky 1/3  CPU n% pk m%` (CPU of the voice engine in the audio interrupt, share of the 2.9 ms block; average and slowly decaying peak, refreshed every 50 ms).
+2. Page 1: **Channel** (Off, or MIDI 1 .. 16; Off or another channel gives this instrument back to MIDI at once and the MIDI settings return), Voices (1 .. 4), Level, Reverb send, Delay send, Glide, Width (0 = mono, about half the CPU). Select a value with its screen button or Left / Right, change it with the jog wheel or Up / Down, the Default key (wheel press) sets the default. Screen button 8 = **Next**.
+3. With MIDI instrument 16 claimed (Shift + button 1 on it) it is the synth voice. With it as the current instrument, play: the pads of a Chord/Arp or Mono track, the keyboard / note pads of the pattern editor and a step with instrument MIDI 16 all sound it. It no longer sends MIDI on channel 16.
+4. Page 2: Shape (0 = two detuned saws, 1 .. 100 = pulse wave wide .. narrow), Detune, Interval (-12 .. +12 semitones between the left and the right oscillator pair), Noise, Cutoff, Reso, Drive. Page 3: Attack, Decay, Sustain, Release, LFO rate, LFO depth, LFO to (Pitch / Shape / Cutoff); screen button 8 = **Back** (to the limiter screen).
+5. Save the project: the values are in `plinky.bin` next to it (and in the Workspace). A project that never used the voice has no such file and Channel 0.
+
+| Check | Expected |
+|---|---|
+| Fresh project, MIDI instrument page | The stock MIDI page, unchanged. MIDI instruments send MIDI as before (Channel 0). Shift + screen button 1 on MIDI 16 switches the page to the voice parameters (page 1/3, Channel `MIDI 16`); on another MIDI instrument (say 3) the page stays the MIDI settings. Channel set to Off with the jog wheel: back to the MIDI settings. |
+| Page 1, Channel = 16, play a note on the pads (instrument MIDI 16 selected) | A saw-like note with a short attack, held while the pad is held, a release after it; no MIDI note on channel 16 any more (a MIDI monitor on the USB / DIN output sees nothing for that channel). |
+| Hold four pads, then a fifth | Four voices sound; the fifth note takes the oldest (a releasing voice first); no click, no silence of the other notes. Voices = 2: only two notes at once. |
+| **CPU readout, 1 .. 4 voices.** Default sound (Width 60, Shape 0), page 1 title: hold 1, 2, 3, 4 notes, write down `CPU` and `pk` after 5 s each | Idle `0%`. Estimated from the code: about 4% per voice (4 voices about 15% + 1%), mono (Width 0) about 2.5% per voice. Report the real numbers (device test). |
+| Same with Shape 40 (pulse), then Width 0 | Pulse costs about the same; Width 0 clearly less (the right oscillator pair and its filter are skipped). |
+| 4 voices together with a dense pattern, delay and reverb on, 5 minutes | No drop-outs, crackle or stutter; the UI stays responsive. Look at the pk value: it should stay well under 100% together with the other load. |
+| Cutoff 0 .. 100 while a note is held | Dark to bright, smooth (no zipper noise); Reso up: a resonant whistle, no runaway or silence; Drive up: louder and more saturated, never harsher than the limiter allows. |
+| Shape 0, Detune 0 .. 100 | From one steady saw to a wide beating chorus. Interval +7: a fifth in the right oscillator pair (Width above 0). Width 0: mono. |
+| Shape 1 .. 100 | Pulse wave from square (1) to thin (100); with LFO to = Shape and some depth the width moves. |
+| Attack / Decay / Sustain / Release | The envelope also opens the filter (the louder, the brighter): a short Decay with Sustain 20 gives a pluck. Sustain 0 with a held note: the note rings out and the voice frees itself (CPU back to 0). |
+| LFO rate / depth with LFO to = Pitch | A vibrato up to +-2 semitones; Cutoff: a wobble. The Mod wheel (CC 1) of an external keyboard on this channel also adds vibrato. |
+| Glide up, play legato (hold a note, press another) | The pitch slides; Glide 0 = no slide. |
+| Reverb / Delay send up | The voice appears in the reverb / delay returns (sends are separate from the track faders); both 0 = dry only. |
+| Pattern with notes on MIDI 16 and CC automation (Send CC FX on MIDI 16 with CC 74 / 71 / 73 / 72) | CC 74 = Cutoff, 71 = Reso, 73 = Attack, 75 = Decay, 72 = Release, 70 = Shape, 76 = Detune, 77 = Noise, 5 = Glide, 7 = Level, 91 = Reverb, 93 = Delay, 1 = vibrato depth; pitch bend = +-2 semitones. (The CC values are live: they stay in the page until changed and are written at the next save.) |
+| Stop during a held note / a chord | All voices release (no hanging note); Stop in Play mode with a latched arp: silent after the release. |
+| Change Channel from 16 to 0 while a note sounds | The note releases, MIDI instrument 16 sends MIDI again. |
+| **Saved.** Set Cutoff 20, Detune 80, Channel 16, Save, power off, load the project; then load an older project | The values are back in the first project (open the pages); the older project has Channel 0 and default values. |
+| Export (stems / mix) of a pattern that plays the voice | The mix contains the voice (it is part of the dry mix); the track stems do not (it is not one of the 8 sample tracks). |
+| Stock behaviour (section 12) with Channel 0 | Unchanged; there is no visible difference at all. |
+
+Known (plan 009 S): the sends and the dry level of the voice are not on the Master mixer (use the page); the voice is not on the track faders / mute / solo / stems; crossing Shape 0 to 1 while a note sounds may tick once; one voice engine for all MIDI channels is not possible (exactly one channel).
 ## 11f. CPU savings (plan 009 P, v0.2.7): compare with the previous build (v0.2.6) on the same project
 Use one project with 8 sample voices (some with the filter on), the delay and the stock reverb used, the limiter on, and play it. Open Master > Reverb (it resets the average when it opens) and write down "Rev / All CPU" after 30 s of the busiest part; also read Config > audio usage (min / max / avg / last) and "free heap" / "stack ... free ..." (bottom right of the Config page). Do it on v0.2.6 and on this build; the second number of the Master > Reverb item and the Config numbers are the comparison.
 | Press | Expected |

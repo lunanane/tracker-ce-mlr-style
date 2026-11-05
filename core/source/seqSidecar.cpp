@@ -2,6 +2,7 @@
 #include "seqSidecar.h"
 #include "seqClips.h"
 #include "seqFx.h"
+#include "seqPlinky.h"
 #include "seqHooks.h"
 #include "seqClipsLogic.h"
 #include "seqTracks.h"
@@ -100,6 +101,9 @@ void seqSidecarsLoadWorkspace()
 {
     seqTracksLoadWorkspace();
     seqClipsLoadWorkspace();
+#ifdef FEATURE_PLINKY
+    seqPlinkyLoadWorkspace(); // plan 009 S: synth voice values; a project without the file = voice off
+#endif
     seqFxLoadWorkspace();     // plan 007: reverb type / highpass / delay bandpass width; a project without the file = stock sound
     seqFaderProjectLoaded(); // perform FX are not saved: nothing stays dialled in across a project load
 }
@@ -109,6 +113,9 @@ void seqSidecarsSaveWorkspace()
     seqTracksSaveWorkspace();
     seqClipsSaveWorkspace();
     seqFxSaveWorkspace();
+#ifdef FEATURE_PLINKY
+    seqPlinkySaveWorkspace();
+#endif
 }
 
 void seqSidecarsSaveProject(const char* path, const char* name)
@@ -116,6 +123,9 @@ void seqSidecarsSaveProject(const char* path, const char* name)
     seqTracksSaveProject(path, name);
     seqClipsSaveProject(path, name);
     seqFxSaveProject(path, name);
+#ifdef FEATURE_PLINKY
+    seqPlinkySaveProject(path, name);
+#endif
 }
 
 void seqSidecarsImportProject(const char* path, const char* name)
@@ -123,4 +133,7 @@ void seqSidecarsImportProject(const char* path, const char* name)
     seqTracksImportProject(path, name);
     seqClipsImportProject(path, name);
     seqFxImportProject(path, name);
+#ifdef FEATURE_PLINKY
+    seqPlinkyImportProject(path, name);
+#endif
 }

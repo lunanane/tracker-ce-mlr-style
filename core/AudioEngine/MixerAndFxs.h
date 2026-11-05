@@ -30,7 +30,17 @@ class MixerAndFxs
 
     static constexpr int kExternalInputsCount = 1;
 #ifndef PLATFORM_IMX
-    static constexpr int kSendsInputsCount = 2 * kExternalInputsCount + voicesCount;
+    // plan 009 S: the synth voice (original Tracker) takes one more dry input and two more send inputs (left / right)
+#ifdef FEATURE_PLINKY
+    static constexpr int kPlinkyTracksInputs = 1;
+    static constexpr int kPlinkySendInputs = 2;
+#else
+    static constexpr int kPlinkyTracksInputs = 0;
+    static constexpr int kPlinkySendInputs = 0;
+#endif
+    static constexpr int kSendsInputsCount = 2 * kExternalInputsCount + voicesCount + kPlinkySendInputs;
+    static constexpr int kPlinkyTracksChannel = voicesCount;
+    static constexpr int kPlinkySendChannel = 2 * kExternalInputsCount + voicesCount;
 #else
     static constexpr int kSendsInputsCount =
       2 * kExternalInputsCount + 2 * voicesCount + kSynthParts;
@@ -38,7 +48,11 @@ class MixerAndFxs
     static constexpr int kTrackMixerOutputsCount = 1;
     static constexpr int kTrackAndSendsMixerInputs =
       kTrackMixerOutputsCount + kExternalInputsCount + FxType::kFxCount;
+#ifndef PLATFORM_IMX
+    static constexpr int kTracksAndSynthVoices = voicesCount + kSynthParts + kPlinkyTracksInputs;
+#else
     static constexpr int kTracksAndSynthVoices = voicesCount + kSynthParts;
+#endif
 
     MixerAndFxs();
     AudioMixer<kSendsInputsCount>* getPreFxMixer(FxType type);

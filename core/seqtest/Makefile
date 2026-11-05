@@ -8,13 +8,14 @@ GLUE = ../source/seqTracksCore.cpp ../source/seqCut.cpp ../interface/seqSession/
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
 
 .PHONY: test clean preview
-test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE)
+test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE) build/seq_plinky_tests$(EXE)
 	build/seq_cpu_tests$(EXE)
 	build/seq_glue_tests$(EXE)
 	build/seq_perform_tests$(EXE)
 	build/seq_mod_tests$(EXE)
 	build/seq_play_tests$(EXE)
 	build/seq_fx_tests$(EXE)
+	build/seq_plinky_tests$(EXE)
 
 build/seq_glue_tests$(EXE): test_main.cpp test_session.cpp test_cut.inc ../source/seqSessionLogic.h ../source/seqClipsLogic.h ../source/seqCut.h ../source/seqCutLogic.h ../interface/seqSession/cutLayer.h ../interface/seqSession/cutSessionLayer.h ../interface/seqSession/laneDraw.h ../interface/seqSession/laneView.h ../source/seqTracksCore.h ../source/seqTracksLogic.h ../source/seqTracksRec.h ../source/seqRecLogic.h test_rec.inc test_hr.inc $(GLUE) $(SEQ)
 	mkdir -p build
@@ -41,6 +42,11 @@ build/seq_play_tests$(EXE): test_play.cpp ../source/seqPlayLogic.h ../source/seq
 build/seq_fx_tests$(EXE): test_fx.cpp ../source/seqFxDsp.h ../source/seqFxLogic.h ../source/seqSidecarLogic.h ../libs/Audio/Polyverb/ring_reverb.h
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) test_fx.cpp -o $@
+
+# plan 009 S: synth voice engine (libs/Audio/PlinkyVoice, header only). -O2: the cost lines of the test are only meaningful optimised
+build/seq_plinky_tests$(EXE): test_plinky.cpp ../libs/Audio/PlinkyVoice/plinky_voice.h ../libs/Audio/PlinkyVoice/plinky_params.h ../source/seqSidecarLogic.h
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) -O2 -I../libs/Audio/PlinkyVoice test_plinky.cpp -o $@
 
 clean:
 	rm -rf build

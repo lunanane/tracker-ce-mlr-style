@@ -13,6 +13,7 @@
 #include "seqSidecar.h"
 #include "seqClips.h"
 #include "seqFx.h"
+#include "seqPlinky.h"
 #include "seqHooks.h"
 #include <math.h>
 #include <new>
@@ -569,6 +570,9 @@ void seqTracksUpdate()
         newFileManager.autosaveProjectStruct_ASAP();
     seqClipsUpdate();
     seqFxUpdate();
+#ifdef FEATURE_PLINKY
+    seqPlinkyUpdate();
+#endif
     seqCutUpdate();
 
     if (s_pendingRel.any())
