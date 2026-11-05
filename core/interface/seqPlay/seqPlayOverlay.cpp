@@ -362,7 +362,10 @@ bool SeqPlayOverlay::button(uint8_t b, uint8_t state)
         case interfaceButtonInstr:
             // Instrument Parameters (also with screen button 1 held): the Plinky parameter overlay of the selected Plinky track
             if (state == buttonPress)
+            {
+                closeList(false); // v0.3.1: an open type list ends first; the screen-button release then applies no type
                 plinkyToggle();
+            }
             return true;
         case interfaceButtonLeft:
         case interfaceButtonRight:
@@ -662,6 +665,10 @@ void SeqPlayOverlay::refreshView()
                         memset(&snap, 0, sizeof(snap));
                 },
                 &view_.hr);
+        }
+        else if (view_.type == seqlogic::TYPE_PLINKY)
+        {
+            // v0.3.1: the PolySynth legend is drawn from plSetup / plMenu (set above); it must not read the Mono state of the track
         }
         else
         {
