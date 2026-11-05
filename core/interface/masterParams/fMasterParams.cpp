@@ -11,6 +11,7 @@
 #include "performanceMode/performanceMode.h"
 
 #include "masterParams/masterParams.h"
+#include "masterParams/ampView.h"
 #include "mtGainLevelLogarithmicTab.h"
 
 #include "Platform.h"
@@ -90,6 +91,7 @@ static void functSoloMuteReverb(uint8_t state);
 static void functSoloMuteDryMix(uint8_t state);
 static void functSoloMuteLineIn(uint8_t state);
 static void functSoloMuteDelayReverb(uint8_t state);
+static void functAmpView(uint8_t state);
 #ifdef FEATURE_SYNTH
 static void functSelectSynth1(uint8_t state);
 static void functSelectSynth2(uint8_t state);
@@ -146,6 +148,7 @@ static elapsedMillis refreshTimer;
 
 void cMasterParams::update()
 {
+    ampView.update(displayType == displayMode::mixerDelayReverb); // plan 013 M: cheap while closed; closes when the page is left
 
     if (displayType == displayMode::mixer && !keyboardManager.getState())
     {
@@ -341,6 +344,7 @@ void cMasterParams::start(uint32_t options)
 
 void cMasterParams::stop()
 {
+    ampView.forget();
     sequencer.stopManualNotes();
     moduleRefresh = 0;
 }
@@ -1252,6 +1256,9 @@ void cMasterParams::switchToMixerDelayReverb()
     ip->setButtonObj(interfaceButton5, functSelectSynth2);
     ip->setButtonObj(interfaceButton6, functSelectSynth3);
 #endif
+#ifdef FEATURE_PLINKY
+    ip->setButtonObj(interfaceButton7, buttonPress, functAmpView); // plan 013 M
+#endif
     ip->setButtonObj(interfaceButtonShift, functSoloMuteDelayReverb);
 
     ip->setButtonObj(interfaceButtonPlay, buttonPress, functPlayAction);
@@ -2075,6 +2082,23 @@ static void functSelectSynth2(uint8_t state)
     }
 }
 
+#endif // FEATURE_SYNTH
+
+static void functAmpView(uint8_t state)
+{
+    (void)state; // registered for buttonPress only
+    MP->ampViewButton();
+}
+
+void cMasterParams::ampViewButton()
+{
+    if (displayType != displayMode::mixerDelayReverb)
+        return;
+    ampView.toggle();
+    showMixerDelayReverbScreen(); // the label reads "Close" while the view is open
+}
+
+#ifdef FEATURE_SYNTH
 static void functSelectSynth3(uint8_t state)
 {
     if (MP->displayType == cMasterParams::displayMode::masterValues)

@@ -27,6 +27,10 @@ void seqPlinkyDefault(int param);
 float seqPlinkyCpu();                    // % of the 128 sample block period: average ...
 float seqPlinkyCpuPeak();                // ... and slowly decaying peak
 int seqPlinkyVoicesActive();
+// pitch trace ring of the engine (plan 013 V; read only, any context): sample k of a voice is ring[k & (len - 1)], head = next index
+const void* seqPlinkyTraceRing(int voice);
+unsigned seqPlinkyTraceLen();
+uint16_t seqPlinkyTraceHead();
 
 // ---- sidecar "plinky.bin" ----
 void seqPlinkyLoadWorkspace();                                   // Workspace/plinky.bin -> values (missing / invalid: defaults)

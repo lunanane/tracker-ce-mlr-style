@@ -96,6 +96,13 @@ class audioEngine
     void setReverbType(uint8_t type);
     float getReverbCpuPercent();     // CPU of the reverb block in the audio interrupt, % of the block period (average)
     float getReverbCpuPeakPercent(); // ... and its slowly decaying peak
+    // plan 013 M (amplitude view): block peak 0..32768 of the final left / right output (after the limiter) since the last call
+    void setMasterPeakTap(bool on)
+    {
+        limiter[AudioOutput::OutputChannels::kLeft]->setPeakTap(on);
+        limiter[AudioOutput::OutputChannels::kRight]->setPeakTap(on);
+    }
+    uint32_t takeMasterPeak(uint8_t channel) { return limiter[channel]->takePeak(); }
     void setDelayParams(uint8_t value);
     void setLimiterAttack(uint16_t attack);
     void setLimiterRelease(float release);

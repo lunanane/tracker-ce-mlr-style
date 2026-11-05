@@ -17,6 +17,7 @@
 #include "seqTracks.h"
 #ifdef FEATURE_PLINKY
 #include "seqPlinky.h"
+#include "seqPlay/pitchTrace.h" // plan 013 V
 #endif
 
 SeqPlayOverlay seqPlayOverlay;
@@ -43,6 +44,9 @@ void SeqPlayOverlay::createControl()
     prop.data = &view_;
     view_.mode = SeqPlayViewData::HIDDEN;
     viewShownValid_ = false;
+#ifdef FEATURE_PLINKY
+    pitchTraceView.createControl(); // plan 013 V: before the legend control = drawn on top of it
+#endif
     control_ = display.createControl<cSeqPlayLegend>(&prop);
 }
 
@@ -57,6 +61,9 @@ void SeqPlayOverlay::moduleStop()
 {
     leave();
     control_ = -1; // the interface destroys the module's controls right after stop()
+#ifdef FEATURE_PLINKY
+    pitchTraceView.forget(); // plan 013 V
+#endif
     viewShownValid_ = false;
 }
 
@@ -100,7 +107,7 @@ void SeqPlayOverlay::leave()
     applyPlan(seqplay::EV_LEAVE);
     recKey_.reset();
     recStopPending_ = false;
-    plinkyOpen_ = false;
+    plinkyClose(); // also ends the pitch trace view (plan 013 V)
     returnEdit();
     keys_.clear();
     active_ = false;
@@ -335,6 +342,11 @@ bool SeqPlayOverlay::editKey(uint8_t b, uint8_t state)
         case seqplay::EditKeys::TAKE:
             if (kind == seqplay::EditKeys::PRESS && k == seqplay::EditKeys::K_DELETE && plinkyOpen_)
                 plinkyDefault();
+#ifdef FEATURE_PLINKY
+            // plan 013 V: FX2 while the PolySynth overlay is open toggles the pitch trace view (pads keep playing)
+            if (kind == seqplay::EditKeys::PRESS && k == seqplay::EditKeys::K_FX2 && plinkyOpen_)
+                pitchTraceView.show(!pitchTraceView.visible(), "FX2: close");
+#endif
             return true;
         default: return false;
     }
@@ -505,6 +517,9 @@ bool SeqPlayOverlay::pot(uint8_t pot, int16_t value)
 void SeqPlayOverlay::plinkyClose()
 {
     plinkyOpen_ = false;
+#ifdef FEATURE_PLINKY
+    pitchTraceView.show(false, nullptr); // plan 013 V
+#endif
 }
 
 void SeqPlayOverlay::plinkyToggle()
@@ -752,6 +767,9 @@ void SeqPlayOverlay::update()
     if (!active_)
         return;
     uint32_t now = seqNowMs();
+#ifdef FEATURE_PLINKY
+    pitchTraceView.update(); // plan 013 V: cheap while hidden, <= 25 fps while visible
+#endif
 
     if (editBorrowed_ && !keys_.editWanted())
         returnEdit(); // the last editing key was released and its stock handler has run

@@ -152,6 +152,9 @@ void seqPlinkyDefault(int param)
 float seqPlinkyCpu() { return engine.getPlinkyCpuPercent(); }
 float seqPlinkyCpuPeak() { return engine.getPlinkyCpuPeakPercent(); }
 int seqPlinkyVoicesActive() { return eng().activeVoices(); }
+const void* seqPlinkyTraceRing(int voice) { return eng().traceRing(voice); }
+unsigned seqPlinkyTraceLen() { return plinkyvoice::kTraceLen; }
+uint16_t seqPlinkyTraceHead() { return eng().traceHeadIndex(); }
 
 bool seqPlinkyNewerFile() { return s_newerFile; }
 

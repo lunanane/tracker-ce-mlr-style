@@ -145,6 +145,7 @@ class cMasterParams : public ModuleBase
     void switchToMaster();
     void switchToMixer();
     void switchToMixerDelayReverb();
+    void ampViewButton(); // plan 013 M: the "Amp view" screen button of Global Mixer 3/3 (original Tracker)
     void switchToDelayScreen();
     void switchToReverbScreen();
     void switchToLimiterScreen();
@@ -190,7 +191,7 @@ class cMasterParams : public ModuleBase
 
     uint8_t isSolo = 0;
     int8_t soloTrack = -1;
-    char mixerLabel[8][7];
+    char mixerLabel[8][10]; // 10: "Amp view" (plan 013 M)
     char mixerVolumeLabel[8][12];
     char delayVolumeLabel[12];
     char reverbVolumeLabel[12];

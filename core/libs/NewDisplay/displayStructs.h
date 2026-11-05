@@ -181,6 +181,7 @@ typedef enum enControlId
     controlIdSeqFaderView,   // R3 fader page
     controlIdSeqLanes,       // R4 MLR screen: static lanes
     controlIdSeqPlayheads,   // R4 MLR screen: playheads
+    controlIdSeqTraceView,   // plan 013: PolySynth pitch trace / master amplitude view
 
     /*
      *

@@ -334,6 +334,22 @@ struct Marks
 enum { kGridBudget = 5500, kRectCost = 8, kOutlineCost = 28, kBatchCost = 16, kNumberCost = 24 };
 inline uint16_t textCost(uint8_t chars) { return (uint16_t)(16 + 4 * chars); }
 
+// The marks control (plan 013 C): a thin outline round every playing clip and every blinking queued clip (28 bytes each), a progress
+// line (8) per playing clip, the song row bar, the countdown text. Summed from the Marks, never above kMarksBudget.
+enum { kMarksBudget = 1600 };
+inline uint16_t marksCost(const Marks& m)
+{
+    uint32_t cost = 3 * kBatchCost + kBatchCost;       // colour / width changes, the song row bar
+    for (uint8_t t = 0; t < kTracks; t++)
+    {
+        if (m.playRow[t] < kVisRows) cost += kOutlineCost + (m.prog[t] > 0 ? kRectCost : 0);
+        if (m.blink && m.qRow[t] < kVisRows && m.qKind[t] == MK_BLINK) cost += kOutlineCost;
+    }
+    if (m.blink && m.sceneRow < kVisRows) cost += kOutlineCost;
+    if (m.countdown != 0xFF) cost += textCost(16);
+    return (uint16_t)cost;
+}
+
 struct GridPlan
 {
     bool outlines; // steady outlines of armed follow actions
@@ -348,7 +364,7 @@ inline GridPlan planGrid(const View& v)
     GridPlan p = { false, false, false, false, 0 };
     uint32_t cost = 0;
     cost += (uint32_t)(kTracks + kVisRows) * kNumberCost;                        // track and row numbers
-    cost += (uint32_t)(kVisRows * kTracks + kVisRows) * kRectCost + 3 * kBatchCost; // cells and scene cells in three batches
+    cost += (uint32_t)(kVisRows * kTracks + kVisRows) * kRectCost + 6 * kBatchCost; // cells and scene cells: three batches each (plan 013 C)
     cost += 2 * kOutlineCost + 8 + kOutlineCost + 8;                              // pad window frames, focus frame
     cost += textCost(14) + textCost(18) + textCost(18);                           // launch quantise, focus lines
     cost += textCost(22);                                                         // the scene line of the info column (plan 006)

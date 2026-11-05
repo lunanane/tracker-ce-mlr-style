@@ -124,7 +124,7 @@ enum { kPanelY0 = 30, kPanelY1 = 424, kRowY0 = 56, kRowH = 62, kRowStep = 66, kB
 
 template <class C> void draw(C& c, const Model& m, const Palette& p)
 {
-    char buf[48];
+    char buf[72];
     const int selSec = m.sec < kSections ? m.sec : 0;
     // ---- shapes ----
     c.color(p.bg);
@@ -160,9 +160,9 @@ template <class C> void draw(C& c, const Model& m, const Palette& p)
     // ---- texts ----
     c.textPhase();
     c.color(p.text);
-    snprintf(buf, sizeof buf, "PolySynth (track %d)  CPU %d%% pk %d%%", m.track, m.cpu, m.peak);
+    snprintf(buf, sizeof buf, "PolySynth T%d  CPU %d%% pk %d%%  FX2: pitch view", m.track, m.cpu, m.peak); // plan 013 V: FX2 opens pitchTraceView
     c.text(12, 42, 3, 2, buf);
-    c.text(12, 398, 1, 2, "Left/Right: param  Up/Down: section  Jog: value (Shift: fine)  Default: reset");
+    c.text(12, 398, 1, 2, "Left/Right: param  Up/Down: section  Jog: value (Shift: fine)  Del: reset");
     c.text(12, 412, 1, 2, m.newer ? "Instr: close      Newer synth file: edits are not saved" : "Instr: close");
     for (int s = 0; s < kSections; s++)
         for (int i = 0; i < section((uint8_t)s).count; i++)

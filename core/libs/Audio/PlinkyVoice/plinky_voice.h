@@ -43,6 +43,18 @@ constexpr int kBlock = 128;
 constexpr float kFs = 44100.0f;
 constexpr float kBlockSec = (float)kBlock / kFs;
 
+// Pitch trace (plan 013 V): per voice a ring of (pitch, envelope) written at control rate (every kTraceEvery blocks = ~35 ms), read by
+// the main loop (interface/seqPlay/pitchTrace.cpp). The reader copies samples behind the head only, so a torn read can at worst show
+// one wrong point; nothing here is ever waited for.
+constexpr int kTraceLen = 128;     // power of two; the view uses the newest 112
+constexpr int kTraceEvery = 12;    // blocks per sample
+struct TraceSample
+{
+    int16_t pitch; // (base note + glide position + LFO / bend pitch offset) * 32, semitones
+    uint8_t env;   // envelope level 0..255
+    uint8_t on;    // the voice sounds (not idle)
+};
+
 // 2^x, relative error < 2e-5 (7 term series on the fraction, exponent by bit pattern). No libm.
 __attribute__((noinline)) inline float exp2fast(float x)
 {
@@ -162,6 +174,9 @@ class Engine
         smoothed = false;
         for (int i = 0; i < E_N; i++)
             q[i].valid = 0;
+        memset(trace, 0, sizeof(trace));
+        traceHead = 0;
+        traceDiv = 0;
     }
 
     // ---- any context (the sequencer runs in an interrupt, pads and the UI on the main loop) ----
@@ -214,6 +229,9 @@ class Engine
         return n;
     }
     const Voice& voice(int i) const { return v[i]; }
+    // pitch trace ring (any context, read only): sample k of voice i is trace[i][k & (kTraceLen - 1)], the newest is head - 1
+    const TraceSample* traceRing(int i) const { return trace[i]; }
+    uint16_t traceHeadIndex() const { return __atomic_load_n(&traceHead, __ATOMIC_ACQUIRE); }
 
     // Renders one block of kBlock samples (16 bit, left / right). Returns false (outputs untouched) when nothing sounds.
     bool render(int16_t* outL, int16_t* outR)
@@ -248,6 +266,11 @@ class Engine
                 vo.gate = 0;
                 vo.stage = ST_RELEASE;
             }
+        }
+        if (++traceDiv >= kTraceEvery)
+        {
+            traceDiv = 0;
+            writeTrace(d.vib);
         }
         float lv = lvlPrev;
         const float dl = (d.level - lv) * (1.0f / kBlock);
@@ -290,6 +313,28 @@ class Engine
     float sCut, sRes, sNoise, sDet, sShape, sLevel;
     bool smoothed;
     float busL[kBlock], busR[kBlock];
+    TraceSample trace[kMaxVoices][kTraceLen];
+    uint16_t traceHead;
+    uint8_t traceDiv;
+
+    void writeTrace(float vib)
+    {
+        const uint16_t h = traceHead;
+        const int k = h & (kTraceLen - 1);
+        for (int i = 0; i < kMaxVoices; i++)
+        {
+            const Voice& vo = v[i];
+            float p = (vo.pitch + vib) * 32.0f;
+            p = p > 32000.0f ? 32000.0f : (p < -32000.0f ? -32000.0f : p);
+            float e = vo.env * 255.0f;
+            e = e > 255.0f ? 255.0f : (e < 0.0f ? 0.0f : e);
+            TraceSample& s = trace[i][k];
+            s.pitch = (int16_t)(p < 0 ? p - 0.5f : p + 0.5f);
+            s.env = (uint8_t)e;
+            s.on = vo.stage != ST_IDLE ? 1 : 0;
+        }
+        __atomic_store_n(&traceHead, (uint16_t)(h + 1), __ATOMIC_RELEASE);
+    }
 
     bool push(uint8_t type, uint8_t a, uint8_t b)
     {

@@ -8,7 +8,7 @@ GLUE = ../source/seqTracksCore.cpp ../source/seqCut.cpp ../interface/seqSession/
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
 
 .PHONY: test clean preview
-test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE) build/seq_plinky_tests$(EXE)
+test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE) build/seq_plinky_tests$(EXE) build/seq_trace_tests$(EXE)
 	build/seq_cpu_tests$(EXE)
 	build/seq_glue_tests$(EXE)
 	build/seq_perform_tests$(EXE)
@@ -16,6 +16,7 @@ test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tes
 	build/seq_play_tests$(EXE)
 	build/seq_fx_tests$(EXE)
 	build/seq_plinky_tests$(EXE)
+	build/seq_trace_tests$(EXE)
 
 build/seq_glue_tests$(EXE): test_main.cpp test_session.cpp test_cut.inc ../source/seqSessionLogic.h ../source/seqClipsLogic.h ../source/seqCut.h ../source/seqCutLogic.h ../interface/seqSession/cutLayer.h ../interface/seqSession/cutSessionLayer.h ../interface/seqSession/laneDraw.h ../interface/seqSession/laneView.h ../source/seqTracksCore.h ../source/seqTracksLogic.h ../source/seqTracksRec.h ../source/seqRecLogic.h test_rec.inc test_hr.inc test_plinkyseq.inc ../source/seqPlinkySeqLogic.h ../source/seqPlinkyUiLogic.h $(GLUE) $(SEQ)
 	mkdir -p build
@@ -47,6 +48,11 @@ build/seq_fx_tests$(EXE): test_fx.cpp ../source/seqFxDsp.h ../source/seqFxLogic.
 build/seq_plinky_tests$(EXE): test_plinky.cpp ../libs/Audio/PlinkyVoice/plinky_voice.h ../libs/Audio/PlinkyVoice/plinky_params.h ../source/seqSidecarLogic.h
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -O2 -I../libs/Audio/PlinkyVoice test_plinky.cpp -o $@
+
+# plan 013: pitch trace (engine ring, follower, layout, display list size), amplitude view, launcher budgets
+build/seq_trace_tests$(EXE): test_trace.cpp ../libs/Audio/PlinkyVoice/plinky_voice.h ../source/seqPitchTraceLogic.h ../source/seqAmpViewLogic.h ../source/seqPalette.h ../source/seqSessionLogic.h
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) -O2 -I../libs/Audio/PlinkyVoice test_trace.cpp -o $@
 
 clean:
 	rm -rf build

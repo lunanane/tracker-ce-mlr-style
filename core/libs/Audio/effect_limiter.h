@@ -27,6 +27,11 @@ class AudioEffectLimiter : public AudioStream
     void blockUpdate();
     void unblockUpdate();
 
+    // plan 013 M (master amplitude view): peak |sample| of the blocks this stage sent on since the last call, 0 .. 32768. Measured only
+    // while the tap is on (one pass over the block); read from the main loop, tear tolerant.
+    void setPeakTap(bool on) { peakTap = on; }
+    uint32_t takePeak() { return __atomic_exchange_n(&outPeak, (uint32_t)0, __ATOMIC_ACQ_REL); }
+
   private:
     audio_block_t* inputQueueArray[2];
     int16_t inputStorageBuffer[LIMITER_DELAY];
@@ -44,6 +49,9 @@ class AudioEffectLimiter : public AudioStream
     bool isAverageGain;
     bool isSideChainEnable;
     bool isBlocked;
+    volatile bool peakTap = false;
+    volatile uint32_t outPeak = 0;
+    void tapPeak(const int16_t* d);
 };
 
 #endif /* LIBS_AUDIO_EFFECT_LIMITER_H_ */

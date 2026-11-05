@@ -2,6 +2,7 @@
 #include "seqHooks.h"
 #ifdef FEATURE_PLINKY
 #include "seqPlinky.h"
+#include "seqPlay/pitchTrace.h"
 #endif
 #include "instrumentEditor/instrumentEditor.h"
 #include "mtWavetableEnvelopes.h"
@@ -279,6 +280,10 @@ void cInstrumentEditor::start(uint32_t options)
 
 void cInstrumentEditor::stop()
 {
+#ifdef FEATURE_PLINKY
+    pitchTraceView.forget();
+    plinkyPitchView = false;
+#endif
     mtPopups.hideInfoPopup();
     keyboardManager.deactivateKeyboard();
     sequencer.stopManualNotes();

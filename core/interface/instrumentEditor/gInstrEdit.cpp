@@ -3,6 +3,7 @@
 #include "seqPlinky.h"
 #include "seqTracks.h"
 #include "PlinkyVoice/plinky_params.h"
+#include "seqPlay/pitchTrace.h"
 #endif
 #include "instrumentEditor/instrumentEditor.h"
 #include "mtWavetableEnvelopes.h"
@@ -107,6 +108,10 @@ const char* const instrSynthNoteText = "Note: To use MIDI Mapping, the sequence 
 
 void cInstrumentEditor::initDisplayControls()
 {
+#ifdef FEATURE_PLINKY
+    pitchTraceView.createControl(); // plan 013 V: first = lowest index = drawn on top of the page
+    plinkyPitchView = false;
+#endif
     for (uint8_t i = 0; i < 5; i++)
     {
         localActiveBarColors[i] = display.getTheme().activeBarColors[i];
@@ -1960,8 +1965,16 @@ void cInstrumentEditor::showPlinkyCpu(bool force)
 
 void cInstrumentEditor::plinkyRefresh()
 {
+    pitchTraceView.update(); // cheap while hidden; <= 25 fps while visible
     if (!plinkyActive())
+    {
+        if (plinkyPitchView)
+        {
+            plinkyPitchView = false;
+            pitchTraceView.show(false, nullptr);
+        }
         return;
+    }
     const uint32_t now = seqNowMs();
     if (now - plinkyLastMs < 50)
         return;
@@ -2007,6 +2020,8 @@ void cInstrumentEditor::showPlinkyParams()
         display.setControlStyle2(label[i], controlStyleCenterX | controlStyleCenterY | controlStyleFont2);
         display.setControlText(label[i], p >= 0 ? paramInfo(p).name : (p == -2 ? "" : "Next"));
         display.setControlText2(label[i], p >= 0 || p == -2 ? "" : (plinkyPage == 1 ? "p1/3" : (plinkyPage == 2 ? "p2/3" : "p3/3")));
+        if (p == -2) // plan 013 V: the free place of page 3 is the pitch trace toggle
+            display.setControlText(label[i], plinkyPitchView ? "Params" : "Pitch view");
         display.setRemoveControlStyle(label[i], controlStyleShowBitmap);
         display.setRemoveControlStyle(label[i], controlStyleSpecialFx2);
         if (p >= 0)
@@ -2088,6 +2103,15 @@ bool cInstrumentEditor::plinkyButton(uint8_t button, uint8_t state)
     {
         if (state != buttonPress)
             return true;
+        if (plinkyPitchView || (kPlinkyPages[plinkyPage - 1][button] == -2 && plinkyPage == 3))
+        {
+            // plan 013 V: "Pitch view" (page 3, place 7) opens the trace, "Params" or any other screen button closes it again
+            const bool open = !plinkyPitchView && button == 6;
+            plinkyPitchView = open;
+            pitchTraceView.show(open, "Params: close");
+            showPlinkyParams();
+            return true;
+        }
         if (kPlinkyPages[plinkyPage - 1][button] >= 0)
         {
             selectedPlace[mode] = button;
