@@ -21,10 +21,11 @@ def font(n):
 def render(path, out):
     img = Image.new("RGB", (W, H), (0, 0, 0))
     d = ImageDraw.Draw(img)
+    pitch = os.path.basename(path).startswith("pitch")
     d.rectangle([0, 0, W, 28], fill=(40, 40, 40))
-    d.text((8, 6), "Master, Global Mixer 3/3 (stock title bar)", fill=(160, 160, 160))
+    d.text((8, 6), "PolySynth Instrument (stock title bar)" if pitch else "Master, Global Mixer 3/3 (stock title bar)", fill=(160, 160, 160))
     d.rectangle([0, 425, W, H], fill=(30, 30, 30))
-    for i, t in enumerate(["", "", "", "", "", "", "", "Close"]):
+    for i, t in enumerate(["", "", "", "", "", "", "Pitch view" if pitch else "", "" if pitch else "Close"]):
         d.text((i * 100 + 50 - 4 * len(t), 445), t, fill=(150, 150, 150))
     color = (255, 255, 255)
     wd = 1
@@ -66,6 +67,6 @@ def render(path, out):
 
 if __name__ == "__main__":
     for name in sorted(os.listdir(sys.argv[1])):
-        if name.startswith("amp") and name.endswith(".ops"):
+        if (name.startswith("amp") or name.startswith("pitch")) and name.endswith(".ops"):
             render(os.path.join(sys.argv[1], name), os.path.join(sys.argv[1], name[:-4] + ".png"))
             print("wrote", name[:-4] + ".png")

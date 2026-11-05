@@ -24,7 +24,8 @@ class PitchTraceView
     void update();
 
   private:
-    pitchtrace::Follower follower_;
+    // v0.3.7: the follower (672 samples x 4 voices, 10.8 KB) is raw storage in EXTERNAL_RAM, constructed on the first show
+    pitchtrace::Follower* follower_ = nullptr;
     pitchtrace::Range range_;
     TraceViewData data_;
     int8_t control_ = -1;

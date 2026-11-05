@@ -483,6 +483,11 @@ static void functEncoder(int16_t value)
 
     if (MP->displayType == cMasterParams::displayMode::mixerDelayReverb)
     {
+        if (ampView.visible()) // plan 015 V: the jog wheel sets the time scale of the amplitude view ("Jog: time scale")
+        {
+            ampView.jog(value);
+            return;
+        }
         if (MP->delayIsEdited)
         {
             MP->changeDelayVolume(value);

@@ -103,6 +103,9 @@ class audioEngine
         limiter[AudioOutput::OutputChannels::kRight]->setPeakTap(on);
     }
     uint32_t takeMasterPeak(uint8_t channel) { return limiter[channel]->takePeak(); }
+    // plan 015 V: per audio block peaks of the final output, one ring per channel (buffers of the view; nullptr switches the tap off)
+    void setMasterPeakRing(uint8_t channel, uint16_t* buf) { limiter[channel]->setPeakRing(buf); }
+    uint16_t masterPeakHead(uint8_t channel) { return limiter[channel]->ring.headIndex(); }
     void setDelayParams(uint8_t value);
     void setLimiterAttack(uint16_t attack);
     void setLimiterRelease(float release);
@@ -607,6 +610,17 @@ class playerEngine
 
     void setPassEnvelope(uint8_t state);
     float getRMSValue();
+    // plan 015 V: per audio block peaks of this track's output for the amplitude view, one ring per channel analyzer (nullptr = off)
+    int peakTapChannels() const { return (int)rmsPtr.size(); }
+    void setPeakTap(int channel, uint16_t* buf)
+    {
+        if (channel >= 0 && channel < (int)rmsPtr.size())
+            rmsPtr[channel]->tap.attach(buf);
+    }
+    uint16_t peakTapHead(int channel) const
+    {
+        return channel >= 0 && channel < (int)rmsPtr.size() ? rmsPtr[channel]->tap.headIndex() : (uint16_t)0;
+    }
     AudioVoice* getAudioVoice();
 
   private:

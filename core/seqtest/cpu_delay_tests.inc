@@ -476,6 +476,67 @@ static void testRmsWatch()
     CHECK(fabsf(m.read() - 10000.0f / 32767.0f) < 1e-4f); // the silent half was not counted
 }
 
+// ---- plan 015 V: per block peak taps (amplitude view): one value per audio block, only while a ring is attached; the meter is untouched
+static void testPeakTap()
+{
+    AudioAnalyzeRMS& m = *new (calloc(1, sizeof(AudioAnalyzeRMS))) AudioAnalyzeRMS();
+    static uint16_t ring[PeakRing::kLen];
+    memset(ring, 0xAA, sizeof ring);
+    auto feedPeak = [&](int peak, bool block) {
+        if (block)
+        {
+            audio_block_t* b = (audio_block_t*)calloc(1, sizeof(audio_block_t));
+            b->ref_count = 1;
+            for (int s = 0; s < 128; s++)
+                b->data[s] = (int16_t)((s & 1 ? -1 : 1) * (s == 77 ? peak : peak / 3));
+            stubIn[0] = b;
+        }
+        else
+            stubIn[0] = nullptr;
+        m.update();
+    };
+    // no ring attached and nobody watching: nothing is measured
+    feedPeak(5000, true);
+    CHECK(m.tap.headIndex() == 0 && ring[0] == 0xAAAA);
+    m.tap.attach(ring);
+    const int peaks[6] = { 1000, 32767, 0, 250, 12000, 7 };
+    for (int i = 0; i < 6; i++) feedPeak(peaks[i], i != 2 || false);
+    CHECK(m.tap.headIndex() == 6);
+    CHECK(ring[0] == 1000 && ring[1] == 32767 && ring[3] == 250 && ring[4] == 12000 && ring[5] == 7);
+    feedPeak(0, false); // a missing block is a silent block, not a gap in the time axis
+    CHECK(m.tap.headIndex() == 7 && ring[6] == 0);
+    // the RMS meter did not start accumulating by itself (nobody asked): the first read gives 0
+    CHECK(m.read() == 0.0f);
+    // the ring wraps: after kLen + 3 more blocks the head moved on and the newest value sits at head - 1
+    for (int i = 0; i < PeakRing::kLen + 3; i++) feedPeak(100 + i, true);
+    CHECK(m.tap.headIndex() == (uint16_t)(7 + PeakRing::kLen + 3));
+    CHECK(ring[(uint16_t)(m.tap.headIndex() - 1) & (PeakRing::kLen - 1)] == 100 + PeakRing::kLen + 2);
+    // detached: no more writes
+    m.tap.attach(nullptr);
+    feedPeak(900, true);
+    CHECK(m.tap.headIndex() == 0 && !m.tap.active());
+    // the limiter: one peak per block into its ring, the old accumulating peak still works
+    AudioEffectLimiter& nl = *new (calloc(1, sizeof(AudioEffectLimiter))) AudioEffectLimiter();
+    mtProject.values.limiterAttack = 10;
+    mtProject.values.limiterRelease = 100;
+    mtProject.values.limiterThreshold = 32000;
+    mtProject.values.limiterMode = limiterModeSubtle;
+    nl.begin();
+    static uint16_t lring[PeakRing::kLen];
+    nl.setPeakRing(lring);
+    std::vector<int16_t> sig(128 * 10, 0);
+    for (int b = 0; b < 10; b++) sig[b * 128 + 5] = (int16_t)(1000 * (b + 1));
+    runLimiter(nl, sig, nullptr, false);
+    CHECK(nl.ring.headIndex() == 10);
+    bool ok = true;
+    for (int b = 0; b < 10; b++) ok = ok && lring[b] == 1000 * (b + 1);
+    CHECK(ok);
+    CHECK(nl.takePeak() == 10000);
+    nl.setPeakRing(nullptr);
+    runLimiter(nl, sig, nullptr, false);
+    CHECK(nl.ring.headIndex() == 0);
+}
+
 // ---- plan 010: a missing input block is silence for the limiter (it used to return without a word, leaving the stale lookahead samples)
 static void testLimiterMissingBlock()
 {

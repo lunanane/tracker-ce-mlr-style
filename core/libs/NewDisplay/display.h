@@ -104,6 +104,18 @@ class cDisplay
         }
         return sum;
     }
+    // v0.3.7: the same without one control (the view that sizes its own display list to what the others leave)
+    uint32_t shownRamBytesExcept(hControl skip) const
+    {
+        uint32_t sum = 0;
+        for (int i = 0; i < controlsCount; i++)
+        {
+            const cDisplayControl* p = controlsTable[i];
+            if (i != skip && p != nullptr && (p->style & controlStyleShow) && p->refresh)
+                sum += p->ramSize;
+        }
+        return sum;
+    }
     void forceAppedStage();
     void processDisplayUpdateImmediate();
     bool isControlsRefreshProcessIdle();

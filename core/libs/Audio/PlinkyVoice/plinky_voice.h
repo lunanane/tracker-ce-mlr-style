@@ -43,11 +43,11 @@ constexpr int kBlock = 128;
 constexpr float kFs = 44100.0f;
 constexpr float kBlockSec = (float)kBlock / kFs;
 
-// Pitch trace (plan 013 V): per voice a ring of (pitch, envelope) written at control rate (every kTraceEvery blocks = ~35 ms), read by
-// the main loop (interface/seqPlay/pitchTrace.cpp). The reader copies samples behind the head only, so a torn read can at worst show
-// one wrong point; nothing here is ever waited for.
-constexpr int kTraceLen = 128;     // power of two; the view uses the newest 112
-constexpr int kTraceEvery = 12;    // blocks per sample
+// Pitch trace (plan 013 V): per voice a ring of (pitch, envelope) written at control rate (every kTraceEvery blocks = 5.8 ms since
+// v0.3.7, plan 015 V; was 12 blocks), read by the main loop (interface/seqPlay/pitchTrace.cpp), which keeps its own 3.9 s window. The
+// reader copies samples behind the head only, so a torn read can at worst show one wrong point; nothing here is ever waited for.
+constexpr int kTraceLen = 128;     // power of two; 743 ms of samples, the reader runs every ~40 ms
+constexpr int kTraceEvery = 2;     // blocks per sample
 struct TraceSample
 {
     int16_t pitch; // (base note + glide position + LFO / bend pitch offset) * 32, semitones
@@ -332,7 +332,7 @@ class Engine
     uint16_t traceHead;
     uint8_t traceDiv;
 
-    // v0.3.6 (plan 014 A3): the trace is written every kTraceEvery rendered blocks (~35 ms); a voice that sounded in ANY block since
+    // v0.3.6 (plan 014 A3): the trace is written every kTraceEvery rendered blocks (~5.8 ms since v0.3.7); a voice that sounded in ANY block since
     // the last sample is "on" (latched in latchTrace), with the pitch / envelope of its last rendered block. Before, only the state at
     // the sample instant counted: a staccato chord stab (shorter than 35 ms of attack + release) or a note that ended before the next
     // sample was never visible, and the engine going idle wrote no closing sample.
