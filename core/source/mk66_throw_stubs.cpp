@@ -39,4 +39,25 @@ void* operator new(std::size_t size, std::align_val_t al)
     return memalign(static_cast<std::size_t>(al), size);
 }
 
+// memalign() memory is released with free(); the aligned deletes of an over-aligned type must match the aligned news above.
+void operator delete(void* p, std::align_val_t) noexcept
+{
+    free(p);
+}
+
+void operator delete[](void* p, std::align_val_t) noexcept
+{
+    free(p);
+}
+
+void operator delete(void* p, std::size_t, std::align_val_t) noexcept
+{
+    free(p);
+}
+
+void operator delete[](void* p, std::size_t, std::align_val_t) noexcept
+{
+    free(p);
+}
+
 #endif
