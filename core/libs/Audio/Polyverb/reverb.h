@@ -140,7 +140,7 @@ class Reverb
 
             delta = (wet * 32768 - *left) * amount;
             *left += delta;
-            delta_sum += abs(delta);
+            delta_sum += __builtin_fabsf(delta); // plan 009 P#8: was libc abs(int) per sample (-fno-builtin)
 
             c.Load(apout);
             // c.Interpolate(del1, 4450.0f, LFO_1, 50.0f, krt);
@@ -155,7 +155,7 @@ class Reverb
 
             delta = (wet * 32768 - *right) * amount;
             *right += delta;
-            delta_sum += abs(delta);
+            delta_sum += __builtin_fabsf(delta); // plan 009 P#8: was libc abs(int) per sample (-fno-builtin)
 
             ++left;
             ++right;
