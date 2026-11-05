@@ -1,4 +1,9 @@
 #include "core/songTimer.h"
+#ifdef FEATURE_PLINKY
+#include "seqPlinky.h"
+#include "seqTracks.h"
+#include "PlinkyVoice/plinky_params.h"
+#endif
 #include "instrumentEditor/instrumentEditor.h"
 #include "mtWavetableEnvelopes.h"
 #include "fileManager.h"
@@ -362,6 +367,13 @@ void cInstrumentEditor::showTitleBar()
         case mtInstEditModeEnv: label = "Instrument Automation 2/2"; break;
         case mtInstEditModeMidi:
             label = "MIDI Instrument Parameters";
+#ifdef FEATURE_PLINKY
+            if (plinkyActive())
+            {
+                showPlinkyCpu(true);
+                label = plinkyTitle;
+            }
+#endif
             songTimer.hide();
             break;
         case mtInstEditModeInstrSynth: label = "Instrument MIDI Mapping"; break;
@@ -1061,6 +1073,13 @@ void cInstrumentEditor::showInstrumentSynth()
 
 void cInstrumentEditor::showInstrumentMidiParams()
 {
+#ifdef FEATURE_PLINKY
+    if (plinkyActive())
+    {
+        showPlinkyParams();
+        return;
+    }
+#endif
     showTitleBar();
     refreshFramePosition();
 
@@ -1905,3 +1924,194 @@ const char* const InstrumentCCNames[] = {
 // --------------------------------------------  synth  -------------------------------------------
 // --------------------------------------------  synth  -------------------------------------------
 // --------------------------------------------  synth  -------------------------------------------
+
+#ifdef FEATURE_PLINKY
+// plan 009 S: the synth voice on a MIDI instrument. Page 1: voice and sends, page 2: oscillators and filter, page 3: envelope and
+// LFO; place 7 = Next (wraps). Place 0 of page 1 is the Channel: Off (or another channel) gives the instrument back to MIDI.
+namespace
+{
+using namespace plinkyvoice;
+const int8_t kPlinkyPages[3][8] = {
+    { P_CHANNEL, P_VOICES, P_LEVEL, P_REVERB, P_DELAY, P_GLIDE, P_WIDTH, -1 },
+    { P_SHAPE, P_DETUNE, P_INTERVAL, P_NOISE, P_CUTOFF, P_RESO, P_DRIVE, -1 },
+    { P_ATTACK, P_DECAY, P_SUSTAIN, P_RELEASE, P_LFO_RATE, P_LFO_DEPTH, P_LFO_DEST, -1 },
+};
+const char* const kPlinkyLfoDest[3] = { "Pitch", "Shape", "Cutoff" };
+} // namespace
+
+bool cInstrumentEditor::plinkyActive() const
+{
+    const int i = mtProject.values.lastUsedInstrument;
+    return mode == mtInstEditModeMidi && i >= MIDI_INSTRUMENTS_START_IDX && i < MIDI_INSTRUMENTS_START_IDX + kMidiInstrumentsCount &&
+           seqPlinkyGet(P_CHANNEL) == i - MIDI_INSTRUMENTS_START_IDX + 1;
+}
+
+void cInstrumentEditor::showPlinkyCpu(bool force)
+{
+    char t[sizeof(plinkyTitle)];
+    snprintf(t, sizeof(t), "Plinky %d/3  CPU %d%% pk %d%%", plinkyPage, (int)(seqPlinkyCpu() + 0.5f), (int)(seqPlinkyCpuPeak() + 0.5f));
+    if (force || strcmp(t, plinkyTitle) != 0)
+    {
+        memcpy(plinkyTitle, t, sizeof(plinkyTitle));
+        if (!force)
+            titleBar->setTitle(plinkyTitle);
+    }
+}
+
+void cInstrumentEditor::plinkyRefresh()
+{
+    if (!plinkyActive())
+        return;
+    const uint32_t now = seqNowMs();
+    if (now - plinkyLastMs < 50)
+        return;
+    plinkyLastMs = now;
+    showPlinkyCpu(false);
+}
+
+void cInstrumentEditor::showPlinkyValue(uint8_t place)
+{
+    const int p = kPlinkyPages[plinkyPage - 1][place];
+    if (p < 0)
+        return;
+    const int v = seqPlinkyGet(p);
+    const ParamInfo& pi = paramInfo(p);
+    char* s = plinkyVal[place];
+    switch (p)
+    {
+        case P_CHANNEL: snprintf(s, sizeof(plinkyVal[0]), v ? "MIDI %d" : "Off", v); break;
+        case P_INTERVAL: snprintf(s, sizeof(plinkyVal[0]), "%+d st", v - 12); break;
+        case P_LFO_DEST: snprintf(s, sizeof(plinkyVal[0]), "%s", kPlinkyLfoDest[v > 2 ? 2 : v]); break;
+        default: snprintf(s, sizeof(plinkyVal[0]), "%d", v); break;
+    }
+    display.setControlValue(barControl[place], (v - pi.min) * 100 / (pi.max - pi.min));
+    display.refreshControl(barControl[place]);
+    display.setControlText2(label[place], s);
+    display.refreshControl(label[place]);
+}
+
+void cInstrumentEditor::showPlinkyParams()
+{
+    showTitleBar();
+    refreshFramePosition();
+
+    const uint32_t shadow = (display.getTheme().bottomScreenShadow > 0 ? controlStyleBottomShadow : 0);
+    const uint32_t gradient = (display.getTheme().barShadow > 0 ? controlStyleGradient : 0);
+
+    for (uint8_t i = 0; i < 8; i++)
+    {
+        const int p = kPlinkyPages[plinkyPage - 1][i];
+        display.setControlValue(label[i], 1);
+        display.setControlColors(label[i], display.getTheme().activeLabelsColors);
+        display.setRemoveControlStyle(label[i], controlStyleLimitTextWidth);
+        display.setControlStyle2(label[i], controlStyleCenterX | controlStyleCenterY | controlStyleFont2);
+        display.setControlText(label[i], p >= 0 ? paramInfo(p).name : "Next");
+        display.setControlText2(label[i], p >= 0 ? "" : (plinkyPage == 1 ? "p1/3" : (plinkyPage == 2 ? "p2/3" : "p3/3")));
+        display.setRemoveControlStyle(label[i], controlStyleShowBitmap);
+        display.setRemoveControlStyle(label[i], controlStyleSpecialFx2);
+        if (p >= 0)
+        {
+            display.setControlStyle(barControl[i], (controlStyleShow | controlStyleValue_0_100 | controlStyleBackground) | shadow | gradient);
+            display.setControlShow(barControl[i]);
+        }
+        else
+        {
+            display.setControlHide(barControl[i]);
+        }
+        display.refreshControl(barControl[i]);
+    }
+    display.setControlPosition(label[1], (800 / 8) * 1 + (800 / 16), -1);
+    display.setControlPosition(label[6], (800 / 8) * 6 + (800 / 16), -1);
+
+    for (uint8_t i = 0; i < 8; i++)
+    {
+        showPlinkyValue(i);
+        display.setControlShow(label[i]);
+        display.refreshControl(label[i]);
+    }
+
+    for (uint8_t i = 0; i < 6; i++)
+        display.setControlHide(ccNameListControl[i]);
+
+    display.setControlValue(bgLabel, 255);
+    display.setControlShow(bgLabel);
+    display.refreshControl(bgLabel);
+
+    display.setControlHide(list1Control);
+    display.setControlHide(list2Control);
+    display.setControlHide(list3Control);
+    display.setControlHide(list4Control);
+    display.setControlHide(filterModeListControl);
+    display.setControlHide(doubleLabelAutomation);
+    display.setControlHide(paramsListControl);
+    display.setControlHide(modelListControl);
+    display.setControlHide(instrumentSynthCCListControl);
+    display.setControlHide(instrumentListControl);
+    display.setControlHide(noteLabel);
+    display.setControlHide(blankSpaceCover[0]);
+    display.setControlHide(imgGridControl);
+
+    display.synchronizeRefresh();
+}
+
+void cInstrumentEditor::plinkyChange(int d)
+{
+    const int p = kPlinkyPages[plinkyPage - 1][selectedPlace[mode]];
+    if (p < 0)
+        return;
+    seqPlinkySet(p, seqPlinkyGet(p) + d);
+    if (!plinkyActive())
+    {
+        showInstrumentMidiParams(); // the channel was changed away: back to the MIDI settings
+        return;
+    }
+    showPlinkyValue(selectedPlace[mode]);
+}
+
+void cInstrumentEditor::plinkyDefault()
+{
+    const int p = kPlinkyPages[plinkyPage - 1][selectedPlace[mode]];
+    if (p < 0)
+        return;
+    seqPlinkyDefault(p);
+    if (!plinkyActive())
+    {
+        showInstrumentMidiParams();
+        return;
+    }
+    showPlinkyValue(selectedPlace[mode]);
+}
+
+bool cInstrumentEditor::plinkyButton(uint8_t button, uint8_t state)
+{
+    if (plinkyActive())
+    {
+        if (state != buttonPress)
+            return true;
+        if (kPlinkyPages[plinkyPage - 1][button] >= 0)
+        {
+            selectedPlace[mode] = button;
+            activateLabelsBorder();
+            return true;
+        }
+        plinkyPage = plinkyPage < 3 ? plinkyPage + 1 : 1; // Next
+        selectedPlace[mode] = 0;
+        showPlinkyParams();
+        activateLabelsBorder();
+        return true;
+    }
+    const int i = mtProject.values.lastUsedInstrument;
+    if (button == 0 && state == buttonPress && buttons->isButtonPressed(interfaceButtonShift) && i >= MIDI_INSTRUMENTS_START_IDX &&
+        i < MIDI_INSTRUMENTS_START_IDX + kMidiInstrumentsCount)
+    {
+        // Shift + screen button 1: this MIDI instrument becomes the synth voice (its channel is the voice channel)
+        seqPlinkySet(plinkyvoice::P_CHANNEL, i - MIDI_INSTRUMENTS_START_IDX + 1);
+        plinkyPage = 1;
+        selectedPlace[mode] = 0;
+        showInstrumentMidiParams();
+        activateLabelsBorder();
+        return true;
+    }
+    return false;
+}
+#endif

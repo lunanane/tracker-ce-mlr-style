@@ -1,4 +1,7 @@
 #include "seqLauncher.h"
+#ifdef FEATURE_PLINKY
+#include "seqPlinky.h"
+#endif
 #include "instrumentEditor/instrumentEditor.h"
 #include "mtWavetableEnvelopes.h"
 
@@ -76,6 +79,9 @@ static void onNoteKeyboardHide();
 void cInstrumentEditor::update()
 {
     moduleRefresh = 0;
+#ifdef FEATURE_PLINKY
+    plinkyRefresh();
+#endif
 }
 
 void cInstrumentEditor::start(uint32_t options)
@@ -436,6 +442,14 @@ void cInstrumentEditor::changeParamValue(int value, ValueChangeSource source)
         return;
     }
 
+#ifdef FEATURE_PLINKY
+    if (plinkyActive())
+    {
+        plinkyChange(value);
+        return;
+    }
+#endif
+
     if (frameData.multiSelActiveNum != 0)
     {
         stepThroughNodes(value, invert);
@@ -534,6 +548,10 @@ void cInstrumentEditor::changeParamValue(int value, ValueChangeSource source)
 
 static void functSelectParams(uint8_t button, uint8_t state)
 {
+#ifdef FEATURE_PLINKY
+    if (IE->mode == mtInstEditModeMidi && IE->plinkyButton(button, state))
+        return;
+#endif
     uint8_t mode_places = button + IE->mode * 10;
 
     if (IE->mode == mtInstEditModeEnv)
@@ -3021,6 +3039,13 @@ static void functNote(uint8_t value)
 
 void cInstrumentEditor::setDefaultValue(uint8_t place)
 {
+#ifdef FEATURE_PLINKY
+    if (plinkyActive())
+    {
+        plinkyDefault();
+        return;
+    }
+#endif
     switch (place)
     {
         case 0: setDefaultVolume(); break;

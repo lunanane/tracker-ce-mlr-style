@@ -38,7 +38,7 @@ sites) and about 100 KB+ of flash. The image has 37 KB left. So the engine is wr
 - **Engine** `core/libs/Audio/PlinkyVoice/plinky_voice.h` (header only, no Polyend includes, host-tested) + `plinky_params.h`
   (parameter table, sidecar `plinky.bin`), **audio stream** `core/libs/Audio/synth_plinky.{h,cpp}` (2 outputs, DWT cycle counter),
   **glue** `core/source/seqPlinky.{h,cpp}` (MIDI routing, values, sidecar, deferred write like `seqfx.bin`), **UI** three pages
-  under Master > Limiter > "Plinky" (`gMasterParams.cpp` / `fMasterParams.cpp`), enabled by `-DFEATURE_PLINKY` for MK66 only.
+  on the Instrument Parameters page of the MIDI instrument that owns the voice channel (`gInstrEdit.cpp` / `fIinstrEdit.cpp`; owner decision: the instrument page; Shift + screen button 1 on a MIDI instrument claims its channel), enabled by `-DFEATURE_PLINKY` for MK66 only.
 - **How a track plays it**: the voice owns one MIDI channel (parameter Channel). `sendMidiNoteOn/Off`, `sendCC` and `sendPitchbend`
   (the single choke point of the stock sequencer, our Chord/Arp / Mono tracks, clips, pads, external MIDI keyboard) hand
   non-synth messages of that channel to the engine instead of the MIDI outputs. MIDI instrument N = channel N, so every stock
@@ -91,8 +91,7 @@ is one function with per-block constant branches (4 copies of the loop were 1.5 
 measurements; the CPU numbers above are estimates. (2) The voice is on one MIDI channel only; that channel no longer sends MIDI
 (by design). (3) The sample loop runs from flash; if the pk value shows spikes, the loop can be moved to `AUDIO_CORE_RAM` (about
 2.4 KB of RAM) or the 4 voices reduced by default. (4) Not built here: Tracker+ / Mini (`FEATURE_PLINKY` is off there; the shared
-edits are guarded). (5) The page is on the limiter screen because the Master page and the instrument page have no free slot;
-a nicer place needs a UI decision. (6) A mode change Shape 0 to 1 while a note sounds can tick once. (7) The voice is not on the
+edits are guarded). (5) The claim gesture (Shift + screen button 1) is not shown on screen. (6) A mode change Shape 0 to 1 while a note sounds can tick once. (7) The voice is not on the
 track faders / mute / solo / stems; its sends are separate (page 1).
 
 ## P — CPU audit (report)
@@ -202,3 +201,5 @@ Assume a Plinky voice costs ~2-3 % (to be measured with the instrument-page CPU 
 
 #1, #2 (no filter), #4, #8, #9 are bit-exact and small: together roughly **14-25 %** of the budget (scenario dependent) before any audible
 change. No hotkey or UI change is needed. Next step: the owner approves the list; no code was changed.
+
+**After merging seq-tracks v0.2.6 and moving the UI to the instrument page**: image end 0xEEC90 -> **0xF1468** (+10,200 bytes), RAM +1,920 bytes; above 0xF0000 until the flash-freeing branch lands.

@@ -5,9 +5,6 @@
 #include "mtSequencer.h"
 #include "seqLauncher.h"
 #include "seqFx.h"
-#ifdef FEATURE_PLINKY
-#include "seqPlinky.h"
-#endif
 
 #include "patternEditor/patternEditor.h"
 #include "performanceMode/performanceMode.h"
@@ -68,9 +65,6 @@ static void functSelectReverbDiffusion();
 static void functSelectReverbType();
 static void functReverbLineIn();
 static void functReverbCancel();
-#ifdef FEATURE_PLINKY
-static void functPlinkyOpen();
-#endif
 // limiter
 static void functSelectLimiterAttack();
 static void functSelectLimiterRelease();
@@ -171,10 +165,7 @@ void cMasterParams::update()
 
     if ((displayType == displayMode::masterValues) && (isLimiterScreen))
     {
-#ifdef FEATURE_PLINKY
-        if (!plinkyPage)
-#endif
-            gainReduceHandler();
+        gainReduceHandler();
     }
 
     // gdyby byla taka potrzeba mozna sprobowac tu odswiezac rowniez levele, a obliczac w kazdej
@@ -185,15 +176,6 @@ void cMasterParams::update()
 
     if ((displayType == displayMode::masterValues) && isReverbScreen)
         showReverbCpu(); // every 50 ms
-#ifdef FEATURE_PLINKY
-    if ((displayType == displayMode::masterValues) && isLimiterScreen)
-    {
-        if (plinkyPage)
-            showPlinkyCpu();
-        else
-            showPlinkyEntry();
-    }
-#endif
 
     if (displayType == displayMode::mixer && !keyboardManager.getState())
     {
@@ -559,12 +541,6 @@ static void functEncoder(int16_t value)
             default: break;
         }
     }
-#ifdef FEATURE_PLINKY
-    else if (MP->plinkyPage)
-    {
-        MP->plinkyChange(value);
-    }
-#endif
     else if (MP->isLimiterScreen)
     {
         switch (MP->selectedPlaceLimiter)
@@ -624,12 +600,6 @@ static void functLeft()
             MP->selectedPlaceReverb--;
         MP->refreshReverbFrame();
     }
-#ifdef FEATURE_PLINKY
-    else if (MP->plinkyPage)
-    {
-        MP->plinkyMove(-1);
-    }
-#endif
     else if (MP->isLimiterScreen)
     {
         if (MP->selectedPlaceLimiter == 4)
@@ -694,12 +664,6 @@ static void functRight()
             MP->selectedPlaceReverb++;
         MP->refreshReverbFrame();
     }
-#ifdef FEATURE_PLINKY
-    else if (MP->plinkyPage)
-    {
-        MP->plinkyMove(1);
-    }
-#endif
     else if (MP->isLimiterScreen)
     {
         if (MP->selectedPlaceLimiter == 2)
@@ -813,12 +777,6 @@ static void functUp()
             default: break;
         }
     }
-#ifdef FEATURE_PLINKY
-    else if (MP->plinkyPage)
-    {
-        MP->plinkyChange(1);
-    }
-#endif
     else if (MP->isLimiterScreen)
     {
         switch (MP->selectedPlaceLimiter)
@@ -924,12 +882,6 @@ static void functDown()
             default: break;
         }
     }
-#ifdef FEATURE_PLINKY
-    else if (MP->plinkyPage)
-    {
-        MP->plinkyChange(-1);
-    }
-#endif
     else if (MP->isLimiterScreen)
     {
         switch (MP->selectedPlaceLimiter)
@@ -1036,12 +988,6 @@ static void functDelete()
             default: break;
         }
     }
-#ifdef FEATURE_PLINKY
-    else if (MP->plinkyPage)
-    {
-        MP->plinkyDefault();
-    }
-#endif
     else if (MP->isLimiterScreen)
     {
         switch (MP->selectedPlaceLimiter)
@@ -1253,9 +1199,6 @@ void cMasterParams::switchToMaster()
     isReverbScreen = false;
     isLimiterScreen = false;
     isEqualizerScreen = false;
-#ifdef FEATURE_PLINKY
-    plinkyPage = 0;
-#endif
 
     showMasterScreen();
 }
@@ -1368,10 +1311,6 @@ void cMasterParams::switchToLimiterScreen()
     ip->setButtonObj(interfaceButton1, buttonPress, functSelectLimiterRelease);
     ip->setButtonObj(interfaceButton2, buttonPress, functSelectLimiterThreshold);
     ip->setButtonObj(interfaceButton4, buttonPress, functSelectLimiterSidechain);
-#ifdef FEATURE_PLINKY
-    ip->setButtonObj(interfaceButton6, buttonPress, functPlinkyOpen);
-    plinkyPage = 0;
-#endif
     ip->setButtonObj(interfaceButton7, buttonPress, functLimiterCancel);
 
     keyboardManager.deactivateKeyboard();
@@ -1544,49 +1483,6 @@ static void functReverbCancel()
 {
     MP->switchToMaster();
 }
-
-#ifdef FEATURE_PLINKY
-// plan 009 S: the Plinky pages. Places 0 .. 6 select a value (jog wheel / up / down change it, left / right move), place 7 = Next / Back.
-static void functPlinkyOpen()
-{
-    MP->plinkyPage = 1;
-    MP->plinkyPlace = 0;
-    MP->switchToPlinkyScreen();
-}
-static void functPlinky0() { MP->plinkyButton(0); }
-static void functPlinky1() { MP->plinkyButton(1); }
-static void functPlinky2() { MP->plinkyButton(2); }
-static void functPlinky3() { MP->plinkyButton(3); }
-static void functPlinky4() { MP->plinkyButton(4); }
-static void functPlinky5() { MP->plinkyButton(5); }
-static void functPlinky6() { MP->plinkyButton(6); }
-static void functPlinky7() { MP->plinkyButton(7); }
-
-void cMasterParams::switchToPlinkyScreen()
-{
-    ip->clearButtonsRange(interfaceButton0, interfaceButton7);
-    ip->clearButton(interfaceButtonShift);
-
-    ip->setButtonObj(interfaceButton0, buttonPress, functPlinky0);
-    ip->setButtonObj(interfaceButton1, buttonPress, functPlinky1);
-    ip->setButtonObj(interfaceButton2, buttonPress, functPlinky2);
-    ip->setButtonObj(interfaceButton3, buttonPress, functPlinky3);
-    ip->setButtonObj(interfaceButton4, buttonPress, functPlinky4);
-    ip->setButtonObj(interfaceButton5, buttonPress, functPlinky5);
-    ip->setButtonObj(interfaceButton6, buttonPress, functPlinky6);
-    ip->setButtonObj(interfaceButton7, buttonPress, functPlinky7);
-
-    keyboardManager.deactivateKeyboard();
-
-    showPlinkyScreen();
-
-    displayType = displayMode::masterValues;
-    isDelayScreen = false;
-    isReverbScreen = false;
-    isEqualizerScreen = false;
-    isLimiterScreen = true; // the Master key returns to the limiter screen
-}
-#endif
 
 // limiter screen
 static void functSelectLimiterAttack()
