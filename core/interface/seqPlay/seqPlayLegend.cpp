@@ -9,8 +9,8 @@
 #include <stdio.h>
 
 namespace {
-constexpr int16_t kListY = 328;    // three boxes of 30 px, 2 px apart: y 328..422
 constexpr int16_t kListStep = 32;
+constexpr int16_t kListY = (int16_t)(424 - seqlogic::TYPE_COUNT * kListStep); // TYPE_COUNT boxes of 30 px, 2 px apart, ending at y 422
 constexpr int16_t kCellW = 100;
 constexpr int16_t kLegendX = 40;   // 12 cells of 60 px: x 40..760
 constexpr int16_t kLegendY = 334;  // 4 rows of 22 px: y 334..422
@@ -121,6 +121,7 @@ void cSeqPlayLegend::update()
     st.vel = view->vel;
     st.tie = view->tie;
     st.win = view->win;
+    st.hr = &view->hr;
 
     // backing panel: two caption lines (state, how to play) above the 12 x 4 cells
     API_COLOR(th.backgroundColor);

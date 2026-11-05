@@ -175,7 +175,9 @@ static void test_logic()
 {
     CHECK(trackFromScreenButton(0, false) == 0 && trackFromScreenButton(7, false) == 7);
     CHECK(trackFromScreenButton(0, true) == 8 && trackFromScreenButton(7, true) == 15);
-    CHECK(stepTypeSelection(0, -1) == 0 && stepTypeSelection(0, 3) == 1 && stepTypeSelection(2, 1) == 2);
+    // plan 008 D: the HYPER_RASP script types follow Mono in the list (was: the list ended at Mono = 2); same clamping, checked at both ends
+    CHECK(stepTypeSelection(0, -1) == 0 && stepTypeSelection(0, 3) == 1 && stepTypeSelection(2, 1) == TYPE_HR_FIRST);
+    CHECK(stepTypeSelection(TYPE_COUNT - 1, 1) == TYPE_COUNT - 1 && stepTypeSelection(TYPE_COUNT - 1, -1) == TYPE_COUNT - 2);
     CHECK(velocityToVolume(127) == 100 && velocityToVolume(0) == 0 && velocityToVolume(64) == 50);
     CHECK(padCol(13) == 1 && padRow(13) == 1 && padCol(47) == 11 && padRow(47) == 3);
     CHECK(wantTakeover(TYPE_CHORDARP, 1, 0, false, false));
@@ -1193,6 +1195,9 @@ static void fixCrc(uint8_t* b, size_t n)
     b[end + 1] = (uint8_t)(crc >> 8);
 }
 
+#include "seqPlayLogic.h"
+#include "test_hr.inc"
+
 static void test_sidecar_roundtrip_and_corruption()
 {
     MockHost h1, h2;
@@ -1254,10 +1259,10 @@ static void test_sidecar_roundtrip_and_corruption()
     memset(bad, 0, sizeof(bad)); // empty file read into a zeroed buffer
     CHECK(!c->loadState(bad, sizeof(bad)));
     CHECK(c->type(7) == TYPE_MONO && c->stateHash() == hashC); // refused files change nothing
-    // a valid frame with an invalid block (type 7) and a fixed-up CRC: only that track falls back to Off, the rest loads
+    // a valid frame with an invalid block (type TYPE_COUNT, the first number past the last type) and a fixed-up CRC: only that track falls back to Off, the rest loads
     // (owner review 2026-11-04: a single bad block must not throw away the whole file)
     memcpy(bad, buf, n);
-    bad[8] = 7; // track 0
+    bad[8] = TYPE_COUNT; // track 0
     fixCrc(bad, n);
     CHECK(c->loadState(bad, n));
     CHECK(c->type(0) == TYPE_OFF && c->type(3) == TYPE_CHORDARP && c->type(9) == TYPE_MONO && c->type(7) == TYPE_OFF);
@@ -1403,6 +1408,13 @@ int main()
     test_engine_rec_chord();
     test_sample_track_chord_lowest_only();
     test_sidecar_roundtrip_and_corruption();
+    test_hr_type_numbers_and_names();
+    test_hr_pads_sound_and_take_over();
+    test_hr_clock_runs_only_while_the_transport_plays();
+    test_hr_type_change_silences_and_releases();
+    test_hr_tracks_share_the_scale_bus();
+    test_hr_sidecar_roundtrip_and_old_files();
+    test_hr_state_hash_follows_the_settings_only();
     test_state_change_detection();
     test_hash_ignores_performance();
     test_save_uses_critical_sections();

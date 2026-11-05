@@ -1,11 +1,12 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
-// Engine of the per-track sequencers (Chord/Arp, Mono): state, takeover logic, command queue.
+// Engine of the per-track sequencers (Chord/Arp, Mono, the ported HYPER_RASP scripts): state, takeover logic, command queue.
 // No Polyend includes (only seqgen), so it is tested on the desktop (core/seqtest).
 // Threads: postPad/postType and the getters are called from the main loop; everything else from the audio
 // context (Sequencer::tick / tick_uStep). Main -> audio goes through a single-producer ring buffer.
 #pragma once
 #include "chordarp.h"
 #include "mono.h"
+#include "hr_scripts.h"
 #include "seqTracksLogic.h"
 #include "seqTracksRec.h"
 #include "seqCut.h"
@@ -75,8 +76,9 @@ class Engine
     bool popRecOp(seqrec::Op& out); // ops from the audio side, in order
 
     // ---- project sidecar (main loop, with the audio engine idle or stopped) ----
-    // File = "SQTR", version, track count, payload length (u16), per track [type, lenCA, CA, lenMono, Mono], CRC16.
-    enum { kSidecarVersion = 1, kSidecarMax = 8 + seqlogic::kTracks * (3 + seqgen::ChordArp::kSerialSize + seqgen::Mono::kSerialSize) + 2 };
+    // File = "SQTR", version, track count, payload length (u16), per track [type, lenCA, CA, lenMono, Mono, (version 2:) lenHR, HR], CRC16.
+    // Version 1 files (no HR block) still load; saving writes version 2. The HR block is the settings of the track's HYPER_RASP script.
+    enum { kSidecarVersion = 2, kSidecarMax = 8 + seqlogic::kTracks * (4 + seqgen::ChordArp::kSerialSize + seqgen::Mono::kSerialSize + seqgen::HrScript::kMaxSerial) + 2 };
     size_t saveState(uint8_t* buf, size_t cap) const; // 0 = buffer too small
     bool loadState(const uint8_t* buf, size_t len);   // false = invalid frame (nothing changed); a bad track block only turns that track Off
     void resetState();                                // all tracks Off, fresh state
@@ -104,6 +106,9 @@ class Engine
     seqgen::SeqContext& context() { return ctx_; }
     seqgen::ChordArp& chordArp(uint8_t t) { return t_[t].ca; }
     seqgen::Mono& mono(uint8_t t) { return t_[t].mo; }
+    const seqgen::HrScript* hr(uint8_t t) const { return t < kTracks ? t_[t].hr.get() : 0; } // the HYPER_RASP script of an HR-type track, else 0
+    seqgen::HrScript* hr(uint8_t t) { return t < kTracks ? t_[t].hr.get() : 0; }
+    seqgen::HrBus& hrBus() { return hrBus_; }
     int soundingCount(uint8_t t) const { return t_[t].nSounding; }
 
   private:
@@ -116,6 +121,7 @@ class Engine
     {
         seqgen::ChordArp ca;
         seqgen::Mono mo;
+        seqgen::HrSlot hr; // the script of an HR type (constructed in place on a type change)
         uint8_t type;
         uint8_t pending;
         bool monoSteps;
@@ -146,11 +152,13 @@ class Engine
     int heldPads(const Track& t) const;
     bool recLive(uint8_t track) const { return ((takenMask_ >> track) & 1u) || heldPads(t_[track]) > 0; } // the sequencer is played on the track (also while it is muted)
     void scanMono(Track& t);
+    void createHr(uint8_t track, uint8_t type);
     static void sink(void* user, const seqgen::Event& e);
     void onEvent(const seqgen::Event& e);
 
     Host* host_;
     seqgen::SeqContext ctx_;
+    seqgen::HrBus hrBus_; // scale / root shared by the HYPER_RASP scripts (their set_scale / set_root_note)
     Track t_[kTracks];
     Cmd ring_[kRing];
     volatile uint8_t head_, tail_;

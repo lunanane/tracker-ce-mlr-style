@@ -30,6 +30,7 @@ struct SeqPlayViewData
     uint8_t vel = 1;   // LEGEND (Mono): velocity pattern 1..72
     uint8_t tie = 0;   // LEGEND (Mono): tie
     int8_t win = 0;    // LEGEND (Mono): degree window offset
+    seqplay::HrSnap hr = {}; // LEGEND (HYPER_RASP types): title, help and cells reported by the script
     uint8_t edge = 0;  // 0 none; 1 / 2: the selected track is on the higher / lower strip page than the one shown (edge marker)
     uint8_t edgeTrack = 0; // that track's number 1..16
 };

@@ -71,9 +71,9 @@ Naming: the bottom-right key printed "Perform" is the firmware's **Pattern** key
 ## 3. Pick a sequencer type (hold the track's screen button + jog wheel)
 | Press | Expected |
 |---|---|
-| Hold a track's screen button, turn the wheel **one detent** | A list Off / Chord/Arp / Mono (3 boxes) appears above that button, highlight on the track's **current** type, a small square marks the current one. The first detent only opens the list, it never changes the type. |
+| Hold a track's screen button, turn the wheel **one detent** | A list Off / Chord/Arp / Mono / Arp Lines / Chord Stabs / Arp Seq / HR Chord/Arp / Bassline Seq / Euclid Drums / Grid Seq / Step Follow (11 boxes, bottom-aligned above the button, original Tracker) appears above that button, highlight on the track's **current** type, a small square marks the current one. The first detent only opens the list, it never changes the type. |
 | Release the button without turning further | Nothing changes (the type stays; a running track is not touched). |
-| Hold the button, turn the wheel 2 detents, release (transport stopped) | The type applies at once: the strip shows `CHRD` or `MONO` (`---` for Off). |
+| Hold the button, turn the wheel 2 detents, release (transport stopped) | The type applies at once: the strip shows `CHRD`, `MONO`, `ARPL`, `STAB`, `ARSQ`, `HRCA`, `BASS`, `EUCL`, `GRID` or `STEP` (`---` for Off). |
 | Start the pattern (Play), hold the button, wheel to another type, release | Line 2 of that cell shows `next: MONO`; the type changes at the next bar. |
 | With a change pending: hold the button, wheel back to the current type, release | The pending change is cancelled (`next:` disappears). |
 | Open the list, then press Shift (or **Left / Right**) before releasing | The list closes and nothing is applied. |
@@ -99,6 +99,75 @@ Use a MIDI track (9-16) with a synth/hardware on its channel, and a sample track
 | CLEAR pad (column 12, row 1) | The sequence is cleared, the note stops, `*` goes, the pattern plays again on that track. |
 | Stop | Notes stop immediately, `*` goes. |
 | Leave Play mode while Mono plays | Mono keeps playing (set the track to Off to silence it). |
+
+# HYPER_RASP types (plan 008 D) - original Tracker only
+These eight types are the scripts of HYPER_RASP, ported 1:1. Select the type as in section 3 (the wheel walks the whole list), tap pads in the
+**left 8 columns** (the HYPER_RASP 8 x 4 pad); columns 9-12 ("extras") hold what the script keeps on encoders. Hold **Shift** for the legend
+(words per pad, the caption shows the state and how to play). General for all of them: they get the clock only while the transport plays,
+the track is taken over (`*` / `live`, pattern muted) while the script is performing, and Stop silences them. Extras: `-` / `+` pads step a
+value, the bottom row resets it. Colours: dim = idle, bright = active; where the script lights a "current" step the pad is full bright.
+
+## 5a. Arp Lines (`ARPL`) and 5b. Chord Stabs (`STAB`) - same layout, different voice
+| Press | Expected |
+|---|---|
+| Tap a root (cols 1-6, rows 1-2: C .. B) | The chord of the current Major/Minor + chord pad is latched and the pattern runs on the transport: Arp Lines plays one note per hit (an arpeggio figure), Chord Stabs plays the whole chord on the hits. The root pad flashes on every hit. |
+| Tap the same root again | Unlatches, notes stop, `*` goes. |
+| Col 1, rows 3 / 4 | Major / Minor. The sound changes at once. |
+| Cols 2-6, rows 3-4 | One of the ten patterns (figures for Arp Lines, stab rhythms for Chord Stabs); the lit pad is the current one. |
+| Cols 7-8, rows 1-4 | One of the eight chords (triad, 7th, add9 ...). |
+| Extras (cols 9-12) | Row 1: Oct- Oct+ Tran- Tran+. Row 2: Slower Faster Vel- Vel+. Arp Lines only, row 3: Lead / Follow (Follow: the twelve root pads are the degrees of the scale another track published, e.g. a Chord/Arp with key lock, and the played root is published back). Row 4: reset Oct / rate (1/16) / Vel / Tran. |
+| Caption (Shift) | `ARP LINES  C min  <pattern>  <chord>  1/16  Vel 100` |
+
+## 5c. Arp Seq (`ARSQ`)
+| Press | Expected |
+|---|---|
+| Tap a root (cols 1-6, rows 1-2) | Latches it and arpeggiates the chord at the current setting (first note at once); tap it again to stop. |
+| Row 3: col 1 Major/Minor, cols 2-6 five cycle pads | Each tap cycles: mode (Arp / Chord), speed, direction, groove (velocity pattern 1-12), octave (-1 / 0 / +1). The legend shows the current value. |
+| Col 7, rows 1-3 (chord keys) | Hold one, or overlap two or three in a sequence: the order picks one of 15 chord types (e.g. 1 then 2 = maj7). The pads show the order 15 / 10 / 6. |
+| Col 8, row 3 | PLAY: the 8 steps run, each lasting 4 bars. |
+| Row 4 (steps 1-8) | Tap = store the current setting in that step. Hold two steps = loop range. Bright = stored, brighter = current. |
+| Extras | none (the script has no encoder parameters). |
+
+## 5d. HR Chord/Arp (`HRCA`) - HYPER_RASP chord_arp.lua, not the grid-composer Chord/Arp
+| Press | Expected |
+|---|---|
+| Col 8, rows 1-4 (function column) | A tap on one key = view 1-4: roots + chord types / arp settings / gate and groove / chord tracker. Keys 3+4 together toggle the tracker page, 1+2 together = tracker play / stop. (The mute combo 1+3 is not implemented: use the Tracker's mute.) |
+| View 1: tap a root (cols 1-6) | Chord sounds and arps per the view 2 settings. Col 7: four chord-type keys, hold two for the six combo types. |
+| Views 2-4 | As in the script: direction / speed / mode / key lock / size, octave and inversion; gate patterns and the velocity groove; eight chord steps with durations (page keys, clear key). |
+| Extras | Row 1: Vel- Vel+ Tran- Tran+. Row 2: Key- Key+ Scale Latch. Row 3: Start Play Page. Row 4: View 1-4 directly. |
+
+## 5e. Bassline Seq (`BASS`)
+| Press | Expected |
+|---|---|
+| Rows 1-3 (24 keys, row 3 lowest) | Scale degrees of the shared scale (default D# minor) from the tonic at or below the shared root (default 60). Tonic keys are brighter. Keys that leave MIDI are dark. Hold keys: nothing sounds yet. |
+| Row 4 cols 1-7 | Euclid presets E(1,8) .. E(7,8): the lit one is the rhythm. With the transport playing, each onset plays the held keys **in the order you pressed them** (one key = repeats it, several = arpeggio). |
+| Release the last key | The ringing note stops at once. |
+| Row 4 col 8 (Rec), hold | While held (transport playing) the preset steps are stored, 8 at a time up to 8 chains; after you release, stop and play: with no preset selected the stored rhythm plays. Stop clears the live preset. |
+| Extras | Row 1: Oct- Oct+ Dir- Dir+ (UP / DOWN / UP/DN / PATT). Row 2: Grv- Grv+ (velocity groove 1-12). Row 4: reset Oct / Dir / Grv. |
+| With a Chord/Arp (key lock) or Arp Lines (Lead) on another track | The published scale / root move this keyboard without reloading. |
+
+## 5f. Euclid Drums (`EUCL`)
+| Press | Expected |
+|---|---|
+| Rows 1-4 | Four drum voices (kit "bd sd oh ch": notes 36 / 38 / 46 / 42 on the track's channel). Tap E(k,8) in cols 1-7 to give that row a Euclid rhythm (transport playing); tap the lit one again to mute the row (dim). |
+| Col 8 (Rec), hold | Stores that row's rhythm (8 steps per chain, up to 8). |
+| Extras | Row 1: Grp- Grp+ (8 kit groupings) Vel- Vel+. Row 2: Cha- Cha+ (chance of a hit, 10 % steps; below 100 the hits are random) Swg- Swg+ (kept, not applied, as in the script). Row 4: reset. |
+| Stop | All drums end, the live presets are cleared (the recorded rhythms stay). |
+
+## 5g. Grid Seq (`GRID`)
+| Press | Expected |
+|---|---|
+| Rows 1-4 x steps 1-8 | Tap a cell: the step toggles (bright); the playhead is a dim cell. A step plays that row's drum voice (same kit groupings as Euclid Drums). |
+| Hold a cell | After about one quarter note the voice retriggers from that step; hold two cells of a row = faster ratchet (the spread picks the rate). A hold that ratcheted does not toggle the step. |
+| Extras | Row 1: Grp- Grp+ Vel- Vel+. Row 2: Div- Div+ Tran- Tran+. Row 3: Lo- Lo+ Hi- Hi+ (loop range, the pads outside it go dark). Row 4: reset. |
+
+## 5h. Step Follow (`STEP`)
+| Press | Expected |
+|---|---|
+| Rows 1-4 x steps 1-8 | A window of four scale degrees (row 4 lowest). Tap to light a step; a step with several lit degrees plays them together. Tonic rows are brighter. The notes follow the scale / root another track published (none = chromatic from the root). |
+| Col 8, rows 3 / 4 | Page the window up / down by two degrees (dim = at the limit of 12..120). |
+| Extras | Row 1: Oct- Oct+ Vel- Vel+. Row 2: Div- Div+ Lo- Lo+. Row 3: Hi- Hi+. Row 4: reset (Oct, Vel, Div, whole loop). |
+| Limits | 24 distinct degrees are kept; further ones are ignored. |
 
 ## 6. Misc
 | Check | Expected |
