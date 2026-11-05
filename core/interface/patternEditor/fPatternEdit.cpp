@@ -1237,8 +1237,8 @@ void cPatternEditor::changeActualPattern(int16_t value)
     sequencer.sequencialSwitch_Reset();
     sequencer.setOnGlobalStep(nullCallback);
 
-    if (value && (sequencer.getSeqState() != sequencer.SEQ_STATE_PLAY_PERFORMANCE || seqSessionOwnsPerformance() ||
-         !sequencer.isPerformancePatternChanged()))
+    // v0.3.1 M2: per-track performance patterns in RAM (also kept fader FX, any play state) are never saved as the pattern
+    if (value && (seqSessionOwnsPerformance() || !sequencer.isPerformancePatternChanged()))
     {
         newFileManager.saveWorkspacePatternNow(mtProject.values.actualPattern);
         if (seqSessionSaveFailed())
@@ -1270,8 +1270,7 @@ void cPatternEditor::changeActualPattern(int16_t value)
 
 void cPatternEditor::setActualPattern(int16_t value)
 {
-    if (sequencer.getSeqState() != sequencer.SEQ_STATE_PLAY_PERFORMANCE || seqSessionOwnsPerformance() ||
-         !sequencer.isPerformancePatternChanged())
+    if (seqSessionOwnsPerformance() || !sequencer.isPerformancePatternChanged()) // v0.3.1 M2, as in changeActualPattern
     {
         newFileManager.saveWorkspacePatternNow(mtProject.values.actualPattern);
         if (seqSessionSaveFailed())

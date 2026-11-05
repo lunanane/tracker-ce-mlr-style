@@ -3914,9 +3914,9 @@ bool Sequencer::copyCurrentPatternToBuff(uint8_t* destBuff)
 {
     uint8_t* srcPattern = (uint8_t*)currentPattern;
 
-    if (seqSessionHasLaunched())
+    if (seqSessionSaveNeedsMerge())
     {
-        // Session clips: those tracks are written from the pattern file; a read error aborts the save
+        // Session clips / per-track performance patterns: those tracks are written from the pattern file; a read error aborts the save
         if (!seqSessionMergeForSave(destBuff))
             return false;
     }
