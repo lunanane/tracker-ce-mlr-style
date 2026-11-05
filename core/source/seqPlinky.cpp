@@ -1,6 +1,7 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md). Plinky voice parts: MIT (libs/Audio/PlinkyVoice)
 #include "seqPlinky.h"
 #ifdef FEATURE_PLINKY
+#include <new>
 #include "seqSidecar.h"
 #include "seqModLogic.h"
 #include "seqPlinkySeqLogic.h"
@@ -34,8 +35,13 @@ uint32_t s_loadedId = 0;       // project folder whose sidecar was loaded (valid
 bool s_loadedValid = false;
 bool s_newerFile = false;      // written by a newer mod version: left alone (no downgrade, nothing written)
 
-// plan 012: snapshots per pattern (5.4 KB) and the file buffer in EXTERNAL_RAM, not in the internal SRAM
-__NOINIT(EXTERNAL_RAM) plinkymorph::Controller s_ctl;
+// plan 012: snapshots per pattern (5.4 KB) and the file buffer in EXTERNAL_RAM, not in the internal SRAM.
+// v0.3.5 (boot hang of v0.3.4): the Controller has constructors (Store() fills the base values, Morph / Controller have member
+// initialisers). A __NOINIT(EXTERNAL_RAM) object of that type gets a C++ static constructor that runs from __libc_init_array, long
+// before hardware init powers up and configures the SDRAM -> bus fault at the first write. So: raw storage only (no static
+// constructor), constructed by placement new in seqPlinkyInit() from TrackerImpl::init() (SDRAM ready). See developer_guide.md.
+__NOINIT(EXTERNAL_RAM) alignas(plinkymorph::Controller) uint8_t s_ctlMem[sizeof(plinkymorph::Controller)];
+plinkymorph::Controller& s_ctl = *reinterpret_cast<plinkymorph::Controller*>(s_ctlMem);
 __NOINIT(EXTERNAL_RAM) uint8_t s_fbuf[plinkymorph::kFileMaxAll];
 
 // hash of everything that is saved: the values, the morph time and the snapshots
@@ -274,6 +280,11 @@ void seqPlinkyUpdate()
             s_wsWritePending = true;
         }
     }
+}
+
+void seqPlinkyInit()
+{
+    new (s_ctlMem) plinkymorph::Controller();
 }
 
 void seqPlinkyLoadWorkspace()
