@@ -75,3 +75,5 @@ state in internal RAM; now about 3.7 KB less), EXTERNAL_RAM +31 KB (17.6 KB amp 
 Previews (not committed): `core/seqtest/build/preview/pitch1..4*.png`, `amp1..6*.png` (before: `build/preview_before`).
 
 **Not verified on a device**: the look, the tap cost in the audio interrupt, the budget measured from `shownRamBytesExcept` on the real page, the jog feel.
+
+**V follow-up (owner review of the previews).** Lines are clipped to the floor and BROKEN where a level falls below -48 dB (no joins across silence; a lane may be several strips, `resample` marks breaks with y = -1); the average lines are smoothed over 3 to 5 columns in the right half (triangular), the peak lines stay raw and thin. The long straight lines in the amp4 preview are real: a slow track (3.76 s period) decays exponentially, which is a straight line in dB. Per line allowance in `colsFor` is 40 B for the extra strips.

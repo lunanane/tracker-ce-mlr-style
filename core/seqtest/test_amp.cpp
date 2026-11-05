@@ -253,14 +253,14 @@ static void test_age_to_x()
 
     // geometry of a full cascade: start blocks increase, the total reaches beyond the horizon
     Cascade c;
-    for (int i = 0; i < 100000; i++) c.push(100);
+    for (int i = 0; i < 100000; i++) c.push(1000); // -30 dB
     uint32_t st[kMaxBuckets + 1];
     const int n = geometry(c, st);
     bool inc = st[0] == 0;
     for (int i = 1; i <= n; i++) inc = inc && st[i] > st[i - 1];
     CHECK(inc && (double)st[n] * kBlockMs > kHorizonMs);
     // the resampled line: every column inside the plot, x increasing, newest at the right edge, as many points as columns
-    int16_t o[kMaxCols * 2];
+    int16_t o[(2 * kMaxCols + 2) * 2];
     const int cols = 120;
     const int cnt = resample(c, st, n, cols, 1, D, o);
     CHECK(cnt == cols && o[0] == kX0 && o[(cnt - 1) * 2] == kX1);
@@ -355,7 +355,9 @@ static void test_layout_and_budget()
            c.strips, c.maxStripPts, c.texts);
     CHECK(c.bytes <= kDefaultBudget);
     CHECK(c.bytes <= 8172 - 400 - 600 - 1720); // the frame model: title bar + strip / labels + the view with a margin of 400 B
-    CHECK(c.strips == 8 * 2 + 1); // per track a peak line and an average line, the master one line
+    // per track a peak line and an average line, the master one line; a line is BROKEN where the level falls below the floor (v0.3.7), so a
+    // lane may be several strips, but never fewer than one per line
+    CHECK(c.strips >= 8 * 2 + 1);
     CHECK(c.maxStripPts >= 40 && c.maxStripPts <= kMaxCols); // v0.3.6 had at most 17 points per line
     CHECK(c.minX >= 0 && c.maxX <= 800);
     CHECK(c.minY >= kPanelY0 && c.maxY <= kPanelY1);
@@ -367,14 +369,30 @@ static void test_layout_and_budget()
     for (size_t s = 0; s < c.stripX.size(); s++)
     {
         for (size_t i = 1; i < c.stripX[s].size(); i++) xok = xok && c.stripX[s][i] > c.stripX[s][i - 1];
-        xok = xok && c.stripX[s].back() == kX1;
+        xok = xok && c.stripX[s].size() >= 2;
     }
     CHECK(xok);
-    CHECK(c.stripColor[0] == seqpal::faint(seqpal::trackColor(0))); // pass 0: the dim peak lines in track order
-    CHECK(c.stripColor[7] == seqpal::faint(seqpal::trackColor(7)));
-    CHECK(c.stripColor[8] == seqpal::trackColor(0) && c.stripColor[15] == seqpal::trackColor(7));
-    CHECK(c.stripColor[16] == seqpal::kTitle);
-    CHECK(c.stripWidth[16] <= c.stripWidth[8]); // the master thinner
+    // every colour of the palette is present; the dim peak lines come before the averages, the master last
+    int firstFaint[8], firstAvg[8], lastMaster = -1, firstMaster = 99999, widthAvg = 0, widthMaster = 0;
+    for (int tr = 0; tr < 8; tr++)
+    {
+        firstFaint[tr] = firstAvg[tr] = -1;
+        for (size_t s = 0; s < c.stripColor.size(); s++)
+        {
+            if (firstFaint[tr] < 0 && c.stripColor[s] == seqpal::faint(seqpal::trackColor(tr))) firstFaint[tr] = (int)s;
+            if (firstAvg[tr] < 0 && c.stripColor[s] == seqpal::trackColor(tr)) { firstAvg[tr] = (int)s; widthAvg = c.stripWidth[s]; }
+        }
+        CHECK(firstFaint[tr] >= 0 && firstAvg[tr] > firstFaint[tr]);
+        if (tr) CHECK(firstFaint[tr] > firstFaint[tr - 1] && firstAvg[tr] > firstAvg[tr - 1]);
+    }
+    for (size_t s = 0; s < c.stripColor.size(); s++)
+        if (c.stripColor[s] == seqpal::kTitle) { lastMaster = (int)s; if ((int)s < firstMaster) firstMaster = (int)s; widthMaster = c.stripWidth[s]; }
+    CHECK(lastMaster == (int)c.stripColor.size() - 1 && firstMaster > firstAvg[7]);
+    CHECK(widthMaster <= widthAvg); // the master thinner
+    // the newest values are at the right edge for at least one strip of every colour group
+    int maxX = 0;
+    for (size_t s = 0; s < c.stripX.size(); s++) if (c.stripX[s].back() > maxX) maxX = c.stripX[s].back();
+    CHECK(maxX == kX1);
     // the lines use the height: typical loud material reaches the upper part of the plot, quiet parts the lower
     int top = 9999, bot = -9999;
     for (size_t s = 0; s < c.stripY.size(); s++)
@@ -415,7 +433,7 @@ static void test_layout_and_budget()
     ampview::draw(y, young, "t", "h");
     CHECK(y.bytes <= kDefaultBudget && stripsInPlot(y));
     bool shortLine = true;
-    for (size_t s = 0; s < y.stripX.size(); s++) shortLine = shortLine && y.stripX[s].front() > kX0 + (kX1 - kX0) / 2 && y.stripX[s].back() == kX1;
+    for (size_t s = 0; s < y.stripX.size(); s++) shortLine = shortLine && y.stripX[s].front() > kX0 + (kX1 - kX0) / 2;
     CHECK(shortLine);
 
     // silence: no lines at all, labels only; much smaller list

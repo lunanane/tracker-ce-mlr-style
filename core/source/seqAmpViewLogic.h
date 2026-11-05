@@ -292,7 +292,7 @@ constexpr int kBaseBytes = 800; // measured: grid, labels, header without the li
 inline int colsFor(int budget, int lines, int lanes)
 {
     if (lines < 1) return kMaxCols;
-    const int m = (budget - kBaseBytes - lanes * 24 - lines * 16) / (4 * lines);
+    const int m = (budget - kBaseBytes - lanes * 24 - lines * 40) / (4 * lines); // 40: colour, width and a few strip breaks per line
     return m < kMinCols ? kMinCols : (m > kMaxCols ? kMaxCols : m);
 }
 
@@ -305,6 +305,8 @@ inline int resample(const Cascade& cs, const uint32_t* st, int n, int cols, int 
     const float bpms = 1.0f / kBlockMs;
     const float du = 1.0f / (float)(cols - 1);
     int cnt = 0, k = 0;
+    float dbs[kMaxCols];
+    int16_t xs[kMaxCols];
     for (int j = cols - 1; j >= 0; j--) // newest first
     {
         const float u = (float)(cols - 1 - j) * du; // j = cols - 1 -> u = 0 (now)
@@ -343,19 +345,45 @@ inline int resample(const Cascade& cs, const uint32_t* st, int n, int cols, int 
                 db += ((float)dbv[nb] - db) * t;
             }
         }
-        o[cnt * 2] = (int16_t)(kX0 + ((kX1 - kX0) * j + (cols - 1) / 2) / (cols - 1));
-        o[cnt * 2 + 1] = (int16_t)yOf(db * (1.0f / 64.0f));
+        const float lowest = (float)((kFloorDb - 6) * 64);
+        dbs[cnt] = db < lowest ? lowest : db;
+        xs[cnt] = (int16_t)(kX0 + ((kX1 - kX0) * j + (cols - 1) / 2) / (cols - 1));
         cnt++;
     }
-    for (int a = 0, b = cnt - 1; a < b; a++, b--) // oldest first
+    // cnt columns, newest first. The averages are smoothed over about three to five columns in the right half (a rhythm reads as a stream, not a scribble)
+    if (which == 1)
     {
-        const int16_t x = o[a * 2], y = o[a * 2 + 1];
-        o[a * 2] = o[b * 2];
-        o[a * 2 + 1] = o[b * 2 + 1];
-        o[b * 2] = x;
-        o[b * 2 + 1] = y;
+        float tmp[kMaxCols];
+        for (int i = 0; i < cnt; i++)
+        {
+            const bool right = xs[i] > (kX0 + kX1) / 2;
+            tmp[i] = right && i > 1 && i + 2 < cnt ? (dbs[i - 2] + 2 * dbs[i - 1] + 3 * dbs[i] + 2 * dbs[i + 1] + dbs[i + 2]) * (1.0f / 9.0f)
+                                                        : (right && i > 0 && i + 1 < cnt ? 0.25f * dbs[i - 1] + 0.5f * dbs[i] + 0.25f * dbs[i + 1] : dbs[i]);
+        }
+        for (int i = 0; i < cnt; i++) dbs[i] = tmp[i];
     }
-    return cnt;
+    // oldest first; where the level is below the floor the line is clipped to it and BROKEN (y = -1 marks the break): no long straight
+    // joins across silence
+    int w = 0;
+    bool prevIn = false;
+    for (int i = cnt - 1; i >= 0; i--)
+    {
+        const bool in = dbs[i] > (float)(kFloorDb * 64);
+        if (in || prevIn)
+        {
+            o[w * 2] = xs[i];
+            o[w * 2 + 1] = (int16_t)yOf(in ? dbs[i] * (1.0f / 64.0f) : (float)kFloorDb);
+            w++;
+            if (!in)
+            {
+                o[w * 2] = xs[i];
+                o[w * 2 + 1] = -1;
+                w++;
+            }
+        }
+        prevIn = in;
+    }
+    return w;
 }
 
 static const int kMarkMs[5] = { 1000, 5000, 15000, 60000, 120000 };
@@ -421,7 +449,7 @@ template <class C> void draw(C& c, const Follower& f, const char* title, const c
         }
     }
     const int cols = colsFor(f.budget, lines, lanes);
-    int16_t o[kMaxCols * 2];
+    int16_t o[(2 * kMaxCols + 2) * 2]; // worst case: every other column is a break
     for (int pass = 0; pass < 2; pass++)
     {
         for (int ln = 0; ln < kLanes; ln++)
@@ -431,7 +459,13 @@ template <class C> void draw(C& c, const Follower& f, const char* title, const c
             const uint32_t col = ln == kTracks ? seqpal::kTitle : seqpal::trackColor(ln);
             c.color(pass == 0 ? seqpal::faint(col) : col);
             c.width(pass == 0 ? 10 : (ln == kTracks ? 12 : 16));
-            if (cnt >= 2) c.strip(o, cnt);
+            int s = 0; // strips between the breaks (y = -1)
+            for (int i = 0; i <= cnt; i++)
+                if (i == cnt || o[i * 2 + 1] < 0)
+                {
+                    if (i - s >= 2) c.strip(o + s * 2, i - s);
+                    s = i + 1;
+                }
         }
     }
 
