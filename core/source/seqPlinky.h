@@ -12,6 +12,13 @@ bool seqPlinkyControlChange(uint8_t channel, uint8_t cc, uint8_t value);
 bool seqPlinkyPitchBend(uint8_t channel, int16_t value); // -8192 .. 8191
 void seqPanicPlinky();                                   // transport Stop: all notes off
 
+// ---- Plinky sequencer type (plan 010 B, main loop) ----
+// Claim: the voice gets a MIDI channel when it has none (the last used MIDI instrument, else MIDI instrument 16); a channel that is
+// set already is kept. Returns the MIDI instrument index the type plays through (the voice channel), or -1 while the voice is off.
+void seqPlinkyClaim();
+int seqPlinkyInstrument(); // any context
+bool seqPlinkyNewerFile(); // plinky.bin was written by a newer mod version: edits are not saved
+
 // ---- values (main loop) ----
 int seqPlinkyGet(int param);
 void seqPlinkySet(int param, int value); // clamped; marks the project sidecar dirty; applies the sends

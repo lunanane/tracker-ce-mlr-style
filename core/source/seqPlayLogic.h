@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "hr.h"
+#include "seqPlinkySeqLogic.h"
 #include "seqTracksLogic.h"
 
 namespace seqplay {
@@ -153,12 +154,12 @@ static_assert(sizeof(kHrShort) / sizeof(kHrShort[0]) == seqlogic::kHrScripts && 
 inline const char* typeShort(uint8_t type)
 {
     if (seqlogic::isHrType(type)) return kHrShort[type - seqlogic::TYPE_HR_FIRST];
-    return type == seqlogic::TYPE_CHORDARP ? "CHRD" : type == seqlogic::TYPE_MONO ? "MONO" : "---";
+    return type == seqlogic::TYPE_CHORDARP ? "CHRD" : type == seqlogic::TYPE_MONO ? "MONO" : type == seqlogic::TYPE_PLINKY ? "POLY" : "---";
 }
 inline const char* typeName(uint8_t type)
 {
     if (seqlogic::isHrType(type)) return kHrName[type - seqlogic::TYPE_HR_FIRST];
-    return type == seqlogic::TYPE_CHORDARP ? "Chord/Arp" : type == seqlogic::TYPE_MONO ? "Mono" : "Off";
+    return type == seqlogic::TYPE_CHORDARP ? "Chord/Arp" : type == seqlogic::TYPE_MONO ? "Mono" : type == seqlogic::TYPE_PLINKY ? "PolySynth" : "Off";
 }
 
 // line 1: "6 MONO*"; the selected track in brackets: "[6 MONO*]"
@@ -180,6 +181,7 @@ inline void stripLine2(char* out, size_t n, const StripCell& c)
     else if (c.cut) snprintf(out, n, "cut");
     else if (type == seqlogic::TYPE_OFF) snprintf(out, n, "pattern");
     else if (c.takenOver) snprintf(out, n, "live");
+    else if (type == seqlogic::TYPE_PLINKY) snprintf(out, n, "voice");
     else snprintf(out, n, "ready");
 }
 
@@ -243,6 +245,8 @@ struct LegendState
     uint8_t vel = 1;    // Mono: velocity pattern 1..72
     uint8_t tie = 0;    // Mono: tie
     int8_t win = 0;     // Mono: degree window offset
+    seqplinky::Setup pl;     // Plinky: root / scale / octave / string interval
+    uint8_t plMenu = 0;      // Plinky: the setup view is shown
 };
 
 // Chord/Arp root pads (c31 camelot grid, copy of kCam in seqgen/chordarp.cpp): pad row = grid x - 1, pad column = grid y - 1.
@@ -291,6 +295,41 @@ inline LegendCell legendCell(const LegendState& st, uint8_t col, uint8_t row)
         c.zone = z;
         for (int i = 0; i < 6 && t[i]; i++) c.txt[i] = t[i];
     };
+    if (st.type == seqlogic::TYPE_PLINKY)
+    {
+        if (col == seqplinky::kMenuCol && row == seqplinky::kMenuRow)
+        {
+            set(Z_MODE, st.plMenu ? "Notes" : "Setup");
+            c.on = st.plMenu != 0;
+            return c;
+        }
+        char b[8] = { 0 };
+        if (!st.plMenu)
+        {
+            seqplinky::noteName(seqplinky::padNote(st.pl, col, row), b);
+            set(Z_NOTE, b);
+            c.on = seqplinky::padNote(st.pl, col, row) % 12 == st.pl.root; // the root notes are white
+            return c;
+        }
+        if (row == 0)
+        {
+            static const char* const kPc[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+            set(Z_PANEL, kPc[col]);
+            c.on = col == st.pl.root;
+        }
+        else if (row == 1)
+        {
+            if (col < 8) { set(Z_PANEL, seqplinky::scaleDef(col).shortName); c.on = col == st.pl.scale; }
+            else { snprintf(b, sizeof b, "Oct %d", col - 7); set(Z_PANEL, b); c.on = (col - 7) == st.pl.octave; }
+        }
+        else if (row == 2 && col < 7)
+        {
+            snprintf(b, sizeof b, "Str+%d", col + 1);
+            set(Z_PANEL, b);
+            c.on = (col + 1) == st.pl.interval;
+        }
+        return c;
+    }
     if (st.type == seqlogic::TYPE_CHORDARP)
     {
         static const char* const kTypes[8] = { "Root", "Sus2", "Triad", "Sus4", "5th", "6th", "7th", "9th" };
@@ -463,6 +502,7 @@ inline const char* legendCaption(uint8_t type)
     if (seqlogic::isHrType(type)) return typeName(type);
     if (type == seqlogic::TYPE_CHORDARP) return "CHORD/ARP";
     if (type == seqlogic::TYPE_MONO) return "MONO";
+    if (type == seqlogic::TYPE_PLINKY) return "POLYSYNTH";
     return "";
 }
 
@@ -482,6 +522,12 @@ inline void legendTitle(const LegendState& st, char* out, size_t n)
         else snprintf(view, sizeof view, "Notes %d-%d", st.half ? 9 : 1, st.half ? 16 : 8);
         snprintf(out, n, "MONO   %s   Page %d/%d   Speed %s   Vel %d   Tie %s   Window %+d", view, (int)st.ep, (int)st.np, speedName(st.speed),
                  (int)((st.vel ? st.vel - 1 : 0) % 8 + 1), st.tie ? "on" : "off", (int)st.win);
+    }
+    else if (st.type == seqlogic::TYPE_PLINKY)
+    {
+        static const char* const kPc[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+        snprintf(out, n, "POLYSYNTH   %s   %s %s   Octave %d   Strings +%d degrees", st.plMenu ? "Setup" : "Notes", kPc[st.pl.root % 12],
+                 seqplinky::scaleDef(st.pl.scale).name, (int)st.pl.octave, (int)st.pl.interval);
     }
     else if (seqlogic::isHrType(st.type) && st.hr)
         snprintf(out, n, "%s", st.hr->title);
@@ -507,6 +553,9 @@ inline const char* legendHelp(const LegendState& st)
         if (st.menu) return "Speed: tap one. Pg: tap = edit page, hold Pg 1 + Pg N = N pages. Vel: loudness.";
         return "Tap a cell: note on/off. Hold Loop + tap first and last step = loop. Half: steps 9-16.";
     }
+    if (st.type == seqlogic::TYPE_PLINKY)
+        return st.plMenu ? "Pick root, scale, octave, string step (Str). Notes pad: back. Instr key: sound." :
+                           "Columns = strings, each a few scale steps higher. Rows climb a string. Setup pad: key.";
     if (seqlogic::isHrType(st.type) && st.hr && st.hr->help) return st.hr->help;
     return "";
 }

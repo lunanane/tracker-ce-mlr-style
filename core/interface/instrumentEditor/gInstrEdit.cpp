@@ -368,7 +368,7 @@ void cInstrumentEditor::showTitleBar()
         case mtInstEditModeMidi:
             label = "MIDI Instrument Parameters";
 #ifdef FEATURE_PLINKY
-            label = "MIDI Parameters  Shift+1: Plinky"; // hint of the claim gesture; stock items unchanged
+            label = "MIDI Parameters  Shift+1: PolySynth"; // hint of the claim gesture; stock items unchanged
             if (plinkyActive())
             {
                 showPlinkyCpu(true);
@@ -1950,7 +1950,8 @@ bool cInstrumentEditor::plinkyActive() const
 void cInstrumentEditor::showPlinkyCpu(bool force)
 {
     char t[sizeof(plinkyTitle)];
-    snprintf(t, sizeof(t), "Plinky %d/3  CPU %d%% pk %d%%", plinkyPage, (int)(seqPlinkyCpu() + 0.5f), (int)(seqPlinkyCpuPeak() + 0.5f));
+    snprintf(t, sizeof(t), "PolySynth %d/3  CPU %d%% pk %d%%%s", plinkyPage, (int)(seqPlinkyCpu() + 0.5f), (int)(seqPlinkyCpuPeak() + 0.5f),
+             seqPlinkyNewerFile() ? "  (newer synth file: edits not saved)" : "");
     if (force || strcmp(t, plinkyTitle) != 0)
     {
         memcpy(plinkyTitle, t, sizeof(plinkyTitle));

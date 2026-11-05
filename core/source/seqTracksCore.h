@@ -10,6 +10,7 @@
 #include "seqTracksLogic.h"
 #include "seqTracksRec.h"
 #include "seqCut.h"
+#include "seqPlinkySeqLogic.h"
 
 namespace seqtracks {
 
@@ -48,13 +49,18 @@ class Engine
     void setHost(Host* h) { host_ = h; }
 
     // ---- main loop ----
-    bool postPad(uint8_t track, uint8_t pad, bool down);
+    bool postPad(uint8_t track, uint8_t pad, bool down, uint8_t velo = 0); // velo: pad pressure 1..127 for the Plinky type (0 = fixed)
     bool postType(uint8_t track, uint8_t type); // applied on the next bar while playing
     uint8_t type(uint8_t track) const { return track < kTracks ? t_[track].type : 0; }
     uint8_t pendingType(uint8_t track) const { return track < kTracks ? t_[track].pending : 0xFF; } // 0xFF = none
     bool takenOver(uint8_t track) const { return track < kTracks && ((takenMask_ >> track) & 1u); }
     void leds(uint8_t track, uint8_t out[seqlogic::kPads]) const;
     bool playing() const { return playing_; }
+
+    // ---- Plinky type (plan 010 B): one track at a time plays the voice ----
+    uint8_t plinkyOwner(bool withPending = true) const; // the Plinky track (or the one about to become it), 0xFF = none
+    const seqplinky::Setup& plinkySetup() const { return pl_; }
+    bool plinkyMenu() const { return plMenu_; }
 
     // ---- CUT (MLR) layer, see seqCut.h (the Cut object lives outside the engine: the glue places it in external RAM) ----
     void setCut(seqcut::Cut* c) { __atomic_store_n(&cut_, c, __ATOMIC_RELEASE); } // the object is fully constructed first
@@ -99,7 +105,7 @@ class Engine
     void advanceUs(uint32_t us);         // wall time of one audio block (gate timers, blinking)
 
     // Direct (non-queued) variants, also used by the host tests.
-    void applyPad(uint8_t track, uint8_t pad, bool down);
+    void applyPad(uint8_t track, uint8_t pad, bool down, uint8_t velo = 0);
     void applyType(uint8_t track, uint8_t type);
     void drain();
     enum { REC_STOP = 0, REC_PUNCH = 1, REC_LOOP = 2, REC_STOP_PATTERN = 3 }; // REC_STOP_PATTERN: ends the take, the reason is "pattern changed"
@@ -120,7 +126,7 @@ class Engine
     enum { kRing = 64 };
     struct Cmd
     {
-        uint8_t kind, track, a;
+        uint8_t kind, track, a, b;
     };
     struct Track
     {
@@ -157,6 +163,8 @@ class Engine
     int heldPads(const Track& t) const;
     bool recLive(uint8_t track) const { return ((takenMask_ >> track) & 1u) || heldPads(t_[track]) > 0; } // the sequencer is played on the track (also while it is muted)
     void scanMono(Track& t);
+    void padPlinky(uint8_t track, uint8_t pad, bool down, uint8_t velo);
+    bool plinkyNoteHeld(uint8_t note, uint8_t exceptPad) const;
     void createHr(uint8_t track, uint8_t type);
     static void sink(void* user, const seqgen::Event& e);
     void onEvent(const seqgen::Event& e);
@@ -165,6 +173,9 @@ class Engine
     seqgen::SeqContext ctx_;
     seqgen::HrBus hrBus_; // scale / root shared by the HYPER_RASP scripts (their set_scale / set_root_note)
     Track t_[kTracks];
+    seqplinky::Setup pl_; // Plinky type: root / scale / octave / string interval (one voice, so one set)
+    bool plMenu_;         // Plinky type: the setup view is shown
+    uint8_t plNote_[seqplinky::kPads]; // note each held Plinky pad started
     Cmd ring_[kRing];
     volatile uint8_t head_, tail_;
     volatile uint16_t takenMask_;

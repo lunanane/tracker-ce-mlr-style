@@ -56,14 +56,30 @@ class SeqHost : public seqtracks::Host
     }
     void takeoverBegin(uint8_t track) override
     {
-        s_instrument[track] = sequencer.seqPickInstrument(track);
+        s_instrument[track] = pickInstrument(track);
         s_sampleNote[track] = -1;
         sequencer.seqTakeoverBegin(track);
     }
     void takeoverEnd(uint8_t track) override { s_sampleNote[track] = -1; }
+    // The Plinky type plays through the MIDI instrument whose channel is the voice's (so a recording writes MIDI instrument notes that
+    // the voice plays without the sequencer too); any other type: the last used instrument.
+    static uint8_t pickInstrument(uint8_t track)
+    {
+#ifdef FEATURE_PLINKY
+        if (seqEngine.type(track) == seqlogic::TYPE_PLINKY)
+        {
+            const int i = seqPlinkyInstrument();
+            if (i >= 0)
+                return (uint8_t)i;
+        }
+#endif
+        return sequencer.seqPickInstrument(track);
+    }
+    // the Plinky voice is polyphonic and a MIDI instrument: no sample-track rules for it
+    static bool monoTrack(uint8_t track) { return isSampleTrack(track) && seqEngine.type(track) != seqlogic::TYPE_PLINKY; }
     void noteOn(uint8_t track, uint8_t note, int8_t volume) override
     {
-        if (isSampleTrack(track))
+        if (monoTrack(track))
         {
             if (s_sampleNote[track] >= 0)
                 sequencer.seqNoteOff(track, (uint8_t)s_sampleNote[track], s_instrument[track]);
@@ -73,7 +89,7 @@ class SeqHost : public seqtracks::Host
     }
     void noteOff(uint8_t track, uint8_t note) override
     {
-        if (isSampleTrack(track))
+        if (monoTrack(track))
         {
             if (s_sampleNote[track] != note)
                 return; // an older chord note on a monophonic voice: already replaced
@@ -86,7 +102,7 @@ class SeqHost : public seqtracks::Host
     {
         sequencer.seqTrackPos(track, out.pos, out.uStep, out.last);
     }
-    bool sampleTrack(uint8_t track) override { return isSampleTrack(track); }
+    bool sampleTrack(uint8_t track) override { return monoTrack(track); }
     uint8_t instrument(uint8_t track) override { return s_instrument[track]; }
     // Interrupts off for the few microseconds of copying one track's state out (the audio context runs in an interrupt)
     uint32_t critEnter() override
@@ -477,7 +493,7 @@ namespace
 seqlogic::PendingReleases s_pendingRel;
 }
 
-bool seqPadPress(uint8_t track, uint8_t pad)
+bool seqPadPress(uint8_t track, uint8_t pad, uint8_t velo)
 {
     if (s_pendingRel.has(track, pad))
     {
@@ -485,7 +501,7 @@ bool seqPadPress(uint8_t track, uint8_t pad)
             return false; // the old release goes first
         s_pendingRel.remove(track, pad);
     }
-    return seqEngine.postPad(track, pad, true);
+    return seqEngine.postPad(track, pad, true, velo);
 }
 
 void seqPadRelease(uint8_t track, uint8_t pad)
@@ -572,6 +588,13 @@ void seqTracksUpdate()
     seqFxUpdate();
 #ifdef FEATURE_PLINKY
     seqPlinkyUpdate();
+    {   // a Plinky track appeared (type list, project load): the voice gets a channel when it has none
+        static uint8_t owner = 0xFF;
+        const uint8_t now = seqEngine.plinkyOwner(false);
+        if (now != owner && now != 0xFF)
+            seqPlinkyClaim();
+        owner = now;
+    }
 #endif
     seqCutUpdate();
 

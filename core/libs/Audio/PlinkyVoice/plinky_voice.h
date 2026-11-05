@@ -125,7 +125,7 @@ struct Voice
     float g = 0, k = 0;   // amplitude / filter coefficient at the end of the last block
     uint32_t off = 0;     // pulse width offset (phase) at the end of the last block
     uint32_t serial = 0;
-    uint8_t note = 0, stage = ST_IDLE, gate = 0, fresh = 0;
+    uint8_t note = 0, stage = ST_IDLE, gate = 0, fresh = 0, relPend = 0;
     Voice() { memset(y, 0, sizeof(y)); }
     void clear()
     {
@@ -133,6 +133,7 @@ struct Voice
         env = g = k = 0;
         stage = ST_IDLE;
         gate = 0;
+        relPend = 0;
     }
 };
 
@@ -144,7 +145,10 @@ class Engine
     void init()
     {
         for (int i = 0; i < P_COUNT; i++)
-            p[i] = paramInfo(i).def;
+            p[i] = ef[i] = paramInfo(i).def;
+        for (int i = 0; i < 4; i++)
+            relPend[i] = 0;
+        allOffPend = 0;
         for (int i = 0; i < kMaxVoices; i++)
             v[i] = Voice();
         head = 0;
@@ -162,19 +166,35 @@ class Engine
 
     // ---- any context (the sequencer runs in an interrupt, pads and the UI on the main loop) ----
     bool noteOn(uint8_t note, uint8_t vel) { return push(EV_ON, note, vel); }
-    bool noteOff(uint8_t note) { return push(EV_OFF, note, 0); }
-    bool allNotesOff() { return push(EV_ALLOFF, 0, 0); }
+    // A release that does not fit into the queue is remembered (one bit per note) and applied by the next block: a voice never sticks.
+    bool noteOff(uint8_t note)
+    {
+        if (push(EV_OFF, note, 0))
+            return true;
+        __atomic_fetch_or(&relPend[(note >> 5) & 3], (uint32_t)1 << (note & 31), __ATOMIC_RELEASE);
+        return true;
+    }
+    bool allNotesOff()
+    {
+        if (!push(EV_ALLOFF, 0, 0))
+            __atomic_store_n(&allOffPend, (uint8_t)1, __ATOMIC_RELEASE);
+        return true;
+    }
     // 0 .. 16383, 8192 = centre
     bool pitchBend(int16_t value14) { return push(EV_BEND, (uint8_t)(value14 & 0x7F), (uint8_t)((value14 >> 7) & 0x7F)); }
     bool controlChange(uint8_t cc, uint8_t val) { return push(EV_CC, cc, val); }
 
+    // The saved values p[] are written by the UI only (setParam). MIDI CCs change the effective values ef[] the DSP reads, like CC1 (mod
+    // wheel): the saved patch is never overwritten by automation; moving the parameter in the UI takes the effective value back.
     void setParam(int i, int value)
     {
         if (i >= 0 && i < P_COUNT)
-            p[i] = clampParam(i, value);
+            p[i] = ef[i] = clampParam(i, value);
     }
     uint8_t param(int i) const { return p[i]; }
+    uint8_t effective(int i) const { return ef[i]; }
     uint8_t p[P_COUNT];
+    uint8_t ef[P_COUNT];
 
     // ---- audio context ----
     bool isActive() const
@@ -216,12 +236,18 @@ class Engine
             Voice& vo = v[i];
             if (vo.stage == ST_IDLE)
                 continue;
-            if (i >= (int)p[P_VOICES] && vo.stage != ST_RELEASE)
+            if (i >= (int)ef[P_VOICES] && vo.stage != ST_RELEASE)
             {
                 vo.stage = ST_RELEASE;
                 vo.gate = 0;
             }
             renderVoice(vo, d);
+            if (vo.relPend && !vo.fresh && vo.stage != ST_IDLE)
+            {
+                vo.relPend = 0;
+                vo.gate = 0;
+                vo.stage = ST_RELEASE;
+            }
         }
         float lv = lvlPrev;
         const float dl = (d.level - lv) * (1.0f / kBlock);
@@ -257,6 +283,8 @@ class Engine
     Voice v[kMaxVoices];
     Ev q[E_N];
     volatile uint32_t head, tail;
+    volatile uint32_t relPend[4]; // releases that found the queue full: one bit per note (32 bit atomics only on the Cortex-M4)
+    volatile uint8_t allOffPend;
     uint32_t serial, rng;
     float lfoPhase, bend, mod, lvlPrev;
     float sCut, sRes, sNoise, sDet, sShape, sLevel;
@@ -287,6 +315,15 @@ class Engine
             e.valid = 0;
             tail = tail + 1;
             handle(type, a, b);
+        }
+        if (__atomic_exchange_n(&allOffPend, (uint8_t)0, __ATOMIC_ACQ_REL))
+            handle(EV_ALLOFF, 0, 0);
+        for (int w = 0; w < 4; w++)
+        {
+            uint32_t m = __atomic_exchange_n(&relPend[w], (uint32_t)0, __ATOMIC_ACQ_REL);
+            for (int n = 0; m; n++, m >>= 1)
+                if (m & 1u)
+                    release((uint8_t)(w * 32 + n));
         }
     }
 
@@ -321,18 +358,18 @@ class Engine
         switch (n)
         {
             case 1: mod = (float)val * (1.0f / 127.0f); break;
-            case 5: p[P_GLIDE] = clampParam(P_GLIDE, pct); break;
-            case 7: p[P_LEVEL] = clampParam(P_LEVEL, pct); break;
-            case 70: p[P_SHAPE] = clampParam(P_SHAPE, pct); break;
-            case 71: p[P_RESO] = clampParam(P_RESO, pct); break;
-            case 72: p[P_RELEASE] = clampParam(P_RELEASE, pct); break;
-            case 73: p[P_ATTACK] = clampParam(P_ATTACK, pct); break;
-            case 74: p[P_CUTOFF] = clampParam(P_CUTOFF, pct); break;
-            case 75: p[P_DECAY] = clampParam(P_DECAY, pct); break;
-            case 76: p[P_DETUNE] = clampParam(P_DETUNE, pct); break;
-            case 77: p[P_NOISE] = clampParam(P_NOISE, pct); break;
-            case 91: p[P_REVERB] = clampParam(P_REVERB, pct); break;
-            case 93: p[P_DELAY] = clampParam(P_DELAY, pct); break;
+            case 5: ef[P_GLIDE] = clampParam(P_GLIDE, pct); break;
+            case 7: ef[P_LEVEL] = clampParam(P_LEVEL, pct); break;
+            case 70: ef[P_SHAPE] = clampParam(P_SHAPE, pct); break;
+            case 71: ef[P_RESO] = clampParam(P_RESO, pct); break;
+            case 72: ef[P_RELEASE] = clampParam(P_RELEASE, pct); break;
+            case 73: ef[P_ATTACK] = clampParam(P_ATTACK, pct); break;
+            case 74: ef[P_CUTOFF] = clampParam(P_CUTOFF, pct); break;
+            case 75: ef[P_DECAY] = clampParam(P_DECAY, pct); break;
+            case 76: ef[P_DETUNE] = clampParam(P_DETUNE, pct); break;
+            case 77: ef[P_NOISE] = clampParam(P_NOISE, pct); break;
+            case 91: ef[P_REVERB] = clampParam(P_REVERB, pct); break;
+            case 93: ef[P_DELAY] = clampParam(P_DELAY, pct); break;
             case 120:
             case 123: handle(EV_ALLOFF, 0, 0); break;
             default: break;
@@ -344,6 +381,11 @@ class Engine
         for (int i = 0; i < kMaxVoices; i++)
             if (v[i].gate && v[i].note == note)
             {
+                if (v[i].fresh)
+                {
+                    v[i].relPend = 1; // note-on and note-off in one block: it sounds for one block, then releases (else it would be silent)
+                    continue;
+                }
                 v[i].gate = 0;
                 v[i].stage = ST_RELEASE;
             }
@@ -352,7 +394,7 @@ class Engine
     // voice for a new note: the same note still held, else an idle one, else the quietest releasing one, else the oldest
     int pick(uint8_t note) const
     {
-        const int n = p[P_VOICES];
+        const int n = ef[P_VOICES];
         for (int i = 0; i < n; i++)
             if (v[i].stage != ST_IDLE && v[i].gate && v[i].note == note)
                 return i;
@@ -400,8 +442,8 @@ class Engine
 
     __attribute__((optimize("Os"))) void derive(Derived& d)
     {
-        const float tCut = (float)p[P_CUTOFF], tRes = (float)p[P_RESO], tNoise = (float)p[P_NOISE], tDet = (float)p[P_DETUNE],
-                    tLevel = (float)p[P_LEVEL];
+        const float tCut = (float)ef[P_CUTOFF], tRes = (float)ef[P_RESO], tNoise = (float)ef[P_NOISE], tDet = (float)ef[P_DETUNE],
+                    tLevel = (float)ef[P_LEVEL];
         if (!smoothed)
         {
             sCut = tCut;
@@ -409,7 +451,7 @@ class Engine
             sNoise = tNoise;
             sDet = tDet;
             sLevel = tLevel;
-            sShape = (float)p[P_SHAPE];
+            sShape = (float)ef[P_SHAPE];
             smoothed = true;
         }
         const float a = 0.35f; // block rate one pole: ~12 ms, then ramped linearly across each block
@@ -418,19 +460,19 @@ class Engine
         sNoise = lerpParam(sNoise, tNoise, a);
         sDet = lerpParam(sDet, tDet, a);
         sLevel = lerpParam(sLevel, tLevel, a);
-        sShape = lerpParam(sShape, (float)p[P_SHAPE], a);
+        sShape = lerpParam(sShape, (float)ef[P_SHAPE], a);
 
         // shared LFO (parabolic sine), rate 0.1 .. 19 Hz
-        lfoPhase += 0.1f * exp2fast((float)p[P_LFO_RATE] * 0.076f) * kBlockSec;
+        lfoPhase += 0.1f * exp2fast((float)ef[P_LFO_RATE] * 0.076f) * kBlockSec;
         if (lfoPhase >= 1.0f)
             lfoPhase -= 1.0f;
         const float x = lfoPhase * 2.0f - 1.0f;
         float lfo = 4.0f * x * (1.0f - (x < 0 ? -x : x));
-        float depth = (float)p[P_LFO_DEPTH] * 0.01f;
+        float depth = (float)ef[P_LFO_DEPTH] * 0.01f;
         if (mod > depth)
             depth = mod;
         lfo *= depth;
-        const uint8_t dest = p[P_LFO_DEST];
+        const uint8_t dest = ef[P_LFO_DEST];
 
         d.vib = (dest == 0 ? lfo * 2.0f : 0.0f) + bend;
         const float cutMod = dest == 2 ? exp2fast(lfo * 3.0f) : 1.0f;
@@ -440,23 +482,23 @@ class Engine
         const float nz = sNoise * 0.01f;
         d.noise = nz * nz;
         d.detune = sDet * 0.0012f;
-        d.interval = (float)((int)p[P_INTERVAL] - 12);
+        d.interval = (float)((int)ef[P_INTERVAL] - 12);
         const float lv = sLevel * 0.01f;
-        d.level = lv * lv * 1.5f * (1.0f + (float)p[P_DRIVE] * 0.03f);
+        d.level = lv * lv * 1.5f * (1.0f + (float)ef[P_DRIVE] * 0.03f);
 
         // envelope: per block one pole coefficients from the times (attack 1 ms .. 2 s, decay / release 5 ms .. 10 s)
-        d.kA = 1.0f - exp2fast(-kBlockSec * 1.4427f * 2.4f / (0.001f * exp2fast((float)p[P_ATTACK] * 0.11f)));
-        d.kD = 1.0f - exp2fast(-kBlockSec * 1.4427f * 4.6f / (0.005f * exp2fast((float)p[P_DECAY] * 0.11f)));
-        d.kR = 1.0f - exp2fast(-kBlockSec * 1.4427f * 4.6f / (0.005f * exp2fast((float)p[P_RELEASE] * 0.11f)));
-        d.sus = (float)p[P_SUSTAIN] * 0.01f;
+        d.kA = 1.0f - exp2fast(-kBlockSec * 1.4427f * 2.4f / (0.001f * exp2fast((float)ef[P_ATTACK] * 0.11f)));
+        d.kD = 1.0f - exp2fast(-kBlockSec * 1.4427f * 4.6f / (0.005f * exp2fast((float)ef[P_DECAY] * 0.11f)));
+        d.kR = 1.0f - exp2fast(-kBlockSec * 1.4427f * 4.6f / (0.005f * exp2fast((float)ef[P_RELEASE] * 0.11f)));
+        d.sus = (float)ef[P_SUSTAIN] * 0.01f;
         d.sus *= d.sus;
-        d.glideK = p[P_GLIDE] == 0 ? 1.0f : 1.0f - exp2fast(-kBlockSec * 1.4427f / (0.005f * exp2fast((float)p[P_GLIDE] * 0.1f)));
+        d.glideK = ef[P_GLIDE] == 0 ? 1.0f : 1.0f - exp2fast(-kBlockSec * 1.4427f / (0.005f * exp2fast((float)ef[P_GLIDE] * 0.1f)));
 
-        d.stereo = p[P_WIDTH] != 0;
-        const float w = (float)p[P_WIDTH] * 0.01f;
+        d.stereo = ef[P_WIDTH] != 0;
+        const float w = (float)ef[P_WIDTH] * 0.01f;
         d.sR = 0.5f * (1.0f - w); // share of the opposite side
         d.sL = 1.0f - d.sR;
-        d.pulse = p[P_SHAPE] != 0;
+        d.pulse = ef[P_SHAPE] != 0;
         float sh = sShape;
         if (dest == 1 && d.pulse)
             sh += lfo * 50.0f;

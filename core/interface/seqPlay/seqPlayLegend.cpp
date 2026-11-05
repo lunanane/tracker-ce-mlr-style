@@ -32,6 +32,46 @@ cSeqPlayLegend::cSeqPlayLegend(strControlProperties* properties)
     view = (const SeqPlayViewData*)properties->data;
 }
 
+namespace {
+// Drawing context of seqPlinkyUiLogic.h over the FT81x display list: rectangles are batched, the texts come after the shapes.
+struct PlinkyCtx
+{
+    bool inRects = false;
+    void ensureRects()
+    {
+        if (inRects)
+            return;
+        API_LINE_WIDTH(8);
+        API_BEGIN(RECTS);
+        inRects = true;
+    }
+    void endRects()
+    {
+        if (inRects)
+            API_END();
+        inRects = false;
+    }
+    void color(uint32_t rgb) { API_COLOR(rgb); }
+    void rect(int x0, int y0, int x1, int y1)
+    {
+        ensureRects();
+        API_VERTEX2F(x0, y0);
+        API_VERTEX2F(x1 - 1, y1 - 1);
+    }
+    void textPhase()
+    {
+        endRects();
+        API_BLEND_FUNC(SRC_ALPHA, ONE_MINUS_SRC_ALPHA);
+    }
+    void text(int x, int y, int font, int opt, const char* s)
+    {
+        endRects();
+        API_CMD_TEXT(x, y, fonts[font - 1].handle, (uint16_t)(((opt & 1) ? OPT_CENTERX : 0) | ((opt & 2) ? OPT_CENTERY : 0) | ((opt & 4) ? OPT_RIGHTX : 0)), s);
+    }
+    void finish() { endRects(); }
+};
+} // namespace
+
 static void box(int16_t x, int16_t y, int16_t w, int16_t h)
 {
     API_BEGIN(RECTS);
@@ -69,6 +109,14 @@ void cSeqPlayLegend::update()
     if (view->mode == SeqPlayViewData::HIDDEN)
     {
         API_BLEND_FUNC(SRC_ALPHA, ONE_MINUS_SRC_ALPHA);
+        return;
+    }
+
+    if (view->mode == SeqPlayViewData::PLINKY)
+    {
+        seqplinky::Palette pal = { th.backgroundColor, th.grey_22, 0x555555, th.white, th.cyan, th.yellow, 0x000000, th.cyan };
+        PlinkyCtx c;
+        seqplinky::draw(c, view->plinky, pal);
         return;
     }
 
@@ -122,6 +170,8 @@ void cSeqPlayLegend::update()
     st.tie = view->tie;
     st.win = view->win;
     st.hr = &view->hr;
+    st.pl = view->plSetup;
+    st.plMenu = view->plMenu;
 
     // backing panel: two caption lines (state, how to play) above the 12 x 4 cells
     API_COLOR(th.backgroundColor);

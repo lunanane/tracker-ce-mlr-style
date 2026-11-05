@@ -1372,6 +1372,7 @@ static void test_save_uses_critical_sections()
 int sessionTests(int& checks);
 #include "test_cut.inc"
 #include "test_rec.inc"
+#include "test_plinkyseq.inc"
 
 int main()
 {
@@ -1467,6 +1468,13 @@ int main()
     test_play_rec_bounce_and_transport();
     test_play_rec_shift_loop();
     test_rec_end_reasons();
+    test_plinky_pad_map();
+    test_plinky_type_and_pads();
+    test_plinky_pending_and_stop();
+    test_plinky_record();
+    test_plinky_sidecar();
+    test_plinky_overlay_logic();
+    test_plinky_overlay_draw_budget();
     printf("%d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

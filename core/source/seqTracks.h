@@ -45,7 +45,7 @@ inline bool seqTapRefusedTake()
 void seqPanicRequest();
 
 // ---- pads (main loop) ----
-bool seqPadPress(uint8_t track, uint8_t pad);   // false: dropped (queue full); a press may be lost
+bool seqPadPress(uint8_t track, uint8_t pad, uint8_t velo = 0); // false: dropped (queue full); a press may be lost. velo: pad pressure (Plinky type)
 void seqPadRelease(uint8_t track, uint8_t pad); // never lost: kept and retried from seqTracksUpdate until accepted
 
 // ---- CUT (MLR) layer (main loop) ----

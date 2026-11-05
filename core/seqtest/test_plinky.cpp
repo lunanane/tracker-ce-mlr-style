@@ -496,10 +496,10 @@ static void test_event_queue_and_cc()
     e.controlChange(74, 127);
     e.controlChange(1, 127);
     run(e, 1, o);
-    CHECK(e.param(P_CUTOFF) == 100);
+    CHECK(e.effective(P_CUTOFF) == 100 && e.param(P_CUTOFF) == paramInfo(P_CUTOFF).def); // a CC moves the effective value, not the saved patch
     e.controlChange(74, 0);
     run(e, 1, o);
-    CHECK(e.param(P_CUTOFF) == 0);
+    CHECK(e.effective(P_CUTOFF) == 0 && e.param(P_CUTOFF) == paramInfo(P_CUTOFF).def);
     e.controlChange(123, 0);
     run(e, 400, o);
     CHECK(e.activeVoices() == 0);
@@ -513,6 +513,60 @@ static void test_event_queue_and_cc()
     CHECK(true);
     run(e, 1, o);
     CHECK(e.voice(0).gate == 0);
+}
+
+// review fixes: CC automation never overwrites the saved patch, releases are never lost, a note shorter than a block still sounds
+static void test_cc_release_and_short_notes()
+{
+    {
+        Engine e;
+        std::vector<int16_t> o;
+        e.setParam(P_REVERB, 20);
+        e.controlChange(91, 127);
+        e.controlChange(93, 64);
+        e.controlChange(7, 0);
+        run(e, 1, o);
+        CHECK(e.param(P_REVERB) == 20 && e.param(P_DELAY) == paramInfo(P_DELAY).def && e.param(P_LEVEL) == paramInfo(P_LEVEL).def);
+        CHECK(e.effective(P_REVERB) == 100 && e.effective(P_DELAY) == 50 && e.effective(P_LEVEL) == 0);
+        Params saved;
+        for (int i = 0; i < P_COUNT; i++) saved.v[i] = e.param(i);
+        CHECK(saved.v[P_REVERB] == 20); // what plinky.bin would store
+        e.setParam(P_REVERB, 30); // the UI takes the effective value back
+        CHECK(e.effective(P_REVERB) == 30 && e.param(P_REVERB) == 30);
+    }
+    {
+        // the queue is full of note-ons: the release does not fit, but it is remembered and applied
+        Engine e;
+        std::vector<int16_t> o;
+        e.noteOn(60, 100);
+        run(e, 2, o);
+        for (int i = 0; i < 40; i++) e.noteOn(70, 100);
+        CHECK(e.noteOff(60)); // reports success: it will be applied
+        run(e, 1, o);
+        bool held = false;
+        for (int i = 0; i < kMaxVoices; i++)
+            if (e.voice(i).stage != ST_IDLE && e.voice(i).note == 60 && e.voice(i).gate) held = true;
+        CHECK(!held);
+        for (int i = 0; i < 40; i++) e.noteOn(71, 100);
+        CHECK(e.allNotesOff());
+        run(e, 1, o);
+        for (int i = 0; i < kMaxVoices; i++) CHECK(!e.voice(i).gate);
+    }
+    {
+        // note-on and note-off before the first block renders: the note is heard for a block, then releases
+        Engine e;
+        setOpenMono(e);
+        e.noteOn(60, 100);
+        e.noteOff(60);
+        std::vector<int16_t> o;
+        run(e, 1, o);
+        double energy = 0;
+        for (size_t i = 0; i < o.size(); i++) energy += (double)o[i] * o[i];
+        CHECK(energy > 1.0e6);
+        CHECK(e.voice(0).gate == 0 && e.voice(0).stage != ST_IDLE);
+        run(e, 400, o);
+        CHECK(e.activeVoices() == 0);
+    }
 }
 
 static void test_determinism_and_levels()
@@ -646,6 +700,7 @@ int main()
     test_no_clicks();
     test_antialiasing();
     test_event_queue_and_cc();
+    test_cc_release_and_short_notes();
     test_determinism_and_levels();
     test_cutoff_brightness_and_lfo();
     test_cost();
