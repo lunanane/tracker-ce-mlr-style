@@ -368,6 +368,7 @@ void cInstrumentEditor::showTitleBar()
         case mtInstEditModeMidi:
             label = "MIDI Instrument Parameters";
 #ifdef FEATURE_PLINKY
+            label = "MIDI Parameters  Shift+1: Plinky"; // hint of the claim gesture; stock items unchanged
             if (plinkyActive())
             {
                 showPlinkyCpu(true);

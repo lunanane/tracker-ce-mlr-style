@@ -97,7 +97,7 @@ class Reverb
         float lp_2 = lp_decay_2_;
 
         float delta;
-        float delta_sum = 0.0f;
+        float level_sum = 0.0f; // plan 009 P#7: |wet| of both channels, the tail level (independent of the amount / dry input)
 
         for (size_t i = 0; i < size; i++)
         {
@@ -140,7 +140,7 @@ class Reverb
 
             delta = (wet * 32768 - *left) * amount;
             *left += delta;
-            delta_sum += abs(delta);
+            level_sum += __builtin_fabsf(wet); // plan 009 P#8: was libc abs(int) per sample (-fno-builtin)
 
             c.Load(apout);
             // c.Interpolate(del1, 4450.0f, LFO_1, 50.0f, krt);
@@ -155,7 +155,7 @@ class Reverb
 
             delta = (wet * 32768 - *right) * amount;
             *right += delta;
-            delta_sum += abs(delta);
+            level_sum += __builtin_fabsf(wet);
 
             ++left;
             ++right;
@@ -164,7 +164,36 @@ class Reverb
         lp_decay_0_ = lp_0;
         lp_decay_1_ = lp_1;
         lp_decay_2_ = lp_2;
-        last_update_delta_ = delta_sum / size;
+        last_update_delta_ = level_sum * (32768.0f / size); // in 16 bit LSB, both channels added
+        if (last_update_delta_ > sound_delta_threshold_)
+            quiet_blocks_ = 0;
+    }
+
+    // plan 009 P#7: Process(), but a block that has nothing to do is skipped: the input has been silent (all zero) for kIdleBlocks
+    // blocks (so everything fed in has gone round the delay lines: they are 15 591 samples long at most) and the tail at the output is
+    // below the activity threshold (default 5 LSB summed over both channels, i.e. about -82 dBFS per channel). The block is left as it
+    // is (zero input = zero output); the delay lines and filter states freeze. Returns true when the block was processed.
+    inline bool ProcessOrSkip(int16_t* left, int16_t* right, size_t size)
+    {
+        bool silent = true;
+        const uint32_t* wl = reinterpret_cast<const uint32_t*>(left);
+        const uint32_t* wr = reinterpret_cast<const uint32_t*>(right);
+        for (size_t i = 0; i < size / 2; i++)
+            silent &= (wl[i] | wr[i]) == 0;
+        if (!silent || last_update_delta_ > sound_delta_threshold_)
+        {
+            quiet_blocks_ = 0;
+        }
+        else if (quiet_blocks_ >= kIdleBlocks)
+        {
+            return false;
+        }
+        else
+        {
+            quiet_blocks_++;
+        }
+        Process(left, right, size);
+        return true;
     }
 
     inline void SetAmount(float amount) { amount_ = amount; }
@@ -189,6 +218,7 @@ class Reverb
         lp_decay_1_ = 0;
         lp_decay_2_ = 0;
         last_update_delta_ = sound_delta_threshold_;
+        quiet_blocks_ = 0;
     }
 
     inline void Reset()
@@ -198,15 +228,23 @@ class Reverb
         lp_decay_1_ = 0;
         lp_decay_2_ = 0;
         last_update_delta_ = sound_delta_threshold_;
+        quiet_blocks_ = 0;
     }
 
     inline bool IsActive() { return last_update_delta_ > sound_delta_threshold_; }
 
     inline void SetActiveThreshold(float threshold) { sound_delta_threshold_ = threshold; }
 
+  public:
+    // plan 009 P#1: the delay lines use 15 591 (buffer 1) and 11 037 (buffer 2) of the old 2 x 16 384 words. Buffer 1 stays a power of
+    // two (the LFO step test looks at the low bits of its write pointer, so the output stays bit-identical); buffer 2 is cut to a
+    // multiple of 32 words that still holds its three lines, so both live in internal SRAM (54 848 bytes instead of 64 KB of SDRAM).
+    static constexpr size_t kBuffer1Words = 16384;
+    static constexpr size_t kBuffer2Words = 11040;
+
   private:
-    typedef FxEngine<16384, FORMAT_16_BIT> E;
-    typedef FxEngine<16384, FORMAT_16_BIT> E2;
+    typedef FxEngine<kBuffer1Words, FORMAT_16_BIT, kBuffer2Words> E;
+    typedef E E2;
     E engine_;
 
     static constexpr size_t predelay_buffer_size_ = 5000;
@@ -226,6 +264,8 @@ class Reverb
 
     float last_update_delta_;
     float sound_delta_threshold_ = 5.0f;
+    static constexpr uint32_t kIdleBlocks = 256; // 32 768 samples of silent input and a quiet output before the skip starts
+    uint32_t quiet_blocks_ = 0;
 
     DISALLOW_COPY_AND_ASSIGN(Reverb);
 };

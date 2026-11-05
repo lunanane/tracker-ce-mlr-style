@@ -36,9 +36,9 @@ class AudioEffectLimiter : public AudioStream
     uint16_t xpeak;
     float attackTime;
     float releaseTime;
-    uint16_t a;
-    float coeff;
-    float f;
+    // plan 009 P#5: the 5-sample delays are rings (index of the oldest sample) instead of shift registers moved every sample
+    uint8_t inPos = 0;
+    uint8_t outPos = 0;
     float averageGain;
     float sumGain;
     bool isAverageGain;

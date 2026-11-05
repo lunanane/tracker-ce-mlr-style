@@ -8,7 +8,8 @@ GLUE = ../source/seqTracksCore.cpp ../source/seqCut.cpp ../interface/seqSession/
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
 
 .PHONY: test clean preview
-test: build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE) build/seq_plinky_tests$(EXE)
+test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE) build/seq_plinky_tests$(EXE)
+	build/seq_cpu_tests$(EXE)
 	build/seq_glue_tests$(EXE)
 	build/seq_perform_tests$(EXE)
 	build/seq_mod_tests$(EXE)
@@ -49,3 +50,19 @@ build/seq_plinky_tests$(EXE): test_plinky.cpp ../libs/Audio/PlinkyVoice/plinky_v
 
 clean:
 	rm -rf build
+
+# plan 009 P (CPU savings): bit-exact / bounded host tests against frozen copies of the pre-change DSP (seqtest/ref)
+CPUREF = $(filter-out -I../libs/Audio/Polyverb,$(CXXFLAGS)) -Iref/polyverb -std=gnu++11
+DELAYINC = -Istubs -I../libs/Audio -I../libs/Audio/utility -I../config -I../include -I../libs/Audio/Polyverb -DKINETISL -DAudio_h_ -include stubs/Audio.h -include stubs/dspinst.h
+build/seq_cpu_tests$(EXE): test_cpu.cpp cpu_delay_tests.inc cpu_reverb_wrap.inc cpu_reverb_ref.cpp cpu_reverb_new.cpp ../libs/Audio/Polyverb/reverb.h ../libs/Audio/Polyverb/fx_engine.h ref/polyverb/reverb.h ref/polyverb/fx_engine.h ../libs/Audio/effect_shortDelay.cpp ../libs/Audio/effect_shortDelay.h ref/delay/ref_shortDelay.cpp ref/delay/ref_shortDelay.h stubs/audio_stream_stub.cpp ../libs/Audio/effect_limiter.cpp ../libs/Audio/effect_limiter.h ref/limiter/ref_limiter.cpp ref/limiter/ref_limiter.h ../libs/Audio/filter_variable.cpp ../libs/Audio/amplifier.cpp ../libs/Audio/monoToStereo.cpp ../libs/Audio/mixer.cpp ../libs/Audio/dspApplyGain.cpp stubs/dspinst.h
+	mkdir -p build
+	$(CXX) $(CPUREF) -c cpu_reverb_ref.cpp -o build/cpu_reverb_ref.o
+	$(CXX) $(CXXFLAGS) -std=gnu++11 -c cpu_reverb_new.cpp -o build/cpu_reverb_new.o
+	$(CXX) $(DELAYINC) $(CXXFLAGS) -std=gnu++11 -c ../libs/Audio/effect_shortDelay.cpp -o build/effect_shortDelay.o
+	$(CXX) $(DELAYINC) $(CXXFLAGS) -std=gnu++11 -Iref/delay -c ref/delay/ref_shortDelay.cpp -o build/ref_shortDelay.o
+	$(CXX) $(DELAYINC) $(CXXFLAGS) -std=gnu++11 -c stubs/audio_stream_stub.cpp -o build/audio_stream_stub.o
+	$(CXX) $(DELAYINC) -I../AudioEngine/ConstantValues $(CXXFLAGS) -std=gnu++11 -c ../libs/Audio/effect_limiter.cpp -o build/effect_limiter.o
+	for f in filter_variable amplifier monoToStereo mixer dspApplyGain analyze_rms; do $(CXX) $(DELAYINC) $(CXXFLAGS) -std=gnu++11 -c ../libs/Audio/$$f.cpp -o build/$$f.o || exit 1; done
+	for f in ref_amplifier ref_monoToStereo; do $(CXX) $(DELAYINC) -Iref/voice $(CXXFLAGS) -std=gnu++11 -c ref/voice/$$f.cpp -o build/$$f.o || exit 1; done
+	$(CXX) $(DELAYINC) -I../AudioEngine/ConstantValues -Iref/limiter $(CXXFLAGS) -std=gnu++11 -c ref/limiter/ref_limiter.cpp -o build/ref_limiter.o
+	$(CXX) $(DELAYINC) $(CXXFLAGS) -std=gnu++11 -Iref/delay -Iref/limiter -Iref/voice test_cpu.cpp build/cpu_reverb_ref.o build/cpu_reverb_new.o build/effect_shortDelay.o build/ref_shortDelay.o build/audio_stream_stub.o build/effect_limiter.o build/ref_limiter.o build/filter_variable.o build/amplifier.o build/monoToStereo.o build/mixer.o build/dspApplyGain.o build/ref_amplifier.o build/ref_monoToStereo.o build/analyze_rms.o -o $@

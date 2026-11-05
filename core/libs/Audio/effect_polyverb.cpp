@@ -29,14 +29,21 @@ static __NOINIT(EXTERNAL_RAM) int16_t ringReverbMemory[ringverb::kRingSize + 2 *
 #ifdef PLATFORM_IMX
 static uint16_t internalRamReverbBuff[16384] __attribute__((section(".noinit")));
 #else
-static __NOINIT(EXTERNAL_RAM) uint16_t internalRamReverbBuff[16384];
+// plan 009 P#1: the delay lines of the stock reverb live in internal SRAM (.bss, zeroed at start): 29 uncached SDRAM accesses per sample
+// become single-cycle ones. 32 768 + 22 080 bytes. The old SDRAM array externalRamReverbBuff (Tracker.cpp) is no longer used here.
+static uint16_t internalRamReverbBuff[Reverb::kBuffer1Words];
+static uint16_t sramReverbBuff2[Reverb::kBuffer2Words];
 #endif
 
 AudioEffectPolyverb::AudioEffectPolyverb()
   : AudioStream(2, inputQueueArray)
 {
     buffer = internalRamReverbBuff;
+#ifdef PLATFORM_IMX
     buffer2 = externalRamReverbBuff;
+#else
+    buffer2 = sramReverbBuff2;
+#endif
     reverb.Init(buffer, buffer2);
 
 #if defined(PLATFORM_IMX)
@@ -168,7 +175,7 @@ AUDIO_CORE_RAM void AudioEffectPolyverb::runType(int16_t* l, int16_t* r)
     }
     else
     {
-        reverb.Process(l, r, AUDIO_BLOCK_SAMPLES);
+        reverb.ProcessOrSkip(l, r, AUDIO_BLOCK_SAMPLES); // plan 009 P#7: nothing to do while idle and the tail is gone
     }
 }
 
@@ -198,9 +205,9 @@ AUDIO_CORE_RAM bool AudioEffectPolyverb::clearStep()
     else
     {
         seg[n] = (uint8_t*)buffer;
-        len[n++] = 16384 * sizeof(uint16_t); // internalRamReverbBuff
+        len[n++] = sizeof(internalRamReverbBuff);
         seg[n] = (uint8_t*)buffer2;
-        len[n++] = 16384 * sizeof(uint16_t); // externalRamReverbBuff (REVERB_MEMORY_SIZE)
+        len[n++] = sizeof(sramReverbBuff2);
     }
 #endif
     int which = 0;

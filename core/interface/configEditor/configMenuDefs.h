@@ -108,9 +108,8 @@ const char* const themeChoices[3] = {
     "Anniversary",
 };
 
-const char* const ptrFont[2] = {
+const char* const ptrFont[1] = {
     "Original",
-    "New",
 };
 
 const char* const radioRegion[4] = {
