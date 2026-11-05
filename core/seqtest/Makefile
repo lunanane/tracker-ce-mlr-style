@@ -8,7 +8,8 @@ GLUE = ../source/seqTracksCore.cpp ../source/seqCut.cpp ../interface/seqSession/
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
 
 .PHONY: test clean preview
-test: build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE)
+test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE)
+	build/seq_cpu_tests$(EXE)
 	build/seq_glue_tests$(EXE)
 	build/seq_perform_tests$(EXE)
 	build/seq_mod_tests$(EXE)
@@ -43,3 +44,11 @@ build/seq_fx_tests$(EXE): test_fx.cpp ../source/seqFxDsp.h ../source/seqFxLogic.
 
 clean:
 	rm -rf build
+
+# plan 009 P (CPU savings): bit-exact / bounded host tests against frozen copies of the pre-change DSP (seqtest/ref)
+CPUREF = $(filter-out -I../libs/Audio/Polyverb,$(CXXFLAGS)) -Iref/polyverb -std=gnu++11
+build/seq_cpu_tests$(EXE): test_cpu.cpp cpu_reverb_wrap.inc cpu_reverb_ref.cpp cpu_reverb_new.cpp ../libs/Audio/Polyverb/reverb.h ../libs/Audio/Polyverb/fx_engine.h ref/polyverb/reverb.h ref/polyverb/fx_engine.h
+	mkdir -p build
+	$(CXX) $(CPUREF) -c cpu_reverb_ref.cpp -o build/cpu_reverb_ref.o
+	$(CXX) $(CXXFLAGS) -std=gnu++11 -c cpu_reverb_new.cpp -o build/cpu_reverb_new.o
+	$(CXX) $(CXXFLAGS) test_cpu.cpp build/cpu_reverb_ref.o build/cpu_reverb_new.o -o $@

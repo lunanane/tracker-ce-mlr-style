@@ -942,7 +942,8 @@ void cConfigEditor::showDiagnosticInfo()
     size_t freeBytes = Profiler::getInstance()->freeRamBytes();
     snprintf(heapUsageText, sizeof(heapUsageText), "free heap: %d B", freeBytes);
     size_t maxStackBytes = Profiler::getInstance()->maxStackBytes();
-    snprintf(stackUsageText, sizeof(stackUsageText), "max stack: %d B", maxStackBytes);
+    snprintf(stackUsageText, sizeof(stackUsageText), "stack %d, free %d B", (int)maxStackBytes,
+             (int)Profiler::getInstance()->minFreeStackBytes());
 
     display.setControlText(memoryUsageLabelControl, heapUsageText);
     display.setControlText2(memoryUsageLabelControl, stackUsageText);

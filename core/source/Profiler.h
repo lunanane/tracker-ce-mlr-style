@@ -31,6 +31,7 @@ class Profiler
 
     size_t freeRamBytes();
     size_t maxStackBytes();
+    size_t minFreeStackBytes(); // plan 009 P#1: headroom between heap and the deepest stack use (MK66; 0 on IMX)
     void getAudioProcessingUsageUs(AudioProcessorUsage& usage, bool resetTempMaximum = false);
     void getAudioProcessingUsagePercent(AudioProcessorUsage& usage, bool resetTempMaximum = false);
     void startMeasuringAudio();

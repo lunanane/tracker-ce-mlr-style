@@ -204,9 +204,16 @@ class Reverb
 
     inline void SetActiveThreshold(float threshold) { sound_delta_threshold_ = threshold; }
 
+  public:
+    // plan 009 P#1: the delay lines use 15 591 (buffer 1) and 11 037 (buffer 2) of the old 2 x 16 384 words. Buffer 1 stays a power of
+    // two (the LFO step test looks at the low bits of its write pointer, so the output stays bit-identical); buffer 2 is cut to a
+    // multiple of 32 words that still holds its three lines, so both live in internal SRAM (54 848 bytes instead of 64 KB of SDRAM).
+    static constexpr size_t kBuffer1Words = 16384;
+    static constexpr size_t kBuffer2Words = 11040;
+
   private:
-    typedef FxEngine<16384, FORMAT_16_BIT> E;
-    typedef FxEngine<16384, FORMAT_16_BIT> E2;
+    typedef FxEngine<kBuffer1Words, FORMAT_16_BIT, kBuffer2Words> E;
+    typedef E E2;
     E engine_;
 
     static constexpr size_t predelay_buffer_size_ = 5000;
