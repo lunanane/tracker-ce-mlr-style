@@ -72,6 +72,43 @@ static void test_hr_clock_runs_only_while_the_transport_plays()
     delete e;
 }
 
+static void padHold(Engine& e, uint8_t track, int col, int row, bool down)
+{
+    e.applyPad(track, (uint8_t)(row * 12 + col), down);
+}
+
+// M1: the arranger of the HYPER_RASP chord_arp (not a FOLLOWS_TRANSPORT script) plays a chord; the transport Stop ends it
+static void test_hr_arranger_chord_ends_on_transport_stop()
+{
+    MockHost h;
+    Engine* e = mk(h);
+    e->applyType(3, kHrChordArpType);
+    e->hr(3)->setParam(seqgen::HrChordArp::P_LATCH, 0); // not latched: only the arranger sounds
+    pressPad(*e, 3, 0, 0);              // view 1: a root, released -> remembered as the last root
+    pressPad(*e, 3, 7, 3);              // function column row 4: view 4 (arranger)
+    pressPad(*e, 3, 0, 0);              // step 1 = the last root, chord, duration 1
+    int u = 1;
+    playUSteps(*e, 16, u);              // the transport plays
+    padHold(*e, 3, 7, 0, true);         // function column rows 1 + 2: tracker play
+    padHold(*e, 3, 7, 1, true);
+    padHold(*e, 3, 7, 1, false);
+    padHold(*e, 3, 7, 0, false);
+    CHECK(e->soundingCount(3) > 0 && e->takenOver(3)); // the arranger chord sounds
+    idle(*e, 10);                       // transport Stop
+    CHECK(e->soundingCount(3) == 0);
+    CHECK(h.count('+', 3) == h.count('-', 3));
+    CHECK(!e->takenOver(3));
+    // a second press of the combo starts the arranger again (the stop reset the host-running state)
+    u = 1;
+    playUSteps(*e, 16, u);
+    padHold(*e, 3, 7, 0, true);
+    padHold(*e, 3, 7, 1, true);
+    padHold(*e, 3, 7, 1, false);
+    padHold(*e, 3, 7, 0, false);
+    CHECK(e->soundingCount(3) > 0);
+    delete e;
+}
+
 static void test_hr_type_change_silences_and_releases()
 {
     MockHost h;
@@ -143,12 +180,14 @@ static void test_hr_sidecar_roundtrip_and_old_files()
     size_t n2 = b->saveState(buf2, sizeof(buf2));
     CHECK(n2 == n && memcmp(buf, buf2, n) == 0);
 
-    // a file without any HR type has no trailer: exactly the layout of the earlier firmware (16 records of type + two blocks)
+    // a file without any HR type has no trailer and is written as version 1: exactly what the earlier firmware (v0.2.5 and
+    // before) wrote and reads (16 records of type + two blocks)
     Engine* c = mk(h2);
     c->applyType(0, TYPE_MONO);
     c->applyType(3, TYPE_CHORDARP);
     uint8_t old[Engine::kSidecarMax];
     size_t on = c->saveState(old, sizeof(old));
+    CHECK(old[4] == Engine::kSidecarVersionV1 && buf[4] == Engine::kSidecarVersion); // v1 without HR track, v2 with
     size_t p = 8;
     for (int i = 0; i < kTracks; i++)
     {
@@ -160,6 +199,41 @@ static void test_hr_sidecar_roundtrip_and_old_files()
     // ... and it loads (it is what every file written before plan 008 D looks like)
     Engine* d = mk(h2);
     CHECK(d->loadState(old, on) && d->type(0) == TYPE_MONO && d->type(3) == TYPE_CHORDARP && d->hr(0) == 0);
+    // a REAL v1 frame (version byte 1, CRC recomputed over the changed header) loads with identical state
+    {
+        uint8_t v1[Engine::kSidecarMax];
+        memcpy(v1, old, on);
+        v1[4] = 1;
+        uint16_t cr = seqsidecar::crc16(v1, on - 2);
+        v1[on - 2] = (uint8_t)(cr & 0xFF);
+        v1[on - 1] = (uint8_t)(cr >> 8);
+        Engine* e1 = mk(h2);
+        CHECK(e1->loadState(v1, on) && e1->type(0) == TYPE_MONO && e1->type(3) == TYPE_CHORDARP && e1->type(1) == TYPE_OFF);
+        CHECK(e1->stateHash() == c->stateHash() && e1->stateHash() == d->stateHash());
+        uint8_t v1b[Engine::kSidecarMax];
+        CHECK(e1->saveState(v1b, sizeof(v1b)) == on && memcmp(v1b, v1, on) == 0); // loads and writes back version 1 unchanged
+        // the same payload tagged version 2 (no trailer) loads too
+        v1[4] = 2;
+        cr = seqsidecar::crc16(v1, on - 2);
+        v1[on - 2] = (uint8_t)(cr & 0xFF);
+        v1[on - 1] = (uint8_t)(cr >> 8);
+        Engine* e2 = mk(h2);
+        CHECK(e2->loadState(v1, on) && e2->stateHash() == c->stateHash());
+        // a version 3 frame is refused, nothing changed
+        v1[4] = 3;
+        cr = seqsidecar::crc16(v1, on - 2);
+        v1[on - 2] = (uint8_t)(cr & 0xFF);
+        v1[on - 1] = (uint8_t)(cr >> 8);
+        CHECK(!mk(h2)->loadState(v1, on));
+        // a frame with the HR trailer must not claim version 1
+        uint8_t hv[Engine::kSidecarMax];
+        memcpy(hv, buf, n);
+        hv[4] = 1;
+        cr = seqsidecar::crc16(hv, n - 2);
+        hv[n - 2] = (uint8_t)(cr & 0xFF);
+        hv[n - 1] = (uint8_t)(cr >> 8);
+        CHECK(!mk(h2)->loadState(hv, n));
+    }
 
     // a damaged HR block turns only that track Off
     uint8_t bad[Engine::kSidecarMax];
