@@ -2,6 +2,7 @@
 // Host tests of the v0.2 step-0 foundations: performance-mode owner mask, panic latch, deferred-write gate, tap refusal, the
 // generic sidecar frame and the per-clip play-mode table (plan 005).
 #include "seqClipsLogic.h"
+#include "seqMemLogic.h"
 #include "seqModLogic.h"
 #include "seqSidecarLogic.h"
 #include "seqSongLogic.h"
@@ -378,8 +379,32 @@ static void test_song_advance()
     CHECK(slotAfterSwitch(4, 6, 7) == -1 && slotAfterSwitch(0, 6, 6) == -1);
 }
 
+// v0.3.1 M3: stack low-water found from the stack side; the heap eating the bottom of the paint does not fool it
+static void test_stack_headroom()
+{
+    uint32_t gap[1000];
+    for (auto& w : gap) w = seqmem::kPaint;
+    // untouched: low-water = gapHigh
+    CHECK(seqmem::stackLow(gap, gap + 1000) == gap + 1000);
+    // the stack used the top 100 words
+    for (int i = 900; i < 1000; i++) gap[i] = 0x12345678u + (uint32_t)i;
+    CHECK(seqmem::stackLow(gap, gap + 1000) == gap + 900);
+    // an accidental paint-valued word inside the used stack does not end the scan (run < 32)
+    gap[950] = seqmem::kPaint;
+    CHECK(seqmem::stackLow(gap, gap + 1000) == gap + 900);
+    // the heap grew over the bottom 300 words: the readout used to break there (scan from the heap side), now it does not
+    for (int i = 0; i < 300; i++) gap[i] = 0xC0DE0000u + (uint32_t)i;
+    CHECK(seqmem::stackLow(gap, gap + 1000) == gap + 900);
+    CHECK(seqmem::headroom((uintptr_t)(gap + 900), (uintptr_t)(gap + 300)) == 600u * 4u);
+    // heap and stack met: nothing painted is left
+    for (int i = 0; i < 1000; i++) gap[i] = 0x01010101u + (uint32_t)i;
+    CHECK(seqmem::stackLow(gap, gap + 1000) == gap);
+    CHECK(seqmem::headroom((uintptr_t)gap, (uintptr_t)(gap + 500)) == 0u);
+}
+
 int main()
 {
+    test_stack_headroom();
     test_owner_mask();
     test_launch_then_fader_page_keeps_clips();
     test_fader_then_launch_then_leave_performance();
