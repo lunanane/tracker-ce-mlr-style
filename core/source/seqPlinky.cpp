@@ -149,7 +149,11 @@ void seqPlinkySet(int param, int value)
     if (eng().param(param) != before)
     {
         if (param == P_CHANNEL)
-            eng().allNotesOff(); // the old channel goes back to the MIDI outputs: nothing may hang
+        {
+            eng().allNotesOff(); // the voice's own notes end
+            if (before != 0)
+                sendCC(123, 0, before, false); // v0.3.1 minor 7: the old channel is a plain MIDI output again: all notes off there too
+        }
         if (param == P_REVERB || param == P_DELAY)
             engine.applyPlinkySends();
         s_dirty.mark();
