@@ -429,3 +429,49 @@ static void testOutputStage()
     CHECK(same);
     CHECK(nonzero > 20000);
 }
+
+// ---- Plan 009 P#11: the RMS meter only accumulates while it is being asked for ----
+#include "analyze_rms.h"
+
+static void testRmsWatch()
+{
+    AudioAnalyzeRMS& m = *new (calloc(1, sizeof(AudioAnalyzeRMS))) AudioAnalyzeRMS();
+    g_rng = 99;
+    auto feed = [&](bool block, std::vector<int16_t>* keep) {
+        if (block)
+        {
+            audio_block_t* b = (audio_block_t*)calloc(1, sizeof(audio_block_t));
+            b->ref_count = 1;
+            for (int s = 0; s < 128; s++)
+            {
+                b->data[s] = (int16_t)((int)(rnd() % 20001) - 10000);
+                if (keep) keep->push_back(b->data[s]);
+            }
+            stubIn[0] = b;
+        }
+        m.update();
+    };
+    // nobody is asking: nothing accumulates, a first read gives 0 and starts the watch
+    for (int i = 0; i < 100; i++) feed(true, nullptr);
+    CHECK(m.read() == 0.0f);
+    // now watched: the value equals the RMS of the blocks since (a missing block counts as silence)
+    std::vector<int16_t> seen;
+    for (int i = 0; i < 40; i++) feed(i % 7 != 3, &seen);
+    int64_t sum = 0;
+    for (int16_t v : seen) sum += (int64_t)v * v;
+    float expect = sqrtf((float)(sum / (uint64_t)(40 * 128))) / 32767.0f;
+    CHECK(m.available());
+    CHECK(fabsf(m.read() - expect) < 1e-6f);
+    // asking stops: the meter accumulates for kWatchBlocks blocks after the last read and then sleeps (loud blocks, then silent ones)
+    (void)m.read();
+    for (int i = 0; i < 3000; i++)
+    {
+        audio_block_t* b = (audio_block_t*)calloc(1, sizeof(audio_block_t));
+        b->ref_count = 1;
+        for (int s = 0; s < 128; s++)
+            b->data[s] = i < 1500 ? 10000 : 0;
+        stubIn[0] = b;
+        m.update();
+    }
+    CHECK(fabsf(m.read() - 10000.0f / 32767.0f) < 1e-4f); // the silent half was not counted
+}

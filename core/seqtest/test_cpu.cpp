@@ -134,6 +134,7 @@ int main()
     testLimiter();
     testIdleVoices();
     testOutputStage();
+    testRmsWatch();
     printf("%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }
