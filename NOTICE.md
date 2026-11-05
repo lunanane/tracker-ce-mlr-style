@@ -24,10 +24,7 @@ Polyend Tracker Community Edition (CE) incorporates or links against the followi
 * **License**: MIT / PJRC Permissive License
 * **Copyright**: Copyright (c) 2014-2018 Paul Stoffregen, PJRC.COM, LLC.
 
-## 5. Liberation Sans Fonts (UI Bitmap Font Source)
-* **Location**: `core/libs/fonts/LiberationSans-*_L4.{h,cpp}` (4-bit `L4` antialiased glyph bitmaps)
-* **License**: SIL Open Font License 1.1 (OFL-1.1)
-* **Copyright**: Digitized data copyright (c) 2010 Google Corporation; Copyright (c) 2012 Red Hat, Inc.
+## 5. (removed: Liberation Sans fonts, no longer shipped)
 
 ## 6. Embedded Template Library (ETL)
 * **Location**: `util/3rdparty/etl/`
