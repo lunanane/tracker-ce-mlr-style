@@ -47,8 +47,12 @@ clean:
 
 # plan 009 P (CPU savings): bit-exact / bounded host tests against frozen copies of the pre-change DSP (seqtest/ref)
 CPUREF = $(filter-out -I../libs/Audio/Polyverb,$(CXXFLAGS)) -Iref/polyverb -std=gnu++11
-build/seq_cpu_tests$(EXE): test_cpu.cpp cpu_reverb_wrap.inc cpu_reverb_ref.cpp cpu_reverb_new.cpp ../libs/Audio/Polyverb/reverb.h ../libs/Audio/Polyverb/fx_engine.h ref/polyverb/reverb.h ref/polyverb/fx_engine.h
+DELAYINC = -Istubs -I../libs/Audio -I../config -I../libs/Audio/Polyverb -DKINETISL -DAudio_h_ -include stubs/Audio.h
+build/seq_cpu_tests$(EXE): test_cpu.cpp cpu_delay_tests.inc cpu_reverb_wrap.inc cpu_reverb_ref.cpp cpu_reverb_new.cpp ../libs/Audio/Polyverb/reverb.h ../libs/Audio/Polyverb/fx_engine.h ref/polyverb/reverb.h ref/polyverb/fx_engine.h ../libs/Audio/effect_shortDelay.cpp ../libs/Audio/effect_shortDelay.h ref/delay/ref_shortDelay.cpp ref/delay/ref_shortDelay.h stubs/audio_stream_stub.cpp
 	mkdir -p build
 	$(CXX) $(CPUREF) -c cpu_reverb_ref.cpp -o build/cpu_reverb_ref.o
 	$(CXX) $(CXXFLAGS) -std=gnu++11 -c cpu_reverb_new.cpp -o build/cpu_reverb_new.o
-	$(CXX) $(CXXFLAGS) test_cpu.cpp build/cpu_reverb_ref.o build/cpu_reverb_new.o -o $@
+	$(CXX) $(DELAYINC) $(CXXFLAGS) -std=gnu++11 -c ../libs/Audio/effect_shortDelay.cpp -o build/effect_shortDelay.o
+	$(CXX) $(DELAYINC) $(CXXFLAGS) -std=gnu++11 -Iref/delay -c ref/delay/ref_shortDelay.cpp -o build/ref_shortDelay.o
+	$(CXX) $(DELAYINC) $(CXXFLAGS) -std=gnu++11 -c stubs/audio_stream_stub.cpp -o build/audio_stream_stub.o
+	$(CXX) $(DELAYINC) $(CXXFLAGS) -std=gnu++11 -Iref/delay test_cpu.cpp build/cpu_reverb_ref.o build/cpu_reverb_new.o build/effect_shortDelay.o build/ref_shortDelay.o build/audio_stream_stub.o -o $@

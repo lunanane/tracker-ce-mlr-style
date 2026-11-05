@@ -123,10 +123,13 @@ static void testReverbIdleSkip()
     CHECK(al == bl && ar == br);
 }
 
+#include "cpu_delay_tests.inc"
+
 int main()
 {
     testReverbSram();
     testReverbIdleSkip();
+    testDelay();
     printf("%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }
