@@ -77,8 +77,20 @@ class SeqHost : public seqtracks::Host
     }
     // the Plinky voice is polyphonic and a MIDI instrument: no sample-track rules for it
     static bool monoTrack(uint8_t track) { return isSampleTrack(track) && seqEngine.type(track) != seqlogic::TYPE_PLINKY; }
+    // v0.3.1 minor 6: a PolySynth track whose voice is off (channel 0) plays nothing (it used to fall back to a sample instrument)
+    static bool voiceOff(uint8_t track)
+    {
+#ifdef FEATURE_PLINKY
+        return seqEngine.type(track) == seqlogic::TYPE_PLINKY && seqPlinkyInstrument() < 0;
+#else
+        (void)track;
+        return false;
+#endif
+    }
     void noteOn(uint8_t track, uint8_t note, int8_t volume) override
     {
+        if (voiceOff(track))
+            return;
         if (monoTrack(track))
         {
             if (s_sampleNote[track] >= 0)
@@ -89,6 +101,8 @@ class SeqHost : public seqtracks::Host
     }
     void noteOff(uint8_t track, uint8_t note) override
     {
+        if (voiceOff(track))
+            return;
         if (monoTrack(track))
         {
             if (s_sampleNote[track] != note)

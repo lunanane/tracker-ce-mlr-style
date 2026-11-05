@@ -551,6 +551,10 @@ void SeqPlayOverlay::refreshStrip(bool force)
         if (t == recTrack)
             c.hint = seqplay::recHintText(hints & seqrec::HINT_OVERFLOW, hints & seqrec::HINT_NEED_MIDI, hints & seqrec::HINT_REDUCED);
         c.msg = (c.selected && msg_) ? msg_ : nullptr;
+#ifdef FEATURE_PLINKY
+        if (!c.msg && c.type == seqlogic::TYPE_PLINKY && seqPlinkyInstrument() < 0)
+            c.msg = "voice off"; // v0.3.1 minor 6: the PolySynth track plays nothing without a channel
+#endif
 
         // only the cells whose content changed are rewritten
         uint32_t key = 2166136261u;
