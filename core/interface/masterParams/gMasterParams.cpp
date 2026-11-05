@@ -8,6 +8,7 @@
 #include <masterParams/masterParams.h>
 #include "seqFx.h"
 #include "mtAudioEngine.h"
+#include "Profiler.h"
 
 static const uint16_t framesPlaces[8][4] = {
     { 0 + 1, 31, 800 / 8 - 3, 391 },
@@ -378,7 +379,7 @@ void cMasterParams::showReverbScreen()
     display.setControlText(label[4], "Line in");
     display.setControlText(label[5], "Type");
     display.setControlText2(label[5], " ");
-    display.setControlText(label[6], "Reverb CPU");
+    display.setControlText(label[6], "Rev | All CPU"); // plan 009 P: reverb average | the whole audio interrupt (average since this screen opened)
     display.setControlText2(label[6], " ");
     display.setControlText(label[7], "Back");
     display.setControlText2(label[7], " ");
@@ -411,6 +412,7 @@ void cMasterParams::showReverbScreen()
     showReverbDiffusion();
     showLineInReverbSend();
     showReverbType();
+    Profiler::getInstance()->resetMeasuringAudio(); // the average of the audio load starts when this screen opens
     showReverbCpu();
 
     frameData.placesCount = 6;
@@ -574,8 +576,11 @@ void cMasterParams::showDelayScreen()
 // Compare Stock and Plinky with the same material.
 void cMasterParams::showReverbCpu()
 {
-    snprintf(reverbCpuVal, sizeof(reverbCpuVal), "%d%% pk %d%%", (int)(engine.getReverbCpuPercent() + 0.5f),
-             (int)(engine.getReverbCpuPeakPercent() + 0.5f));
+    // plan 009 P: the second number is the total audio interrupt (Profiler, average since the screen was opened / the last reset), so
+    // the CPU savings can be compared before and after with the same material
+    Profiler::AudioProcessorUsage total;
+    Profiler::getInstance()->getAudioProcessingUsagePercent(total);
+    snprintf(reverbCpuVal, sizeof(reverbCpuVal), "%d%% | %d%%", (int)(engine.getReverbCpuPercent() + 0.5f), total.average);
     display.setControlText2(label[6], reverbCpuVal);
     display.refreshControl(label[6]);
 }
