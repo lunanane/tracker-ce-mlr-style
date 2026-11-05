@@ -231,6 +231,18 @@ static void test_save_merge_and_launched()
     SCHECK(saveSource(0x8004, 2, true) == SRC_FILE && saveSource(0x8004, 15, false) == SRC_CLEAR);
     SCHECK(saveSource(0x8004, 3, true) == SRC_RAM && saveSource(0, 0, false) == SRC_RAM);
     // read errors never count as "no file"
+    // v0.3.1 M2: per-track performance patterns: tracks whose pattern differs from the loaded one come from the file when saving
+    {
+        uint16_t pp[16];
+        for (int i = 0; i < 16; i++) pp[i] = 5;
+        SCHECK(perfSwapMask(pp, 5, true, 16) == 0);
+        pp[2] = 7; pp[9] = 1;
+        SCHECK(perfSwapMask(pp, 5, true, 16) == (uint16_t)((1u << 2) | (1u << 9)));
+        SCHECK(perfSwapMask(pp, 5, false, 16) == 0); // performance mode off: RAM is the pattern
+        SCHECK(perfSwapMask(pp, 5, true, 8) == (1u << 2)); // only the first 8 tracks looked at
+        SCHECK(saveSource(perfSwapMask(pp, 5, true, 16), 2, true) == SRC_FILE && saveSource(perfSwapMask(pp, 5, true, 16), 3, true) == SRC_RAM);
+        SCHECK(saveSource(perfSwapMask(pp, 5, true, 16), 9, false) == SRC_CLEAR);
+    }
     SCHECK(mergeMode(-1) == MERGE_ABORT && mergeMode(0) == MERGE_NO_FILE && mergeMode(1) == MERGE_FROM_FILE);
     SCHECK(clearUndoOnMask(1, 0) && !clearUndoOnMask(0, 0) && !clearUndoOnMask(3, 1) && !clearUndoOnMask(0, 4));
     l.onPatternSwitched();

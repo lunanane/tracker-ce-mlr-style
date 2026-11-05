@@ -160,7 +160,7 @@ template <class C> void draw(C& c, const Model& m, const Palette& p)
     // ---- texts ----
     c.textPhase();
     c.color(p.text);
-    snprintf(buf, sizeof buf, "PolySynth  T%d  MIDI %d  CPU %d%% pk %d%%", m.track, m.channel, m.cpu, m.peak);
+    snprintf(buf, sizeof buf, "PolySynth T%d on MIDI %d  CPU %d%% pk %d%%", m.track, m.channel, m.cpu, m.peak);
     c.text(12, 42, 3, 2, buf);
     c.text(12, 398, 1, 2, "Left/Right: param  Up/Down: section  Jog: value (Shift: fine)  Default: reset");
     c.text(12, 412, 1, 2, m.newer ? "Instr: close      Newer synth file: edits are not saved" : "Instr: close");

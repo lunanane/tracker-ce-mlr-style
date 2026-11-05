@@ -33,7 +33,7 @@ class Profiler
     void sampleHeap();          // plan 010: main loop, keeps the minimum of the free heap
     size_t minFreeHeapBytes();  // lowest free heap since power-on
     size_t maxStackBytes();
-    size_t minFreeStackBytes(); // plan 009 P#1: headroom between heap and the deepest stack use (MK66; 0 on IMX)
+    size_t headroomBytes();     // v0.3.1 M3: highest heap end .. deepest stack use (MK66; 0 on IMX); replaces minFreeStackBytes
     void getAudioProcessingUsageUs(AudioProcessorUsage& usage, bool resetTempMaximum = false);
     void getAudioProcessingUsagePercent(AudioProcessorUsage& usage, bool resetTempMaximum = false);
     void startMeasuringAudio();

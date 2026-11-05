@@ -42,5 +42,10 @@ void seqPanicClips();  // R2: drop queued launches, stop-all, clips back to the 
 void seqPanicFx();     // R3: all perform FX off (faders back to "not dialled in", latches released)
 void seqPanicCut();    // R4: SYNC ALL (cutPanic), release MLR holds and recordings
 
+// v0.3.1 M1: before any export starts (Project > Export Song / Pattern / Stems, Render selection): kept perform FX or performance mode
+// end with the panic semantics (incl. the gated pattern reload), so the export renders the song as written and its own sequencer.stop()
+// has nothing left to panic. true: something was ended (the caller shows "Perform FX ended for export").
+bool seqEndPerformFxForExport();
+
 // ---- R4: once per main loop pass (seqTracksUpdate), any view: retries a SYNC ALL / releases that did not fit into the queue. ----
 void seqCutUpdate();

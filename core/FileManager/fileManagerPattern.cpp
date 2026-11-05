@@ -241,7 +241,7 @@ bool cFileManager::saveWorkspacePatternNow(uint8_t index)
     {
         // sequencer tracks mod: tracks of launched Session clips are written from the pattern file, not from RAM
         Sequencer::strPattern* patternToWrite = sequencer.getPatternToSaveToFile();
-        if (index == mtProject.values.actualPattern && seqSessionHasLaunched())
+        if (index == mtProject.values.actualPattern && seqSessionSaveNeedsMerge())
         {
             if (!isIdleForScratch())
                 return false; // the scratch buffer is in use: the changed flag stays, a later save does it

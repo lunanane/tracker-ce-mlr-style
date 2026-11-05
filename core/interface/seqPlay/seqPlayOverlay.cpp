@@ -228,7 +228,14 @@ void SeqPlayOverlay::closeList(bool apply)
             {
 #ifdef FEATURE_PLINKY
                 if (type == seqlogic::TYPE_PLINKY)
+                {
                     seqPlinkyClaim(); // the voice gets its channel now, before the first pad
+                    if (seqPlinkyGet(plinkyvoice::P_CHANNEL) != 0)
+                    {
+                        snprintf(ownerMsg_, sizeof(ownerMsg_), "on MIDI %d", seqPlinkyGet(plinkyvoice::P_CHANNEL));
+                        setMessage(ownerMsg_); // v0.3.1 minor 5: where the voice sits (the strip cell takes 11 characters; the overlay title says 'PolySynth T? on MIDI n')
+                    }
+                }
 #endif
             }
         }
@@ -355,7 +362,10 @@ bool SeqPlayOverlay::button(uint8_t b, uint8_t state)
         case interfaceButtonInstr:
             // Instrument Parameters (also with screen button 1 held): the Plinky parameter overlay of the selected Plinky track
             if (state == buttonPress)
+            {
+                closeList(false); // v0.3.1: an open type list ends first; the screen-button release then applies no type
                 plinkyToggle();
+            }
             return true;
         case interfaceButtonLeft:
         case interfaceButtonRight:
@@ -544,6 +554,10 @@ void SeqPlayOverlay::refreshStrip(bool force)
         if (t == recTrack)
             c.hint = seqplay::recHintText(hints & seqrec::HINT_OVERFLOW, hints & seqrec::HINT_NEED_MIDI, hints & seqrec::HINT_REDUCED);
         c.msg = (c.selected && msg_) ? msg_ : nullptr;
+#ifdef FEATURE_PLINKY
+        if (!c.msg && c.type == seqlogic::TYPE_PLINKY && seqPlinkyInstrument() < 0)
+            c.msg = "voice off"; // v0.3.1 minor 6: the PolySynth track plays nothing without a channel
+#endif
 
         // only the cells whose content changed are rewritten
         uint32_t key = 2166136261u;
@@ -651,6 +665,10 @@ void SeqPlayOverlay::refreshView()
                         memset(&snap, 0, sizeof(snap));
                 },
                 &view_.hr);
+        }
+        else if (view_.type == seqlogic::TYPE_PLINKY)
+        {
+            // v0.3.1: the PolySynth legend is drawn from plSetup / plMenu (set above); it must not read the Mono state of the track
         }
         else
         {

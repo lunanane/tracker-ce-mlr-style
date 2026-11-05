@@ -884,8 +884,13 @@ uint16_t Engine::stateHash() const
         size_t nc, nm, nh;
         uint8_t type;
         uint8_t hblk[seqgen::HrScript::kMaxSerial];
+        uint8_t pb[seqplinky::kSetupBytes];
+        bool plinky;
         uint32_t cs = host_ ? host_->critEnter() : 0;
         type = t.type;
+        plinky = t.type == TYPE_PLINKY; // v0.3.1: the Plinky setup is read inside the critical section too (pl_ is written from the pads)
+        if (plinky)
+            pl_.save(pb);
         nc = t.ca.serialize(blk, sizeof(blk));
         if (host_)
             host_->critExit(cs);
@@ -904,12 +909,8 @@ uint16_t Engine::stateHash() const
             blk[5] = blk[10] = 0; // edit page, visible half
         c = crc16Update(c, blk, nm);
         c = crc16Update(c, hblk, nh); // HYPER_RASP script: settings only (its serialize leaves out the runtime and view state)
-        if (t.type == TYPE_PLINKY)
-        {
-            uint8_t pb[seqplinky::kSetupBytes];
-            pl_.save(pb);
+        if (plinky)
             c = crc16Update(c, pb, sizeof(pb));
-        }
     }
     return c;
 }

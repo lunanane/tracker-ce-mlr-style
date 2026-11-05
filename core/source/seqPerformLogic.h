@@ -8,6 +8,10 @@
 
 namespace seqperf {
 
+// v0.3.1 M1: an export (Song / Pattern / Stems / Render selection) must start from the song as written: kept fader FX or any performance
+// mode end first (panic semantics), so the export never plays with perform FX or per-track performance patterns.
+inline bool exportEndsFx(bool faderKept, bool performanceMode) { return faderKept || performanceMode; }
+
 // Column 12 is DISENGAGE (plan 005 R3, owner decision): that row's effect goes back to "not dialled in". CELL_RESET is the
 // v0.1 name of the same pad column (alias, so the old checks still read the same).
 enum Cell : uint8_t { CELL_NONE = 0, CELL_FADER, CELL_GROUP, CELL_PING, CELL_REV, CELL_LATCH, CELL_DISENGAGE, CELL_RESET = CELL_DISENGAGE };

@@ -386,6 +386,18 @@ inline SaveSource saveSource(uint16_t launchedMask, uint8_t track, bool fileExis
     return fileExists ? SRC_FILE : SRC_CLEAR;
 }
 
+// v0.3.1 M2: with per-track performance patterns loaded (fader FX kept across modules, or the stock Performance page) the RAM pattern holds
+// tracks of OTHER patterns: bit t = the track is not the loaded pattern's own (perfPatterns[t] != actual). Those tracks must come from the
+// pattern FILE when the loaded pattern is saved, never from RAM. 0 when performance mode is off.
+inline uint16_t perfSwapMask(const uint16_t* perfPatterns, uint16_t actual, bool performanceMode, uint8_t tracks)
+{
+    uint16_t m = 0;
+    if (!performanceMode) return 0;
+    for (uint8_t t = 0; t < tracks && t < 16; t++)
+        if (perfPatterns[t] != actual) m = (uint16_t)(m | (1u << t));
+    return m;
+}
+
 // What a read of the pattern's workspace file (readWorkspacePatternTo: -1 error, 0 no file, 1 ok) means for the merge:
 // only "no file" may clear the launched tracks; an unreadable file aborts the save and is retried (never overwritten).
 enum MergeMode : uint8_t { MERGE_ABORT = 0, MERGE_FROM_FILE = 1, MERGE_NO_FILE = 2 };

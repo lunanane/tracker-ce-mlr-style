@@ -3,6 +3,7 @@
 #include "limits.h"
 #include "log.h"
 #include "malloc.h"
+#include "seqMemLogic.h"
 #include <polyassert.h>
 
 #include "Platform.h"
@@ -27,7 +28,7 @@ extern "C"
 // stack has ever been (a probe for the headroom after the reverb buffers moved into SRAM).
 static uint32_t* s_stackGapLow = nullptr;
 static uint32_t* s_stackGapHigh = nullptr;
-static constexpr uint32_t kGapPaint = 0xAAAAAAAAu;
+static char* s_maxBrk = nullptr; // v0.3.1 M3: the highest the heap has ever been (__brkval only grows, but the readout must not depend on it)
 #endif
 Profiler* Profiler::instance = nullptr;
 
@@ -64,10 +65,11 @@ void Profiler::init()
 #ifndef PLATFORM_IMX
     char* sp;
     __asm volatile("mov %0, sp" : "=r"(sp));
+    s_maxBrk = __brkval;
     s_stackGapLow = (uint32_t*)(((uintptr_t)__brkval + 3) & ~3u);
     s_stackGapHigh = (uint32_t*)(((uintptr_t)sp - 128) & ~3u); // keep clear of the live frames
     for (uint32_t* p = s_stackGapLow; p < s_stackGapHigh; p++)
-        *p = kGapPaint;
+        *p = seqmem::kPaint;
 #endif
 
     resetMeasuringAudio();
@@ -86,9 +88,13 @@ void Profiler::sampleHeap()
     static uint8_t divider = 0;
     if ((++divider & 15) != 0)
         return;
-    const size_t f = mallinfo().fordblks;
+    const size_t f = mallinfo().fordblks; // the free LIST only: it ignores the never-used gap between __brkval and the stack
     if (f < s_minFreeHeap)
         s_minFreeHeap = f;
+#ifndef PLATFORM_IMX
+    if (__brkval > s_maxBrk) // v0.3.1 M3
+        s_maxBrk = __brkval;
+#endif
 }
 size_t Profiler::minFreeHeapBytes()
 {
@@ -128,25 +134,22 @@ size_t Profiler::maxStackBytes()
     // deepest stack use so far: from the top of the stack down to the lowest word that lost the paint
     if (!s_stackGapLow)
         return 0;
-    const uint32_t* p = s_stackGapLow;
-    while (p < s_stackGapHigh && *p == kGapPaint)
-        p++;
-    return (size_t)((uintptr_t)&_estack - (uintptr_t)p);
+    return (size_t)((uintptr_t)&_estack - (uintptr_t)seqmem::stackLow(s_stackGapLow, s_stackGapHigh));
 #endif
 }
 
-// bytes between the end of the heap and the deepest stack point so far (the smallest the headroom has been); 0 when unknown
-size_t Profiler::minFreeStackBytes()
+// v0.3.1 M3: bytes between the highest the heap has been and the deepest stack point so far (the smallest the headroom has been);
+// 0 when unknown. The stack low-water is found by scanning the paint from the stack side (seqMemLogic.h).
+size_t Profiler::headroomBytes()
 {
 #ifdef PLATFORM_IMX
     return 0;
 #else
     if (!s_stackGapLow)
         return 0;
-    const uint32_t* p = s_stackGapLow;
-    while (p < s_stackGapHigh && *p == kGapPaint)
-        p++;
-    return (size_t)((uintptr_t)p - (uintptr_t)s_stackGapLow);
+    if (__brkval > s_maxBrk)
+        s_maxBrk = __brkval;
+    return seqmem::headroom((uintptr_t)seqmem::stackLow(s_stackGapLow, s_stackGapHigh), (uintptr_t)s_maxBrk);
 #endif
 }
 

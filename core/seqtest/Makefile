@@ -25,7 +25,7 @@ build/seq_perform_tests$(EXE): test_perform.cpp ../source/seqPerformLogic.h ../s
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) test_perform.cpp -o $@
 
-build/seq_mod_tests$(EXE): test_mod.cpp ../source/seqModLogic.h ../source/seqSidecarLogic.h ../source/seqClipsLogic.h ../source/seqSongLogic.h ../source/seqTracksLogic.h
+build/seq_mod_tests$(EXE): test_mod.cpp ../source/seqMemLogic.h ../source/seqModLogic.h ../source/seqSidecarLogic.h ../source/seqClipsLogic.h ../source/seqSongLogic.h ../source/seqTracksLogic.h
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) test_mod.cpp -o $@
 

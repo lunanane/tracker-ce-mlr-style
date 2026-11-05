@@ -44,6 +44,7 @@ bool seqSessionTakeUndoCleared();   // true once after a launch step dropped the
 void seqSessionUpdate(); // once per main loop pass (Tracker::update); also queues the Play 1x follow actions
 
 // ---- saving: launched clips never reach the user's pattern file ----
+bool seqSessionSaveNeedsMerge();           // launched clips OR per-track performance patterns in RAM: the save merges from the pattern file
 bool seqSessionHasLaunched();                // some track of the loaded pattern holds a launched clip (RAM != file)
 bool seqSessionMergeForSave(void* destPattern); // fills a strPattern with RAM + the launched tracks read from the pattern file
 bool seqSessionSaveFailed();                 // launched clips exist and the loaded pattern's changed flag is still set after a save attempt

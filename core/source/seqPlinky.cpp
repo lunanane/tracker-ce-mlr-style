@@ -3,6 +3,7 @@
 #ifdef FEATURE_PLINKY
 #include "seqSidecar.h"
 #include "seqModLogic.h"
+#include "seqPlinkySeqLogic.h"
 #include "seqTracksLogic.h"
 #include "mtAudioEngine.h"
 #include "mtSequencer.h"
@@ -70,7 +71,12 @@ bool seqPlinkyNote(uint8_t channel, uint8_t note, uint8_t velo, bool on)
     int n = note + 12 * (2 - (int)mtConfig.midi.middleC);
     n = n < 0 ? 0 : (n > 127 ? 127 : n);
     if (on && velo > 0)
-        return eng().noteOn((uint8_t)n, velo); // false: the event queue was full, the note is not played (the caller sends it on)
+    {
+        // v0.3.1 minor 4: a note-on the full event queue refused is DROPPED, not sent on: its note-off is absorbed here too, so an external
+        // synth would have been left hanging
+        eng().noteOn((uint8_t)n, velo);
+        return true;
+    }
     eng().noteOff((uint8_t)n); // velocity 0 is a note-off; a release never gets lost (remembered when the queue is full)
     return true;
 }
@@ -101,11 +107,26 @@ void seqPlinkyClaim()
 {
     if (eng().param(P_CHANNEL) != 0)
         return;
-    int ch = kMidiInstrumentsCount;
+    // v0.3.1 minor 5: a channel no pattern track and no last-used instrument uses (that one is likely an external synth), else MIDI 16
+    uint16_t used = 0;
     const int last = mtProject.values.lastUsedInstrument;
     if (last >= MIDI_INSTRUMENTS_START_IDX && last < MIDI_INSTRUMENTS_START_IDX + kMidiInstrumentsCount)
-        ch = last - MIDI_INSTRUMENTS_START_IDX + 1;
-    seqPlinkySet(P_CHANNEL, ch);
+        used = (uint16_t)(used | (1u << (last - MIDI_INSTRUMENTS_START_IDX)));
+    const Sequencer::strPattern* pat = sequencer.getActualPattern();
+    for (uint8_t t = 0; t < kAllTracks; t++)
+    {
+        uint8_t len = pat->track[0].length;
+        if (len > Sequencer::MAXSTEP)
+            len = Sequencer::MAXSTEP;
+        for (uint8_t s = 0; s <= len; s++)
+        {
+            const Sequencer::strPattern::strTrack::strStep& st = pat->track[t].step[s];
+            if (st.note >= Sequencer::STEP_NOTE_MIN && st.instrument >= MIDI_INSTRUMENTS_START_IDX &&
+                st.instrument < MIDI_INSTRUMENTS_START_IDX + kMidiInstrumentsCount)
+                used = (uint16_t)(used | (1u << (st.instrument - MIDI_INSTRUMENTS_START_IDX)));
+        }
+    }
+    seqPlinkySet(P_CHANNEL, seqplinky::claimChannel(used));
 }
 
 int seqPlinkyInstrument()
@@ -128,7 +149,11 @@ void seqPlinkySet(int param, int value)
     if (eng().param(param) != before)
     {
         if (param == P_CHANNEL)
-            eng().allNotesOff(); // the old channel goes back to the MIDI outputs: nothing may hang
+        {
+            eng().allNotesOff(); // the voice's own notes end
+            if (before != 0)
+                sendCC(123, 0, before, false); // v0.3.1 minor 7: the old channel is a plain MIDI output again: all notes off there too
+        }
         if (param == P_REVERB || param == P_DELAY)
             engine.applyPlinkySends();
         s_dirty.mark();

@@ -19,6 +19,7 @@ seqlogic::DirtyGate s_dirty;     // a value changed: the workspace autosave is a
 bool s_wsWritePending = false;   // the autosave was asked for; SaveWorkspace writes the file
 bool s_hadFile = false;          // a seqfx.bin was loaded or written for this project
 uint16_t s_savedHash = 0;        // hash of the values last written / loaded
+uint16_t s_savedBase = 0;        // the same without the track selection (v0.3.1: a selection-only change is not a project change)
 uint32_t s_loadedId = 0;         // project folder whose sidecar was loaded (valid or not)
 bool s_loadedValid = false;
 bool s_selKnown = false;         // the track selection was set by the user or read from a file this session: later project loads keep it
@@ -37,6 +38,7 @@ bool writeValues(const char* path)
     if (!n || !seqsidecar::writeFile(path, buf, n))
         return false;
     s_savedHash = h;
+    s_savedBase = s_params.hashBase();
     return true;
 }
 } // namespace
@@ -119,8 +121,13 @@ void seqFxUpdate()
         if (s_params.hash() != s_savedHash)
         {
             s_hadFile = true;
-            newFileManager.setProjectStructChanged();
-            s_wsWritePending = true;
+            if (s_params.hashBase() != s_savedBase)
+            {
+                newFileManager.setProjectStructChanged();
+                s_wsWritePending = true;
+            }
+            else if (!newFileManager.isIdleForScratch() || !writeValues(kWorkspaceFile))
+                s_dirty.mark(); // v0.3.1: only the track selection differs: no project-changed flag, the workspace file is written on its own
         }
     }
 }
@@ -147,6 +154,7 @@ void seqFxLoadWorkspace()
     }
     s_loadedId = seqlogic::projectId(newFileManager.getCurrentProjectPath(), newFileManager.getCurrentProjectName());
     s_savedHash = s_params.hash();
+    s_savedBase = s_params.hashBase();
     // plan 010 A5: the track selection is a performance preference, not a project property. The first file read after power-on
     // supplies it (persisted across sessions); once it is known (read, or set by the user) a project load keeps it.
     s_params.sel = seqfx::selAfterLoad(&s_selKnown, keptSel, s_params.hasSel, s_params.sel);

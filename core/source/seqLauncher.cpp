@@ -383,6 +383,18 @@ bool seqSessionHasLaunched()
     return seqLauncher.launchedMask(seqSessionOwnPattern()) != 0;
 }
 
+// v0.3.1 M2: tracks the performance mode swapped in from other patterns (per-track performance patterns)
+static uint16_t perfSwapped()
+{
+    return seqsession::perfSwapMask(mtProject.perfTracksPatterns, mtProject.values.actualPattern, sequencer.isPerformanceMode(),
+                                    kPerformanceTracks);
+}
+
+bool seqSessionSaveNeedsMerge()
+{
+    return seqSessionHasLaunched() || perfSwapped() != 0;
+}
+
 // dest := the pattern to write: header and the tracks of the loaded pattern from RAM, the tracks that came from launched
 // clips from their snapshot (the own data taken at the launch) or else from the pattern FILE (cleared when there is none), so a
 // launched clip never ends up in the user's pattern file.
@@ -391,9 +403,11 @@ bool seqSessionMergeForSave(void* destPtr)
     Sequencer::strPattern* dest = (Sequencer::strPattern*)destPtr;
     Sequencer::strPattern* cur = sequencer.getActualPattern();
     uint8_t own = seqSessionOwnPattern();
-    uint16_t mask = seqLauncher.launchedMask(own);
+    uint16_t launched = seqLauncher.launchedMask(own);
+    uint16_t swapped = perfSwapped();
+    uint16_t mask = (uint16_t)(launched | swapped); // tracks whose RAM data is not the pattern's own
 
-    if ((mask & ~s_snapValid) == 0)
+    if ((launched & ~s_snapValid) == 0 && swapped == 0)
     {
         memcpy(dest, cur, sizeof(Sequencer::strPattern)); // every launched track has its own data in RAM: no file needed
     }
@@ -426,7 +440,7 @@ bool seqSessionMergeForSave(void* destPtr)
     }
 #ifndef PLATFORM_IMX
     for (uint8_t t = 0; t < seqsession::kTracks; t++)
-        if (((mask >> t) & 1u) && ((s_snapValid >> t) & 1u))
+        if (((launched >> t) & 1u) && ((s_snapValid >> t) & 1u))
             dest->track[t] = s_snap[t];
 #endif
     return true;
@@ -434,7 +448,7 @@ bool seqSessionMergeForSave(void* destPtr)
 
 bool seqSessionSaveFailed()
 {
-    return seqSessionHasLaunched() && newFileManager.isPatternStructChanged(seqSessionOwnPattern());
+    return seqSessionSaveNeedsMerge() && newFileManager.isPatternStructChanged(seqSessionOwnPattern());
 }
 
 bool seqSessionOwnsPerformance()
