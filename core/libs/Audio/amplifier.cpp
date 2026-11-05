@@ -40,12 +40,19 @@ AUDIO_CORE_RAM void AudioAmplifier::update(void)
         return;
     }
 
-    audio_block_t* block = receiveWritable(0);
-    if (block)
+    // plan 009 P#6: the output goes to several readers, so a writable receive would copy the block first: read the input as it is and
+    // write the gained samples into a block of its own (one pass instead of copy + pass)
+    audio_block_t* in = receiveReadOnly(0);
+    if (in)
     {
-        applyGain(block->data, multiplier, previousMultiplier);
-        transmit(block);
-        release(block);
+        audio_block_t* block = allocate();
+        if (block)
+        {
+            applyGainFrom(in->data, block->data, multiplier, previousMultiplier);
+            transmit(block);
+            release(block);
+        }
+        release(in);
     }
     else
     {

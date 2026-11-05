@@ -127,11 +127,13 @@ static void testReverbIdleSkip()
 
 int main()
 {
+    setvbuf(stdout, nullptr, _IONBF, 0);
     testReverbSram();
     testReverbIdleSkip();
     testDelay();
     testLimiter();
     testIdleVoices();
+    testOutputStage();
     printf("%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

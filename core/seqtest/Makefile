@@ -57,5 +57,6 @@ build/seq_cpu_tests$(EXE): test_cpu.cpp cpu_delay_tests.inc cpu_reverb_wrap.inc 
 	$(CXX) $(DELAYINC) $(CXXFLAGS) -std=gnu++11 -c stubs/audio_stream_stub.cpp -o build/audio_stream_stub.o
 	$(CXX) $(DELAYINC) -I../AudioEngine/ConstantValues $(CXXFLAGS) -std=gnu++11 -c ../libs/Audio/effect_limiter.cpp -o build/effect_limiter.o
 	for f in filter_variable amplifier monoToStereo mixer dspApplyGain; do $(CXX) $(DELAYINC) $(CXXFLAGS) -std=gnu++11 -c ../libs/Audio/$$f.cpp -o build/$$f.o || exit 1; done
+	for f in ref_amplifier ref_monoToStereo; do $(CXX) $(DELAYINC) -Iref/voice $(CXXFLAGS) -std=gnu++11 -c ref/voice/$$f.cpp -o build/$$f.o || exit 1; done
 	$(CXX) $(DELAYINC) -I../AudioEngine/ConstantValues -Iref/limiter $(CXXFLAGS) -std=gnu++11 -c ref/limiter/ref_limiter.cpp -o build/ref_limiter.o
-	$(CXX) $(DELAYINC) $(CXXFLAGS) -std=gnu++11 -Iref/delay -Iref/limiter test_cpu.cpp build/cpu_reverb_ref.o build/cpu_reverb_new.o build/effect_shortDelay.o build/ref_shortDelay.o build/audio_stream_stub.o build/effect_limiter.o build/ref_limiter.o build/filter_variable.o build/amplifier.o build/monoToStereo.o build/mixer.o build/dspApplyGain.o -o $@
+	$(CXX) $(DELAYINC) $(CXXFLAGS) -std=gnu++11 -Iref/delay -Iref/limiter -Iref/voice test_cpu.cpp build/cpu_reverb_ref.o build/cpu_reverb_new.o build/effect_shortDelay.o build/ref_shortDelay.o build/audio_stream_stub.o build/effect_limiter.o build/ref_limiter.o build/filter_variable.o build/amplifier.o build/monoToStereo.o build/mixer.o build/dspApplyGain.o build/ref_amplifier.o build/ref_monoToStereo.o -o $@

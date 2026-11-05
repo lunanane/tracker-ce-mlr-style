@@ -31,9 +31,9 @@ AUDIO_CORE_FLASH void MonoToStereo::update(void)
 {
     audio_block_t* block[Channel::channelCount];
 
-    block[Channel::left] = receiveWritable(0);
+    audio_block_t* in = receiveReadOnly(0);
 
-    if (block[Channel::left] == nullptr)
+    if (in == nullptr)
     {
         // plan 009 P#2: a missing block is a block of zeros: the pending gain ramps are used up as before
         for (int channel = 0; channel < Channel::channelCount; channel++)
@@ -41,19 +41,25 @@ AUDIO_CORE_FLASH void MonoToStereo::update(void)
         return;
     }
 
+    // plan 009 P#6: both channels are written straight from the (shared, read-only) input: no copy of the input, no memcpy for the right
+    // channel, one pass per channel
+    block[Channel::left] = allocate();
     block[Channel::right] = allocate();
-    if (block[Channel::right] == nullptr)
+    if (block[Channel::left] == nullptr || block[Channel::right] == nullptr)
     {
-        release(block[Channel::left]);
+        if (block[Channel::left] != nullptr)
+            release(block[Channel::left]);
+        if (block[Channel::right] != nullptr)
+            release(block[Channel::right]);
+        release(in);
         return;
     }
 
-    memcpy(block[Channel::right]->data, block[Channel::left]->data, AUDIO_BLOCK_SAMPLES * 2);
-
     for (int channel = 0; channel < Channel::channelCount; channel++)
     {
-        applyGain(block[channel]->data, multiplier[channel], previous_multiplier[channel]);
+        applyGainFrom(in->data, block[channel]->data, multiplier[channel], previous_multiplier[channel]);
         transmit(block[channel], channel);
         release(block[channel]);
     }
+    release(in);
 }

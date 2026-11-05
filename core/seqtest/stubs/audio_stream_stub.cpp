@@ -51,6 +51,13 @@ audio_block_t* AudioStream::receiveWritable(unsigned int index)
 {
     audio_block_t* b = stubIn[index];
     stubIn[index] = nullptr;
+    if (b && b->ref_count > 1) // shared: copy, like the real one
+    {
+        audio_block_t* copy = allocate();
+        memcpy(copy->data, b->data, sizeof(b->data));
+        release(b);
+        b = copy;
+    }
     return b;
 }
 int stubAllocated() { return s_alloc; }

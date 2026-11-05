@@ -350,3 +350,82 @@ static void testIdleVoices()
             CHECK(a.out.size() == b.out.size());
         }
 }
+
+// ---- Plan 009 P#6: amplifier and mono-to-stereo read the input read-only and write the gained blocks directly ----
+#include "ref_amplifier.h"
+#include "ref_monoToStereo.h"
+
+static void testOutputStage()
+{
+    g_rng = 4242;
+    AudioAmplifier& na = *new (calloc(1, sizeof(AudioAmplifier))) AudioAmplifier();
+    RefAmplifier& ra = *new (calloc(1, sizeof(RefAmplifier))) RefAmplifier();
+    MonoToStereo& nm = *new (calloc(1, sizeof(MonoToStereo))) MonoToStereo();
+    RefMonoToStereo& rm = *new (calloc(1, sizeof(RefMonoToStereo))) RefMonoToStereo();
+    // (calloc'd objects: the constructors set the gains to unity)
+    const float gains[] = { 1.0f, 0.5f, 0.0f, 0.0f, 0.73f, 1.0f, 1.0f, 0.2f, 0.9f, 0.0f, 1.0f, 0.31f };
+    const float pans[] = { 1.0f, 1.0f, 0.5f, 0.0f, 0.0f, 1.0f, 0.8f, 1.0f, 0.25f, 0.25f, 1.0f, 1.0f };
+    long nonzero = 0;
+    bool same = true;
+    for (int blk = 0; blk < 600; blk++)
+    {
+        if (blk % 17 == 0)
+        {
+            const int k = (blk / 17) % 12;
+            na.gain(gains[k]);
+            ra.gain(gains[k]);
+            nm.gain(pans[k], MonoToStereo::left);
+            rm.gain(pans[k], RefMonoToStereo::left);
+            nm.gain(pans[(k + 5) % 12], MonoToStereo::right);
+            rm.gain(pans[(k + 5) % 12], RefMonoToStereo::right);
+        }
+        int16_t in[128];
+        const bool silent = blk % 50 > 40; // some missing blocks
+        for (int s = 0; s < 128; s++)
+            in[s] = (int16_t)((int)(rnd() % 65536) - 32768);
+        int16_t out[2][2][128]; // [chain][channel][sample]
+        bool got[2][2] = {};
+        for (int chain = 0; chain < 2; chain++)
+        {
+            if (!silent)
+            {
+                audio_block_t* b = (audio_block_t*)calloc(1, sizeof(audio_block_t));
+                b->ref_count = 1;
+                memcpy(b->data, in, 256);
+                stubIn[0] = b;
+            }
+            if (chain) na.update(); else ra.update();
+            audio_block_t* a = stubOut[0];
+            stubOut[0] = nullptr;
+            if (a)
+                a->ref_count++; // a second reader, like the meter: the stage must not modify what it was given
+            stubIn[0] = a;
+            if (chain) nm.update(); else rm.update();
+            if (a)
+                free(a);
+            for (int c = 0; c < 2; c++)
+            {
+                audio_block_t* o = stubOut[c];
+                stubOut[c] = nullptr;
+                if (o)
+                {
+                    memcpy(out[chain][c], o->data, 256);
+                    got[chain][c] = true;
+                    free(o);
+                }
+            }
+        }
+        for (int c = 0; c < 2; c++)
+        {
+            same &= got[0][c] == got[1][c];
+            if (got[0][c] && got[1][c])
+            {
+                same &= memcmp(out[0][c], out[1][c], 256) == 0;
+                for (int s = 0; s < 128; s++)
+                    nonzero += out[1][c][s] != 0;
+            }
+        }
+    }
+    CHECK(same);
+    CHECK(nonzero > 20000);
+}

@@ -37,6 +37,41 @@ AUDIO_CORE_RAM void applyGain(int16_t* data, int32_t& target_mult, int32_t& prev
     previous_mult = target_mult;
 }
 
+AUDIO_CORE_RAM void applyGainFrom(const int16_t* src, int16_t* dst, int32_t& target_mult, int32_t& previous_mult)
+{
+    if (target_mult == MULTI_UNITYGAIN && previous_mult == MULTI_UNITYGAIN)
+    {
+        memcpy(dst, src, AUDIO_BLOCK_SAMPLES * sizeof(int16_t));
+        return;
+    }
+    if (target_mult == 0 && previous_mult == 0)
+    {
+        memset(dst, 0, AUDIO_BLOCK_SAMPLES * sizeof(int16_t));
+        return;
+    }
+
+    const uint32_t* p = (const uint32_t*)src;
+    uint32_t* q = (uint32_t*)dst;
+    const uint32_t* end = (const uint32_t*)(src + AUDIO_BLOCK_SAMPLES);
+
+    int32_t multStep = (target_mult - previous_mult) / AUDIO_BLOCK_SAMPLES;
+    int32_t multToApply = previous_mult;
+
+    do
+    {
+        uint32_t tmp32 = *p++; // read 2 samples from *src
+        int32_t val1 = signed_multiply_32x16b(multToApply, tmp32);
+        multToApply += multStep;
+        int32_t val2 = signed_multiply_32x16t(multToApply, tmp32);
+        multToApply += multStep;
+        val1 = signed_saturate_rshift(val1, 16, 0);
+        val2 = signed_saturate_rshift(val2, 16, 0);
+        *q++ = pack_16b_16b(val2, val1);
+    } while (p < end);
+
+    previous_mult = target_mult;
+}
+
 AUDIO_CORE_RAM void applyGainAndCopy(int32_t* dst,
                                  const int16_t* in,
                                  int32_t& target_mult,
