@@ -8,8 +8,17 @@
 #include "seqSidecarLogic.h"
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 namespace plinkyvoice {
+
+// Shape (plan 015 W): 0 saws, 1..100 pulse, then the Plinky wavetables: kWtTables tables, kWtSteps parameter steps from one table to
+// the next (the sound is the linear blend of the two neighbouring tables). Values 0..100 are the v0.3.6 sounds, unchanged.
+constexpr int kWtTables = 17;
+constexpr int kWtSteps = 8;
+constexpr int kShapePulseMax = 100;
+constexpr int kShapeWt0 = kShapePulseMax + 1;                          // first table, pure
+constexpr int kShapeMax = kShapeWt0 + (kWtTables - 1) * kWtSteps;      // last table, pure (229)
 
 enum Param : uint8_t
 {
@@ -20,7 +29,7 @@ enum Param : uint8_t
     P_DELAY,     // send
     P_GLIDE,
     P_WIDTH,     // 0 = mono (renders one oscillator pair: about half the CPU)
-    P_SHAPE,     // 0 = two detuned saws, 1..100 = pulse (two saws, phase offset): wide .. narrow
+    P_SHAPE,     // 0 = two detuned saws, 1..100 = pulse (two saws, phase offset): wide .. narrow, 101.. = wavetables (plan 015 W, kShapeWt0)
     P_DETUNE,
     P_INTERVAL,  // stored 0..24 = -12 .. +12 semitones between the two oscillator pairs
     P_NOISE,
@@ -47,13 +56,39 @@ inline const ParamInfo& paramInfo(int i)
 {
     static const ParamInfo t[P_COUNT] = {
         { 0, 16, 16, "Channel" },   { 1, 4, 4, "Voices" },    { 0, 100, 70, "Level" },  { 0, 100, 0, "Reverb" },
-        { 0, 100, 0, "Delay" },    { 0, 100, 0, "Glide" },   { 0, 100, 60, "Width" },  { 0, 100, 0, "Shape" },
+        { 0, 100, 0, "Delay" },    { 0, 100, 0, "Glide" },   { 0, 100, 60, "Width" },  { 0, kShapeMax, 0, "Shape" },
         { 0, 100, 30, "Detune" },  { 0, 24, 12, "Interval" }, { 0, 100, 0, "Noise" },  { 0, 100, 60, "Cutoff" },
         { 0, 100, 20, "Reso" },    { 0, 100, 30, "Drive" },  { 0, 100, 10, "Attack" }, { 0, 100, 50, "Decay" },
         { 0, 100, 60, "Sustain" }, { 0, 100, 40, "Release" }, { 0, 100, 40, "LFO rate" }, { 0, 100, 0, "LFO depth" },
         { 0, 2, 0, "LFO to" },
     };
     return t[i < 0 ? 0 : (i >= P_COUNT ? P_COUNT - 1 : i)];
+}
+
+// Names of the 17 tables (by their spectrum; Plinky's own names for most of them are placeholders). 1 based in the display ("WT3 Buzz").
+inline const char* wtName(int table)
+{
+    static const char* const k[kWtTables] = { "Saw",  "Sine", "Buzz", "Soft", "Reed", "Glass", "Pipe", "Hiss", "Hole",
+                                              "Bell", "Pad",  "Vox",  "Warm", "Mild", "Comb",  "Duo",  "Hash" };
+    return k[table < 0 ? 0 : (table >= kWtTables ? kWtTables - 1 : table)];
+}
+
+// Display text of Shape: "Saws", "Pulse 37", on a table "WT3 Buzz", between two tables "WT3+37%" (that far towards the next one).
+inline void shapeText(int v, char* out, size_t n)
+{
+    if (v <= 0)
+        snprintf(out, n, "Saws");
+    else if (v <= kShapePulseMax)
+        snprintf(out, n, "Pulse %d", v);
+    else
+    {
+        const int pos = (v > kShapeMax ? kShapeMax : v) - kShapeWt0;
+        const int t = pos / kWtSteps, s = pos % kWtSteps;
+        if (s == 0)
+            snprintf(out, n, "WT%d %s", t + 1, wtName(t));
+        else
+            snprintf(out, n, "WT%d+%d%%", t + 1, (s * 100 + kWtSteps / 2) / kWtSteps);
+    }
 }
 
 inline uint8_t clampParam(int i, int v)

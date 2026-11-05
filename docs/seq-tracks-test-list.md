@@ -744,6 +744,23 @@ Host-checked (make test): frame budget model, real engine -> ring -> follower ->
 | Tap the selected track screen button | The pad legend | Opens / closes reliably, also right after a type change or an instrument popup; a tap on another track only selects it. The selected cell says `tap: help` all the time (the PolySynth hint `Hold+Instr` flashes in for 0.7 s every 4 s). |
 | Tap the selected track when its type is Off | The cell | The message `pick type first` (no legend over an Off track). |
 
+## 11k. v0.3.7: PolySynth wavetables (plan 015 W, Original Tracker only)
+Host-checked (`make test`, `test_plinky.cpp`): old Shape values bit-exact, table lookup / mip selection / aliasing, no clicks over the table range, texts,
+sidecar range, morph across tables. Nothing below is device-tested yet.
+
+| Do | Look at / listen to | Expected |
+|---|---|---|
+| Open a project saved with v0.3.6 that uses the PolySynth (Saws or a Pulse), play it | The sound | **Identical** to v0.3.6 (Shape 0..100 is unchanged, same CPU). |
+| PolySynth page, Oscillator row, Shape cell: turn the jog wheel up from Pulse 100 | The cell, the sound | `Pulse 100` then `WT1 Saw`, `WT1+12%` ... `WT2 Sine` ... up to `WT17 Hash` (229, the bar full); the text never gets cut. Shift = single steps, coarse = 5. |
+| Hold a chord, sweep Shape slowly over all tables | The sound | Smooth change of timbre (a saw, a sine, buzzy / hollow / noisy colours); **no click** at the table names (every 8th step). Report the names that do not fit what you hear (list: Saw, Sine, Buzz, Soft, Reed, Glass, Pipe, Hiss, Hole, Bell, Pad, Vox, Warm, Mild, Comb, Duo, Hash). |
+| Same with high notes (C6 .. C8) and the bright tables (Hiss, Comb, Hash) | The sound | No harsh aliasing whistles; a slight grit on the brightest tables in the top octaves is expected (interpolation images of Plinky's short tables). |
+| A long note near an octave of the tables (86, 172, 344, 689, 1378 Hz = F2, F3, F4, F5#, F6) with LFO to Pitch | The sound | No ticking when the vibrato crosses the octave. |
+| Glide on, two notes an octave or more apart, in WT mode | The sound | A smooth slide, no zipper. |
+| Shape pattern 1 = Saws, pattern 2 = WT9, morph time 6 s, queue pattern 2 | The cell, the sound | The cell counts through `Pulse n` and the tables (WT1 ...), the sound changes smoothly, no click. |
+| LFO to Shape, depth 50 on a table | The sound | A moving timbre across neighbouring tables, no clicks. |
+| WT mode, Width 0 (mono) and 100; Detune; Interval -12 / 0 / +12 | The sound | Mono = one oscillator; Interval / Detune shift the right / left oscillator like in Pulse. |
+| WT mode vs Saws, four held notes | The title `CPU n%` | About the same percentage (the estimate is -3 .. +15 %); write both numbers down. The level of the brightest tables is comparable to the Saws. |
+
 ## 11f. CPU savings (plan 009 P, v0.2.7): compare with the previous build (v0.2.6) on the same project
 Use one project with 8 sample voices (some with the filter on), the delay and the stock reverb used, the limiter on, and play it. Open Master > Reverb (it resets the average when it opens) and write down "Rev / All CPU" after 30 s of the busiest part; also read Config > audio usage (min / max / avg / last) and "free heap" / "stack ... free ..." (bottom right of the Config page). Do it on v0.2.6 and on this build; the second number of the Master > Reverb item and the Config numbers are the comparison.
 | Press | Expected |

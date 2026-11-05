@@ -2,7 +2,9 @@
 // divide or transcendental in the sample loops, control rate parameters with linear ramps inside the block.
 //
 // Voice: two oscillator pairs (left / right). Each pair is two band limited saws, either detuned against each other (Shape 0)
-// or locked into one pulse wave (Shape > 0: second saw inverted, phase offset = pulse width). Noise, then a two pole "low pass
+// or locked into one pulse wave (Shape 1..100: second saw inverted, phase offset = pulse width). Shape 101.. (plan 015 W) is the
+// Plinky wavetable mode: ONE band limited table oscillator per side instead of the saw pair, the sound is the blend of two
+// neighbouring tables of 17 (plinky_wavetable.h). Noise, then a two pole "low pass
 // gate" that follows the envelope (the louder, the brighter) with resonance, a shared LFO, an ADSR and glide.
 //
 // What comes from the Plinky firmware (plinky_public, sw/Core/Src/plinky.c, RunVoice): the oscillator model with four detuned
@@ -10,8 +12,11 @@
 // the sample at the wrap, computed with one integer divide per cycle), the pulse made of two saws, the low pass gate recursion
 //   y1 += (in - (y2 - y1) * resonance - y1) * k;  y1 *= 0.999;  y2 += (y1 - y2) * k;  y2 *= 0.999
 // with k following the envelope, the envelope followed by a block rate one pole, and the per-block linear ramps of volume,
-// noise and phase increment. Everything else (sampler, arpeggiator, sequencer, effects, wavetable, touch strips) is NOT used.
-// Voice allocation, event queue, pitch maths, LFO, scaling and CPU optimisations are written for the Tracker.
+// noise and phase increment. Everything else (sampler, arpeggiator, sequencer, effects, touch strips) is NOT used.
+// The wavetable mode (plan 015 W) follows RunVoice of the same file (the pwm > 0 branch): the 17 tables of sw/Core/Src/wavetable.h with
+// 9 octave levels each (the level from the phase increment: the table of the octave that has no harmonic above Nyquist), the linear
+// interpolation inside a table (16 bit fraction) and the linear blend of two tables. Voice allocation, event queue, pitch maths, LFO,
+// scaling and CPU optimisations are written for the Tracker.
 //
 // ----------------------------------------------------------------------------------------------------------------------
 // Original work: Copyright (c) the authors of the Plinky firmware, https://github.com/plinkysynth/plinky_public
@@ -34,6 +39,7 @@
 // Port and the Tracker integration: Sequencer tracks mod, PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md).
 #pragma once
 #include "plinky_params.h"
+#include "plinky_wavetable.h"
 #include <string.h>
 
 namespace plinkyvoice {
@@ -121,6 +127,32 @@ inline float blepSaw(uint32_t ph, uint32_t dph, uint32_t& prev)
     return (float)(int32_t)(o + 0x80000000u) * (1.0f / 2147483648.0f);
 }
 
+// Wavetable oscillator (plan 015 W). Octave level of a phase increment (2^32 = one cycle per sample): level 0 = 512 samples per cycle
+// for increments below 2^23 (everything under 86 Hz), every octave up halves the table: level 8 = 2 samples. Table of level n starts at
+// kWtLevelOff[n] in a table's 1031 values; n = 16 - 7 - clz(max(dph, 2^22)).
+static constexpr uint16_t kWtLevelOff[9] = { 0, 513, 770, 899, 964, 997, 1014, 1023, 1028 };
+
+inline int wtLevel(int32_t dph)
+{
+    uint32_t d = dph < (int32_t)(1 << 22) ? (uint32_t)(1 << 22) : (uint32_t)dph;
+    int lv = 9 - __builtin_clz(d);
+    return lv > 8 ? 8 : lv;
+}
+inline const int16_t* wtTable(int table, int level) { return wtData() + table * kWtSize + kWtLevelOff[level]; }
+
+// One sample of the blend of tb (a table at its level) and tb + kWtSize (the next table): phase ph (32 bit), shift = level + 7, w = weight
+// of the second table 0 .. 1. Result -1 .. +1 for the nominal +-16384 of the data. Both table reads are int16 with a 16 bit fraction;
+// the sum is formed in 32 bit modular arithmetic (the true value fits), the blend in float.
+inline float wtSample(const int16_t* tb, uint32_t ph, int shift, float w)
+{
+    const uint32_t i = ph >> shift;
+    const uint32_t i2 = i >> 16, fr = i & 0xFFFFu;
+    const int32_t a0 = tb[i2], a1 = tb[i2 + 1], b0 = tb[i2 + kWtSize], b1 = tb[i2 + 1 + kWtSize];
+    const float ya = (float)(int32_t)(((uint32_t)a0 << 16) + (uint32_t)(a1 - a0) * fr);
+    const float yb = (float)(int32_t)(((uint32_t)b0 << 16) + (uint32_t)(b1 - b0) * fr);
+    return (ya + (yb - ya) * w) * (1.0f / 1073741824.0f); // 16384 * 65536 = 2^30 -> 1.0
+}
+
 struct Saw
 {
     uint32_t ph = 0, prev = 0;
@@ -138,6 +170,7 @@ struct Voice
     uint32_t off = 0;     // pulse width offset (phase) at the end of the last block
     uint32_t serial = 0;
     uint8_t note = 0, stage = ST_IDLE, gate = 0, fresh = 0, relPend = 0;
+    uint8_t wtOn = 0;     // the last block was rendered by the wavetable oscillator (the saws' delayed samples are stale then)
     Voice() { memset(y, 0, sizeof(y)); }
     void clear()
     {
@@ -172,6 +205,8 @@ class Engine
         mod = 0;
         lvlPrev = 0;
         smoothed = false;
+        sWt = 0;
+        wtPrev = -1.0f;
         for (int i = 0; i < E_N; i++)
             q[i].valid = 0;
         memset(trace, 0, sizeof(trace));
@@ -316,6 +351,12 @@ class Engine
         float sL, sR;
         uint32_t offTarget;
         bool stereo, pulse;
+        // wavetable mode (Shape > 100): tables wtA0 / wtA1 (and the next ones) with the weights of the second table at the start
+        // (wtW0) and at the end (wtW1) of the block. wtXF: the position crossed a table in this block (rare): the block renders the old
+        // pair with wtW0 and the new one with wtW1 and crossfades.
+        bool wt, wtXF;
+        int wtA0, wtA1;
+        float wtW0, wtW1;
     };
 
     Voice v[kMaxVoices];
@@ -326,6 +367,7 @@ class Engine
     uint32_t serial, rng;
     float lfoPhase, bend, mod, lvlPrev;
     float sCut, sRes, sNoise, sDet, sShape, sLevel;
+    float sWt, wtPrev; // wavetable position (0 .. 16) smoothed, and the position at the end of the last block (< 0: not in the mode)
     bool smoothed;
     float busL[kBlock], busR[kBlock];
     TraceSample trace[kMaxVoices][kTraceLen];
@@ -587,7 +629,8 @@ class Engine
         const float w = (float)ef[P_WIDTH] * 0.01f;
         d.sR = 0.5f * (1.0f - w); // share of the opposite side
         d.sL = 1.0f - d.sR;
-        d.pulse = ef[P_SHAPE] != 0;
+        d.wt = ef[P_SHAPE] > kShapePulseMax;
+        d.pulse = ef[P_SHAPE] != 0 && !d.wt;
         float sh = sShape;
         if (dest == 1 && d.pulse)
             sh += lfo * 50.0f;
@@ -597,12 +640,45 @@ class Engine
             sh = 100.0f;
         // pulse width 50% .. 2%
         d.offTarget = (uint32_t)((0.5f - 0.48f * (sh - 1.0f) * (1.0f / 99.0f)) * 4294967040.0f);
+
+        // wavetable position in tables (0 .. 16): the parameter smoothed like the others (a jump into the mode starts at the target), the
+        // LFO (target Shape) swings it by +-4 tables at full depth
+        d.wtXF = false;
+        d.wtA0 = d.wtA1 = 0;
+        d.wtW0 = d.wtW1 = 0.0f;
+        if (d.wt)
+        {
+            const float tgt = (float)((int)ef[P_SHAPE] - kShapeWt0) * (1.0f / kWtSteps);
+            sWt = wtPrev < 0.0f ? tgt : lerpParam(sWt, tgt, a);
+            float pos = sWt + (dest == 1 ? lfo * 4.0f : 0.0f);
+            const float top = (float)(kWtTables - 1);
+            pos = pos < 0.0f ? 0.0f : (pos > top ? top : pos);
+            const float pos0 = wtPrev < 0.0f ? pos : wtPrev;
+            wtPrev = pos;
+            // a pair is (table A, A + 1) and a weight 0 .. 1: the last table is A = 15 with weight 1
+            int a1 = (int)pos;
+            if (a1 > kWtTables - 2)
+                a1 = kWtTables - 2;
+            int a0 = (int)pos0;
+            if (a0 > kWtTables - 2)
+                a0 = kWtTables - 2;
+            d.wtA1 = a1;
+            d.wtW1 = pos - (float)a1;
+            d.wtA0 = a0;
+            d.wtW0 = pos0 - (float)a0;
+            if (a0 == a1)
+                d.wtXF = false; // the weight ramps from wtW0 to wtW1 inside the pair
+            else
+                d.wtXF = true;
+        }
+        else
+            wtPrev = -1.0f;
     }
 
     void renderVoice(Voice& vo, const Derived& d)
     {
         // both are per block constants: a predictable branch per sample instead of four copies of the loop (flash is tight)
-        const bool ST = d.stereo, PU = d.pulse;
+        const bool ST = d.stereo, PU = d.pulse, WT = d.wt;
         if (vo.stage == ST_RELEASE && vo.env == 0.0f)
         {
             vo.clear(); // the last block ramped down to zero
@@ -639,7 +715,7 @@ class Engine
 
         // targets
         const float base = vo.pitch + d.vib;
-        if (PU)
+        if (PU || WT)
         {
             vo.s[0].tdph = semiToDphase(base - d.detune);
             vo.s[1].tdph = semiToDphase(base + d.interval);
@@ -677,6 +753,37 @@ class Engine
                       dd3 = (vo.s[3].tdph - dp3) >> 7;
         uint32_t off = vo.off;
         const int32_t doff = (int32_t)(d.offTarget - off) >> 7;
+        if (!WT && vo.wtOn)
+        {
+            // back from the wavetable mode: the delayed saw samples are stale (a click); restart them at the phases
+            pv0 = ph0;
+            pv1 = ph1;
+            pv2 = PU ? ph0 + off : ph2;
+            pv3 = PU ? ph1 + off : ph3;
+        }
+        vo.wtOn = WT;
+        // wavetable mode: tables of the octave level of the louder end of the block's pitch glide (left: oscillator 0, right: oscillator 1)
+        const int16_t *tL0 = nullptr, *tL1 = nullptr, *tR0 = nullptr, *tR1 = nullptr;
+        int shL = 7, shR = 7;
+        float wL = 0.0f, dwW = 0.0f, xfU = 0.0f, dxfU = 0.0f, w1c = 0.0f;
+        if (WT)
+        {
+            const int lvL = wtLevel(dp0 > vo.s[0].tdph ? dp0 : vo.s[0].tdph), lvR = wtLevel(dp1 > vo.s[1].tdph ? dp1 : vo.s[1].tdph);
+            shL = lvL + 7;
+            shR = lvR + 7;
+            tL0 = wtTable(d.wtA0, lvL);
+            tR0 = wtTable(d.wtA0, lvR);
+            wL = d.wtW0;
+            if (d.wtXF)
+            {
+                tL1 = wtTable(d.wtA1, lvL);
+                tR1 = wtTable(d.wtA1, lvR);
+                w1c = d.wtW1;
+                dxfU = 1.0f / kBlock;
+            }
+            else
+                dwW = (d.wtW1 - d.wtW0) * (1.0f / kBlock);
+        }
         float y1L = vo.y[0], y2L = vo.y[1], y1R = vo.y[2], y2R = vo.y[3];
         uint32_t r = rng;
         float* oL = busL;
@@ -689,7 +796,28 @@ class Engine
             r = r * 1664525u + 1013904223u;
             const float n = (float)(int32_t)r * (1.0f / 2147483648.0f) * nz;
             float xL, xR = 0.0f;
-            if (PU)
+            if (WT)
+            {
+                dp0 += dd0;
+                ph0 += (uint32_t)dp0;
+                xL = wtSample(tL0, ph0, shL, wL);
+                if (ST)
+                {
+                    dp1 += dd1;
+                    ph1 += (uint32_t)dp1;
+                    xR = wtSample(tR0, ph1, shR, wL);
+                }
+                if (tL1)
+                {
+                    xfU += dxfU;
+                    xL += (wtSample(tL1, ph0, shL, w1c) - xL) * xfU;
+                    if (ST)
+                        xR += (wtSample(tR1, ph1, shR, w1c) - xR) * xfU;
+                }
+                else
+                    wL += dwW;
+            }
+            else if (PU)
             {
                 off += (uint32_t)doff;
                 dp0 += dd0;

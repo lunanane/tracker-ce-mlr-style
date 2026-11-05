@@ -678,6 +678,72 @@ static double nsPerVoiceSample(int voices, int width, int shape, int reps)
     return ns / ((double)reps * kBlock * voices);
 }
 
+// ---------------------------------------------------------------- plan 015 W: the old Shape values (0 .. 100) sound as before
+// FNV-1a over the 16 bit output (both channels) of fixed scenarios. The expected values were recorded with the v0.3.6 engine (before
+// the wavetable mode existed); a change of the oscillator path for Shape 0 .. 100 must leave every one of them untouched.
+static uint32_t scenarioHash(int shape, int width, int lfoDest, bool sweep)
+{
+    Engine e;
+    e.setParam(P_SHAPE, shape);
+    e.setParam(P_WIDTH, width);
+    e.setParam(P_LFO_DEST, lfoDest);
+    e.setParam(P_LFO_DEPTH, 60);
+    e.setParam(P_LFO_RATE, 70);
+    e.setParam(P_DETUNE, 40);
+    e.setParam(P_INTERVAL, 19);
+    e.setParam(P_NOISE, 15);
+    e.setParam(P_GLIDE, 20);
+    e.setParam(P_RESO, 40);
+    e.setParam(P_RELEASE, 30);
+    e.noteOn(45, 110);
+    e.noteOn(52, 90);
+    e.noteOn(64, 100);
+    std::vector<int16_t> l, r;
+    run(e, 60, l, &r);
+    if (sweep)
+    {
+        e.setParam(P_SHAPE, shape == 0 ? 100 : 1);
+        run(e, 40, l, &r);
+    }
+    e.noteOff(52);
+    e.noteOn(71, 127);
+    run(e, 50, l, &r);
+    e.noteOff(45);
+    e.noteOff(64);
+    e.noteOff(71);
+    run(e, 40, l, &r);
+    uint32_t h = 2166136261u;
+    for (size_t i = 0; i < l.size(); i++)
+    {
+        h = (h ^ (uint16_t)l[i]) * 16777619u;
+        h = (h ^ (uint16_t)r[i]) * 16777619u;
+    }
+    return h;
+}
+
+struct OldShapeCase
+{
+    int shape, width, dest;
+    bool sweep;
+    uint32_t expect;
+};
+static const OldShapeCase kOldShape[] = {
+    { 0, 60, 0, false, 0xE9C783BEu }, { 0, 0, 1, false, 0xA364F8AFu },   { 0, 100, 2, true, 0x7124CC10u },  { 1, 60, 0, false, 0xC69E440Du }, { 1, 0, 1, true, 0xCF503DC9u },
+    { 17, 60, 1, false, 0xC5C1DC1Bu }, { 50, 60, 0, true, 0xCA962DABu }, { 50, 0, 2, false, 0xCC140317u },  { 99, 100, 1, false, 0xB214F03Fu }, { 100, 60, 1, true, 0x207215CAu },
+    { 100, 0, 0, false, 0xD36A2E77u },
+};
+
+static void test_old_shape_values_identical()
+{
+    for (const OldShapeCase& c : kOldShape)
+    {
+        const uint32_t h = scenarioHash(c.shape, c.width, c.dest, c.sweep);
+        if (getenv("PLINKY_PRINT_HASHES"))
+            printf("    { %d, %d, %d, %s, 0x%08Xu },\n", c.shape, c.width, c.dest, c.sweep ? "true" : "false", h);
+        CHECK(h == c.expect);
+    }
+}
+
 // ---------------------------------------------------------------- plan 012: snapshots per pattern and the timed morph
 using namespace plinkymorph;
 
@@ -1013,6 +1079,419 @@ static void test_morph_file()
     CHECK(strcmp(t, "29.5 s") == 0);
 }
 
+// ---------------------------------------------------------------- plan 015 W: Plinky wavetables
+static const double kPi = 3.14159265358979323846;
+static int wtShape(int table, int sub = 0) { return kShapeWt0 + table * kWtSteps + sub; }
+
+static void test_wt_params_and_text()
+{
+    // the range: 0 .. 100 as before, the tables follow; the sidecar takes the new range and still rejects what is beyond it
+    CHECK(paramInfo(P_SHAPE).min == 0 && paramInfo(P_SHAPE).max == kShapeMax && kShapeMax == 229 && kShapeMax <= 255);
+    CHECK(kShapeWt0 == 101 && wtShape(kWtTables - 1) == kShapeMax);
+    Params p;
+    p.v[P_SHAPE] = (uint8_t)wtShape(5, 3);
+    uint8_t buf[kFileMax];
+    const size_t n = p.save(buf, sizeof(buf));
+    CHECK(n > 0);
+    Params q;
+    CHECK(q.load(buf, n) && q.v[P_SHAPE] == wtShape(5, 3));
+    p.v[P_SHAPE] = 230; // beyond the range: back to the default
+    const size_t n2 = p.save(buf, sizeof(buf));
+    Params q2;
+    CHECK(q2.load(buf, n2) && q2.v[P_SHAPE] == 0);
+    // an old file (every value of v0.3.6, 0 .. 100) loads unchanged
+    for (int s = 0; s <= 100; s += 10)
+    {
+        Params o;
+        o.v[P_SHAPE] = (uint8_t)s;
+        const size_t m = o.save(buf, sizeof(buf));
+        Params r;
+        CHECK(r.load(buf, m) && r.v[P_SHAPE] == s);
+    }
+    // texts: the region / table name, short enough for a 92 px cell (nine characters at most)
+    char t[32];
+    shapeText(0, t, sizeof t);
+    CHECK(!strcmp(t, "Saws"));
+    shapeText(1, t, sizeof t);
+    CHECK(!strcmp(t, "Pulse 1"));
+    shapeText(100, t, sizeof t);
+    CHECK(!strcmp(t, "Pulse 100"));
+    shapeText(wtShape(0), t, sizeof t);
+    CHECK(!strcmp(t, "WT1 Saw"));
+    shapeText(wtShape(2), t, sizeof t);
+    CHECK(!strcmp(t, "WT3 Buzz"));
+    shapeText(wtShape(2, 4), t, sizeof t);
+    CHECK(!strcmp(t, "WT3+50%"));
+    shapeText(kShapeMax, t, sizeof t);
+    CHECK(!strcmp(t, "WT17 Hash"));
+    for (int v = 0; v <= kShapeMax; v++)
+    {
+        shapeText(v, t, sizeof t);
+        CHECK(strlen(t) >= 3 && strlen(t) <= 9);
+    }
+    // the morph is linear on the value: from "Pulse 50" to "WT10 Bell" it passes the tables smoothly, in single parameter steps
+    uint8_t cur[P_COUNT], tgt[P_COUNT];
+    fill(cur, 60, 20);
+    fill(tgt, 60, 20);
+    cur[P_SHAPE] = 50;
+    tgt[P_SHAPE] = (uint8_t)wtShape(9);
+    Morph m;
+    m.begin(cur, tgt, 4, 0, 6000);
+    int last = cur[P_SHAPE];
+    int maxJump = 0;
+    for (uint32_t tm = 5; tm <= 6000; tm += 5)
+    {
+        m.step(cur, tm);
+        CHECK(cur[P_SHAPE] >= last && cur[P_SHAPE] <= wtShape(9));
+        maxJump = std::max(maxJump, cur[P_SHAPE] - last);
+        last = cur[P_SHAPE];
+    }
+    CHECK(last == wtShape(9) && !m.running && maxJump <= 1);
+}
+
+static void test_wt_tables_and_lookup()
+{
+    const int16_t* all = wtData();
+    CHECK(sizeof(int16_t) * kWtTables * kWtSize == 35054); // the flash cost
+    CHECK(kWtLevelOff[8] + 3 == kWtSize);
+    // levels: 512, 256 .. 2 samples (+ a guard point that repeats the first sample, so the interpolation never wraps)
+    for (int t = 0; t < kWtTables; t++)
+        for (int lv = 0; lv < 9; lv++)
+        {
+            const int16_t* tb = wtTable(t, lv);
+            const int n = 512 >> lv;
+            CHECK(tb[n] == tb[0]);
+            CHECK(tb + n < all + (t + 1) * kWtSize); // the guard point is inside the table
+            CHECK(lv == 8 || tb + n + 1 == wtTable(t, lv + 1));
+            // bounds: the largest index any phase can reach (pair: the next table too) is the guard point, never beyond it
+            const uint32_t i2max = ((0xFFFFFFFFu >> (lv + 7)) >> 16);
+            CHECK(i2max + 1 == (uint32_t)n);
+            CHECK(t + 1 >= kWtTables || tb + i2max + 1 + kWtSize < all + (t + 2) * kWtSize);
+            for (int i = 0; i <= n; i++)
+                CHECK(abs((int)tb[i]) < 20000); // nominal +-16384, the band limited saw rings to 18932
+        }
+    // interpolation against a double reference, at random phases, every level
+    uint32_t r = 12345;
+    double worst = 0;
+    for (int k = 0; k < 20000; k++)
+    {
+        r = r * 1664525u + 1013904223u;
+        const uint32_t ph = r;
+        r = r * 1664525u + 1013904223u;
+        const int t = (r >> 8) % (kWtTables - 1), lv = (r >> 20) % 9;
+        r = r * 1664525u + 1013904223u;
+        const float w = (float)(r >> 8) * (1.0f / 16777216.0f);
+        const int16_t* tb = wtTable(t, lv);
+        const double pos = (double)(ph >> (lv + 7)) / 65536.0;
+        const int i = (int)pos;
+        const double fr = pos - i;
+        const double a = tb[i] + (tb[i + 1] - tb[i]) * fr, b = tb[i + kWtSize] + (tb[i + 1 + kWtSize] - tb[i + kWtSize]) * fr;
+        const double ref = (a + (b - a) * w) / 16384.0;
+        worst = std::max(worst, fabs((double)wtSample(tb, ph, lv + 7, w) - ref));
+    }
+    printf("  wavetable lookup: largest error against the double reference %.2e\n", worst);
+    CHECK(worst < 3e-6);
+    // weights: 0 = the first table, 1 = the second; the end of the phase circle meets the start (guard point)
+    {
+        const int16_t* tb = wtTable(3, 0);
+        CHECK_NEAR(wtSample(tb, 0, 7, 0.0f), tb[0] / 16384.0, 1e-6);
+        CHECK_NEAR(wtSample(tb, 0, 7, 1.0f), tb[kWtSize] / 16384.0, 1e-6);
+        CHECK_NEAR(wtSample(tb, 0xFFFFFFFFu, 7, 0.0f), tb[0] / 16384.0, 2e-3);
+        CHECK_NEAR(wtSample(tb, 0x40000000u, 7, 0.5f), 0.5 * (tb[128] + tb[128 + kWtSize]) / 16384.0, 1e-6);
+    }
+    // mip selection against pitch: the octave level is the richest one without a harmonic above Nyquist
+    int prev = 0;
+    for (int note = 0; note < 128; note++)
+    {
+        const int32_t dph = semiToDphase((float)note);
+        const int lv = wtLevel(dph);
+        const double f = 440.0 * pow(2.0, (note - 69) / 12.0);
+        CHECK(lv >= prev && lv >= 0 && lv <= 8);
+        prev = lv;
+        const int n = 512 >> lv; // samples per cycle of the level = its highest harmonic * 2
+        CHECK(f * (n / 2) <= 22050.0 * 1.0005);     // never an alias: harmonic n/2 stays under Nyquist
+        CHECK(lv == 0 || f * n > 22050.0 * 0.9995); // and no poorer than needed: the next richer level would alias
+    }
+    CHECK(wtLevel(0) == 0 && wtLevel(65536) == 0 && wtLevel(1 << 22) == 0 && wtLevel((1 << 23) - 1) == 0 && wtLevel(1 << 23) == 1);
+    CHECK(wtLevel(1610612736) == 8);
+    // the octave levels of every table carry the same low harmonics (the generator band limited them from one cycle)
+    double wd = 0;
+    for (int t = 0; t < kWtTables; t++)
+    {
+        const int16_t* b = wtTable(t, 0);
+        double rms = 0;
+        for (int i = 0; i < 512; i++)
+            rms += (double)b[i] * b[i];
+        rms = sqrt(rms / 512.0);
+        for (int lv = 1; lv <= 5; lv++)
+        {
+            const int n = 512 >> lv;
+            const int16_t* c = wtTable(t, lv);
+            for (int h = 1; h <= n / 4; h++)
+            {
+                double r0 = 0, i0 = 0, r1 = 0, i1 = 0;
+                for (int i = 0; i < 512; i++)
+                {
+                    r0 += b[i] * cos(2 * kPi * h * i / 512.0);
+                    i0 += b[i] * sin(2 * kPi * h * i / 512.0);
+                }
+                for (int i = 0; i < n; i++)
+                {
+                    r1 += c[i] * cos(2 * kPi * h * i / n);
+                    i1 += c[i] * sin(2 * kPi * h * i / n);
+                }
+                wd = std::max(wd, hypot(r0 / 512.0 - r1 / n, i0 / 512.0 - i1 / n) * 2.0 / rms);
+            }
+        }
+    }
+    printf("  wavetable levels 1..5: largest deviation of the low harmonics from level 0: %.4f of the table rms\n", wd);
+    CHECK(wd < 0.02);
+}
+
+// strongest partial near f (Hz) of the last 8192 samples
+static double dominantHz(const std::vector<int16_t>& o, double f)
+{
+    const int N = 8192;
+    double best = 0, bestF = 0;
+    for (double ff = f * 0.92; ff < f * 1.08; ff *= 1.0003)
+    {
+        double re = 0, im = 0;
+        for (int n = 0; n < N; n++)
+        {
+            double w = 0.5 - 0.5 * cos(2.0 * kPi * n / N), a = 2.0 * kPi * ff * n / 44100.0, x = o[o.size() - N + n] * w;
+            re += x * cos(a);
+            im += x * sin(a);
+        }
+        if (re * re + im * im > best)
+        {
+            best = re * re + im * im;
+            bestF = ff;
+        }
+    }
+    return bestF;
+}
+
+static void test_wt_sound()
+{
+    // aliasing energy of the wavetable oscillator, as for the polyBLEP saw: the share of the spectrum off the harmonics. The tables are
+    // band limited per octave (no harmonic above Nyquist); what is left is the image energy of the linear interpolation in the short
+    // tables of the top octaves (a 32 sample table holds 16 harmonics), so it grows with the pitch and with the high harmonics a
+    // table has: the plain saw table stays under 0.0035 (C8), all tables under 0.004 up to C4, and none above 0.05 (the "Comb" table
+    // at C6, the worst of the 17).
+    const int tabs[] = { 0, 2, 4, 7, 14, 16 };
+    const int notes[] = { 36, 48, 60, 72, 84, 96, 108 };
+    double worstShare = 0;
+    for (int t : tabs)
+        for (int note : notes)
+        {
+            const double f0 = 440.0 * pow(2.0, (note - 69) / 12.0);
+            Engine e;
+            setOpenMono(e);
+            e.setParam(P_LEVEL, 50);
+            e.setParam(P_SHAPE, wtShape(t));
+            e.noteOn((uint8_t)note, 127);
+            std::vector<int16_t> o;
+            run(e, 60, o);
+            std::vector<float> x(4096);
+            for (int i = 0; i < 4096; i++)
+                x[i] = o[o.size() - 4096 + i] * (1.0f / 32768.0f);
+            const double a = aliasShare(x, f0);
+            worstShare = std::max(worstShare, a);
+            CHECK(a < 0.05);
+            if (t == 0)
+                CHECK(a < 0.0035);
+            if (note <= 60)
+                CHECK(a < 0.004);
+        }
+    printf("  wavetable alias share (energy off the harmonics), worst of %d cases: %.5f (polyBLEP saw 0.00051)\n",
+           (int)(sizeof(tabs) / sizeof(tabs[0]) * sizeof(notes) / sizeof(notes[0])), worstShare);
+    // tuning: the sine table sounds at the pitch of the note
+    for (int note : { 36, 60, 84 })
+    {
+        const double f = 440.0 * pow(2.0, (note - 69) / 12.0);
+        Engine e;
+        setOpenMono(e);
+        e.setParam(P_SHAPE, wtShape(1));
+        e.noteOn((uint8_t)note, 100);
+        std::vector<int16_t> o;
+        run(e, 200, o);
+        CHECK_NEAR(dominantHz(o, f) / f, 1.0, 0.002);
+    }
+    // loudness: the same note, saw table / sine-ish table vs the old saw pair: within a factor 2 (-6 dB .. +6 dB)
+    {
+        double rms[4];
+        const int shapes[4] = { 0, 50, wtShape(0), wtShape(8) };
+        for (int k = 0; k < 4; k++)
+        {
+            Engine e;
+            e.setParam(P_SHAPE, shapes[k]);
+            e.noteOn(48, 100);
+            std::vector<int16_t> o;
+            run(e, 300, o);
+            double s = 0;
+            for (size_t i = o.size() - 8192; i < o.size(); i++)
+                s += (double)o[i] * o[i];
+            rms[k] = sqrt(s / 8192);
+        }
+        printf("  rms: saws %.0f, pulse 50 %.0f, table Saw %.0f, table Hole %.0f\n", rms[0], rms[1], rms[2], rms[3]);
+        for (int k = 2; k < 4; k++)
+            CHECK(rms[k] > rms[0] * 0.5 && rms[k] < rms[0] * 2.0);
+    }
+    // stability over the table range: extreme settings, edge notes; finite and inside 16 bit
+    int cases = 0;
+    for (int t = 0; t < kWtTables; t += 2)
+        for (int sub : { 0, 4 })
+            for (int wd : { 0, 100 })
+                for (int dest = 0; dest < 3; dest++)
+                {
+                    Engine e;
+                    e.setParam(P_SHAPE, std::min(wtShape(t, sub), (int)kShapeMax));
+                    e.setParam(P_WIDTH, wd);
+                    e.setParam(P_RESO, 100);
+                    e.setParam(P_CUTOFF, 100);
+                    e.setParam(P_NOISE, 100);
+                    e.setParam(P_DRIVE, 100);
+                    e.setParam(P_DETUNE, 100);
+                    e.setParam(P_INTERVAL, 24);
+                    e.setParam(P_ATTACK, 0);
+                    e.setParam(P_LFO_DEPTH, 100);
+                    e.setParam(P_LFO_RATE, 100);
+                    e.setParam(P_LFO_DEST, dest);
+                    e.setParam(P_GLIDE, 30);
+                    for (uint8_t n : { 0, 24, 60, 100, 127 })
+                        e.noteOn(n, 127);
+                    std::vector<int16_t> l, rr;
+                    run(e, 200, l, &rr);
+                    int mx = 0;
+                    for (size_t i = 0; i < l.size(); i++)
+                        mx = std::max(mx, std::max(abs((int)l[i]), abs((int)rr[i])));
+                    CHECK(mx <= 32767);
+                    for (int i = 0; i < kMaxVoices; i++)
+                        CHECK(voiceFinite(e.voice(i)));
+                    e.allNotesOff();
+                    std::vector<int16_t> tl;
+                    run(e, 40, tl);
+                    cases++;
+                }
+    CHECK(cases == 9 * 2 * 2 * 3);
+}
+
+static void test_wt_no_clicks()
+{
+    // the largest sample step of every steady table (two notes), the reference for the sweeps below
+    int steady = 0;
+    for (int t = 0; t < kWtTables; t++)
+    {
+        Engine e;
+        e.setParam(P_SHAPE, wtShape(t));
+        e.setParam(P_ATTACK, 0);
+        e.setParam(P_CUTOFF, 70);
+        e.noteOn(48, 100);
+        e.noteOn(55, 100);
+        std::vector<int16_t> o;
+        run(e, 150, o);
+        steady = std::max(steady, maxStep(o, 3000, o.size()));
+    }
+    // a slow sweep of Shape over all tables (one parameter step per 3 blocks): no step beyond the steady ones, also at the boundaries
+    Engine e;
+    e.setParam(P_SHAPE, wtShape(0));
+    e.setParam(P_ATTACK, 0);
+    e.setParam(P_CUTOFF, 70);
+    e.noteOn(48, 100);
+    e.noteOn(55, 100);
+    std::vector<int16_t> o;
+    run(e, 60, o);
+    int sweepMax = 0;
+    for (int s = wtShape(0); s <= kShapeMax; s++)
+    {
+        e.setParam(P_SHAPE, s);
+        for (int b = 0; b < 3; b++)
+        {
+            const size_t from = o.size();
+            run(e, 1, o);
+            sweepMax = std::max(sweepMax, maxStep(o, from, o.size()));
+        }
+    }
+    printf("  Shape sweep over all tables: largest step %d, steady tables %d\n", sweepMax, steady);
+    CHECK(sweepMax <= steady * 5 / 4 + 200);
+    // faster: a jump over several tables in one write (the smoothing carries it, table crossings inside a block)
+    Engine f;
+    f.setParam(P_SHAPE, wtShape(2));
+    f.setParam(P_ATTACK, 0);
+    f.setParam(P_CUTOFF, 70);
+    f.noteOn(48, 100);
+    f.noteOn(55, 100);
+    std::vector<int16_t> p;
+    run(f, 60, p);
+    f.setParam(P_SHAPE, wtShape(13));
+    run(f, 60, p);
+    f.setParam(P_SHAPE, wtShape(3));
+    run(f, 60, p);
+    const int jumpMax = maxStep(p, 3000, p.size());
+    printf("  Shape jumps between tables: largest step %d\n", jumpMax);
+    CHECK(jumpMax <= steady * 5 / 4 + 200);
+    // mode changes during a note: wavetable -> saws -> pulse -> wavetable
+    Engine g;
+    g.setParam(P_ATTACK, 0);
+    g.setParam(P_CUTOFF, 70);
+    g.setParam(P_SHAPE, wtShape(4));
+    g.noteOn(52, 100);
+    std::vector<int16_t> q;
+    run(g, 40, q);
+    int sMax = 0;
+    for (int s : { 0, 40, (int)wtShape(9), 0, 100, (int)wtShape(1) })
+    {
+        g.setParam(P_SHAPE, s);
+        const size_t from = q.size();
+        run(g, 40, q);
+        sMax = std::max(sMax, maxStep(q, from, q.size()));
+    }
+    printf("  mode changes wavetable / saws / pulse: largest step %d (steady wavetables %d)\n", sMax, steady);
+    CHECK(sMax <= steady * 3 / 2 + 400);
+    // pitch glide across octave levels (the table of another octave is used between two blocks): steps as on a steady note
+    Engine h;
+    h.setParam(P_SHAPE, wtShape(16));
+    h.setParam(P_VOICES, 1);
+    h.setParam(P_ATTACK, 0);
+    h.setParam(P_CUTOFF, 100);
+    h.setParam(P_GLIDE, 60);
+    h.noteOn(36, 100);
+    std::vector<int16_t> u;
+    run(h, 40, u);
+    h.noteOn(96, 100); // one voice: the same voice glides from 36 to 96, through every octave level
+    run(h, 100, u);    // the re-attack of the envelope (it opens the filter) is over after this
+    const size_t gFrom = u.size();
+    run(h, 600, u);
+    int steadyAny = 0; // the largest step of any steady note of the glide's range: a level switch makes no step beyond them
+    for (int n = 36; n <= 96; n++)
+    {
+        Engine h2;
+        h2.setParam(P_SHAPE, wtShape(16));
+        h2.setParam(P_VOICES, 1);
+        h2.setParam(P_ATTACK, 0);
+        h2.setParam(P_CUTOFF, 100);
+        h2.noteOn((uint8_t)n, 100);
+        std::vector<int16_t> u2;
+        run(h2, 100, u2);
+        steadyAny = std::max(steadyAny, maxStep(u2, 3000, u2.size()));
+    }
+    const int gl = maxStep(u, gFrom, u.size());
+    printf("  glide through all octave levels: largest step %d (steady notes 36..96: %d)\n", gl, steadyAny);
+    CHECK(gl <= steadyAny);
+}
+
+static void test_wt_cpu()
+{
+    // host cost relative to the saw pair and the pulse (4 voices); the device estimate is in plan 015 "W as built"
+    const double sawS = nsPerVoiceSample(4, 60, 0, 6000), puS = nsPerVoiceSample(4, 60, 40, 6000), wtS = nsPerVoiceSample(4, 60, wtShape(6), 6000);
+    const double sawM = nsPerVoiceSample(4, 0, 0, 6000), puM = nsPerVoiceSample(4, 0, 40, 6000), wtM = nsPerVoiceSample(4, 0, wtShape(6), 6000);
+    printf("  host ns per voice-sample, 4 voices: stereo saw %.1f pulse %.1f wavetable %.1f | mono saw %.1f pulse %.1f wavetable %.1f\n", sawS, puS,
+           wtS, sawM, puM, wtM);
+    printf("  wavetable / saw: stereo %.2f, mono %.2f\n", wtS / sawS, wtM / sawM);
+    CHECK(wtS < sawS * 2.0); // generous: the host timing is noisy (x86 float conversions cost more than on the M4); the device estimate is in the plan
+    CHECK(wtM < sawM * 2.0);
+}
+
 static void test_cost()
 {
     printf("  host cost, ns per voice-sample (saw / pulse, stereo / mono):\n");
@@ -1044,6 +1523,12 @@ int main()
     test_inherit_and_controller();
     test_clip_target();
     test_morph_file();
+    test_old_shape_values_identical();
+    test_wt_params_and_text();
+    test_wt_tables_and_lookup();
+    test_wt_sound();
+    test_wt_no_clicks();
+    test_wt_cpu();
     test_cost();
     printf("plinky: %d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
