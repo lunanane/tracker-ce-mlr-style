@@ -8,6 +8,9 @@
 #include "fileManager.h"
 #include "interruptsControl.h"
 #include "patternEditor/patternEditor.h"
+#ifdef FEATURE_PLINKY
+#include "seqPlinky.h"
+#endif
 #include <cr_section_macros.h>
 #include <stddef.h>
 #include <string.h>
@@ -297,6 +300,12 @@ LaunchResult launchClips(uint16_t tracks, uint8_t pattern, uint8_t quant)
     s_snapValid = (uint16_t)(s_snapValid | snapped);
     if (!sequencer.isPlay())
         flushNow();
+#ifdef FEATURE_PLINKY
+    if (ok)
+        for (uint8_t t = 0; t < seqsession::kTracks; t++)
+            if ((tracks >> t) & 1u)
+                seqPlinkyClipLaunched(t, pattern); // plan 012: a PolySynth track morphs to the sound of the clip's source pattern
+#endif
     s_refusal = seqsession::REFUSE_NONE;
     return ok ? LR_OK : LR_BUSY;
 }

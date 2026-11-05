@@ -707,6 +707,60 @@ static void test_mlr_bar_follows_the_pattern()
     c->apply(0, packQuant(Q_BEAT));
 }
 
+// ---- v0.3.3: a live note sounds like the step it records ("the sequencers are always too loud, recorded they sound right") ----
+// The stock option "record velocity" decides whether a recorded step carries a volume. Off: the step has none (instrument default,
+// -1) and the live note must have none either; on: the live note's volume is the recorded one (a chord: the loudest of the group).
+// Every sequencer type plays through Engine::onEvent, so the pad-driven ones (Chord/Arp, Strings) stand for all of them.
+static void test_live_velocity_matches_recorded()
+{
+    // the rule itself
+    CHECK(liveVolume(79, true) == 79 && liveVolume(79, false) == -1 && liveVolume(0, false) == -1 && liveVolume(0, true) == 0);
+    static const uint8_t kTypes[2] = { TYPE_CHORDARP, TYPE_PLINKY };
+    for (int ti = 0; ti < 2; ti++)
+        for (int on = 0; on < 2; on++)
+        {
+            MockHost h;
+            h.prm.velocity = on != 0;
+            Engine* e = mk(h);
+            Head hd;
+            e->postType(2, kTypes[ti]);
+            e->idleTick();
+            for (int i = 0; i < 48 * 3; i++) { e->blockTick(true, 2604); playRec(*e, h, hd, 1); }
+            e->postRec(2, Engine::REC_PUNCH);
+            for (int i = 0; i < 6; i++) { e->blockTick(true, 2604); playRec(*e, h, hd, 1); }
+            e->postPad(2, 0, true, 37);
+            for (int i = 0; i < 48 * 4; i++) { e->blockTick(true, 2604); playRec(*e, h, hd, 1); }
+            e->postPad(2, 0, false);
+            for (int i = 0; i < 48 * 2; i++) { e->blockTick(true, 2604); playRec(*e, h, hd, 1); }
+            std::vector<seqrec::Op> ops = drainOps(*e);
+            int live = 0, rec = 0;
+            for (size_t i = 0; i < h.log.size(); i++)
+            {
+                if (h.log[i].kind != '+' || h.log[i].track != 2)
+                    continue;
+                live++;
+                if (!on)
+                    CHECK(h.log[i].vol == -1); // the instrument's default, like the recorded step
+                else
+                    CHECK(h.log[i].vol >= 0 && (kTypes[ti] != TYPE_PLINKY || h.log[i].vol == velocityToVolume(37)));
+            }
+            for (size_t i = 0; i < ops.size(); i++)
+            {
+                if (ops[i].kind != seqrec::OP_NOTE)
+                    continue;
+                rec++;
+                bool found = false;
+                for (size_t k = 0; k < h.log.size(); k++)
+                    if (h.log[k].kind == '+' && h.log[k].track == 2 && h.log[k].vol == ops[i].volume)
+                        found = true;
+                CHECK(found);                    // the recorded volume is one a live note had (a chord step: the loudest of its notes)
+                CHECK(on ? ops[i].volume >= 0 : ops[i].volume == -1);
+            }
+            CHECK(live > 0 && rec > 0);
+            delete e;
+        }
+}
+
 // ---- Play mode: the Rec key against the engine and a model of the pattern ----
 // Plan 008 (owner intent "Rec should just record"): a take replaces a step only while the sequencer is played on the track; steps
 // the take passes while nothing is played keep what the pattern holds, lap after lap.

@@ -245,12 +245,14 @@ void SeqPlayOverlay::screenButton(uint8_t index, uint8_t state)
 {
     if (state == buttonPress)
     {
-        legend_.screenButton();
+        const uint8_t track = seqplay::stripSlotTrack(stripPage_, index);
+        legend_.pressed(index, track == selected()); // a second tap on the selected track toggles the pad legend (at the release)
         closeList(false);
-        selectTrack(seqplay::stripSlotTrack(stripPage_, index));
+        selectTrack(track);
     }
     else if (state == buttonRelease)
     {
+        legend_.released(index);
         if (list_.open && hold_.listBtn == (int8_t)index)
             closeList(true); // (the hold state already forgot the button, the list still knows it)
     }
@@ -262,6 +264,7 @@ void SeqPlayOverlay::jog(int16_t value)
     if (btn < 0)
         return;
     value = interfaceGlobals.invertValForList ? -value : value;
+    legend_.wheel(); // the legend gives way to the type list (and this press will not toggle it)
     uint8_t track = seqplay::stripSlotTrack(stripPage_, (uint8_t)btn);
     list_.wheel((uint8_t)btn, seqEngine.type(track), seqEngine.pendingType(track), value);
     if (list_.open)
@@ -340,6 +343,54 @@ bool SeqPlayOverlay::editKey(uint8_t b, uint8_t state)
     }
 }
 
+// The Instrument Parameters key (the module switch to the instrument editor), plan 012 / v0.3.3. On a PolySynth track it opens / closes
+// the section overlay over Play mode (the pads keep playing). On any other track it is the stock page. Shift + key always jumps to the
+// next PolySynth track and opens the overlay (cycles; none: a note on the strip).
+bool SeqPlayOverlay::paramsKey(uint8_t state)
+{
+    if (state != buttonPress)
+    {
+        const bool mine = paramsTaken_;
+        if (state == buttonRelease)
+            paramsTaken_ = false;
+        return mine;
+    }
+    paramsTaken_ = false;
+#ifdef FEATURE_PLINKY
+    switch (seqplay::paramsKey(routable(), PE().buttons->isButtonPressed(interfaceButtonShift), seqPlinkyTrackUsesVoice(selected())))
+    {
+        case seqplay::PK_TOGGLE:
+            closeList(false);
+            plinkyToggle();
+            paramsTaken_ = true;
+            return true;
+        case seqplay::PK_JUMP:
+        {
+            uint16_t mask = 0;
+            for (uint8_t t = 0; t < seqplay::kTracks; t++)
+                if (seqPlinkyTrackUsesVoice(t))
+                    mask = (uint16_t)(mask | (1u << t));
+            const int t = seqplay::nextSynthTrack(mask, selected());
+            paramsTaken_ = true;
+            if (t < 0)
+            {
+                setMessage("no PolySynth");
+                return true;
+            }
+            closeList(false);
+            selectTrack((uint8_t)t);
+            stripPage_ = seqplay::stripPageOfTrack((uint8_t)t);
+            stripKeyValid_ = false;
+            plinkyOpen_ = false;
+            plinkyToggle();
+            return true;
+        }
+        default: break;
+    }
+#endif
+    return false; // the stock page
+}
+
 void SeqPlayOverlay::borrowEdit()
 {
     if (editBorrowed_)
@@ -365,8 +416,7 @@ bool SeqPlayOverlay::button(uint8_t b, uint8_t state)
     seqplay::ScreenHold::Kind kind = state == buttonPress ? seqplay::ScreenHold::PRESS :
                                          state == buttonRelease ? seqplay::ScreenHold::RELEASE : seqplay::ScreenHold::HOLD;
         const bool shiftDown = PE().buttons->isButtonPressed(interfaceButtonShift);
-        if (kind == seqplay::ScreenHold::PRESS && shiftDown && routable())
-            legend_.screenButton(); // a stock mute press: no legend until Shift is released
+
         // Shift + screen button = the stock mute buttons; a press the overlay took stays the overlay's until its release
         switch (hold_.event(b, kind, routable(), shiftDown))
         {
@@ -384,6 +434,9 @@ bool SeqPlayOverlay::button(uint8_t b, uint8_t state)
         stripKeyValid_ = false;
         return false;
     }
+
+    if (active_ && b == interfaceButtonParams)
+        return paramsKey(state);
 
     // v0.3.2: Note / Instr / FX1 / FX2 / Copy / Insert / Delete are the stock keys (also their hold and release, whatever the popups do)
     if (active_ && editKeyIndex(b) < seqplay::EditKeys::K_COUNT)
@@ -520,7 +573,7 @@ void SeqPlayOverlay::plinkyToggle()
     {
         plinkyOpen_ = true;
         plinkyCur_.fix();
-        legend_.screenButton(); // no Shift legend over it
+        legend_.close(); // no legend over it
     }
     else
 #endif
@@ -667,8 +720,27 @@ void SeqPlayOverlay::refreshView()
 #ifdef FEATURE_PLINKY
         view_.mode = SeqPlayViewData::PLINKY;
         seqplinky::Model& m = view_.plinky;
-        for (int i = 0; i < plinkyvoice::P_COUNT; i++)
-            m.v[i] = (uint8_t)seqPlinkyGet(i);
+        for (int i = 0; i <= plinkyvoice::P_COUNT; i++)
+            m.v[i] = (uint8_t)seqPlinkyGet(i); // the last one is the morph time (plan 012)
+        {
+            uint16_t ms = 0;
+            uint8_t mp = 0;
+            m.morphPat = seqPlinkyMorphStatus(&ms, &mp) ? mp : 0;
+            m.morphMs = ms;
+            m.mark = seqPlinkyMarks();
+            for (int i = 0; i < seqnotes::kVoices; i++)
+            {
+                uint8_t n = 0, lv = 0, rel = 0;
+                if (seqPlinkyVoice(i, &n, &lv, &rel))
+                {
+                    m.voice[i].note = n;
+                    m.voice[i].level = lv;
+                    m.voice[i].rel = rel;
+                }
+                else
+                    m.voice[i] = seqnotes::VoiceView();
+            }
+        }
         m.sec = plinkyCur_.sec;
         m.idx = plinkyCur_.idx;
         m.track = (uint8_t)(sel + 1);
@@ -684,7 +756,7 @@ void SeqPlayOverlay::refreshView()
         view_.sel = list_.sel;
         view_.cur = seqEngine.type(seqplay::stripSlotTrack(stripPage_, list_.cell));
     }
-    else if (seqplay::viewKind(false, active_, false, legend_.visible(seqNowMs()), seqEngine.type(sel) == seqlogic::TYPE_OFF) == SeqPlayViewData::LEGEND)
+    else if (seqplay::viewKind(false, active_, false, legend_.visible(), seqEngine.type(sel) == seqlogic::TYPE_OFF) == SeqPlayViewData::LEGEND)
     {
         view_.mode = SeqPlayViewData::LEGEND;
         view_.type = seqEngine.type(sel);
@@ -732,14 +804,33 @@ void SeqPlayOverlay::refreshView()
     {
         view_.mode = SeqPlayViewData::HIDDEN;
     }
+    if (view_.mode == SeqPlayViewData::HIDDEN)
+    {
+        // v0.3.3: the notes the selected track's sequencer sounds (a band above the strip), read at most every 33 ms
+        const uint32_t nowMs = seqNowMs();
+        if (active_ && (uint32_t)(nowMs - notesTime_) >= 33)
+        {
+            notesTime_ = nowMs;
+            uint8_t mask[16];
+            seqEngine.soundingNotes(sel, mask);
+            const bool show = seqEngine.type(sel) != seqlogic::TYPE_OFF;
+            seqnotes::fillBand(view_.notes, show, mask, seqEngine.type(sel) == seqlogic::TYPE_PLINKY ? seqEngine.plinkySetup().root : -1);
+            notesBand_ = view_.notes;
+        }
+        else if (!active_)
+            notesBand_ = seqnotes::Band();
+        view_.notes = notesBand_;
+    }
+    else
+        view_.notes = seqnotes::Band(); // the legend, the list and the overlay cover the band
 
     if (viewShownValid_ && memcmp(&view_, &viewShown_, sizeof(view_)) == 0)
         return;
-    bool wasHidden = !viewShownValid_ || (viewShown_.mode == SeqPlayViewData::HIDDEN && viewShown_.edge == 0);
+    bool wasHidden = !viewShownValid_ || (viewShown_.mode == SeqPlayViewData::HIDDEN && viewShown_.edge == 0 && !viewShown_.notes.show);
     viewShown_ = view_;
     viewShownValid_ = true;
 
-    if (view_.mode == SeqPlayViewData::HIDDEN && view_.edge == 0)
+    if (view_.mode == SeqPlayViewData::HIDDEN && view_.edge == 0 && !view_.notes.show)
         display.setControlHide(control_);
     else if (wasHidden)
         display.setControlShow(control_);
@@ -756,13 +847,15 @@ void SeqPlayOverlay::update()
     if (editBorrowed_ && !keys_.editWanted())
         returnEdit(); // the last editing key was released and its stock handler has run
 
-    // Shift: the legend (after 250 ms) and cancel an open type list
+    // Shift (the stock mute gesture) cancels an open type list; the legend is the tap toggle on the selected track (legend_), not Shift
     bool shift = PE().buttons->isButtonPressed(interfaceButtonShift);
-    if (shift && !legend_.shift)
+    if (shift && !shiftSeen_)
         closeList(false);
+    shiftSeen_ = shift;
     if (!routable() && list_.open)
         applyPlan(seqplay::EV_POPUP); // a popup took the inputs: the list closes, pads and recording go on
-    legend_.shiftChanged(shift, now);
+    if (!routable())
+        legend_.close(); // a popup took the inputs
 
     // the Rec toggle follows the audio side: a take that ended by itself (loop done, transport stop, track Off) clears it
     if (recStopPending_ && seqRecStop())
@@ -782,6 +875,7 @@ void SeqPlayOverlay::update()
         for (int i = 0; i < 48; i++)
             ledShown_[i] = 0xFF;
         lastTrack_ = selected();
+        legend_.close(); // another track: no legend
         stripKeyValid_ = false;
     }
 
