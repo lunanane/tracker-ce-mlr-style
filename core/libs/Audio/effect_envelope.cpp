@@ -32,7 +32,9 @@
 #include "util_math.h"
 #include "mtWavetableEnvelopes.h"
 
-#define SAMPLES_PER_MSEC (AUDIO_SAMPLE_RATE_EXACT / 1000.0)
+// plan 009 P#10: float (was a double: soft-float arithmetic in the control-rate envelope sync); the result differs only by one sample count
+// in a fraction of a percent of the cases
+#define SAMPLES_PER_MSEC (AUDIO_SAMPLE_RATE_EXACT / 1000.0f)
 
 AUDIO_CORE_FLASH void AudioPlayMemory::envelopeSetSustain()
 {
@@ -854,7 +856,7 @@ AUDIO_CORE_FLASH void AudioPlayMemory::envelopeSyncTrackerSeq(uint32_t val, floa
         return;
     }
 
-    float lfoFrequency = (seqSpeed / 15.0);
+    float lfoFrequency = (seqSpeed / 15.0f); // was 15.0 (double): the same result, without the soft-double divide
     float periodTime = (1000 / lfoFrequency) * envelope.syncRate;
 
     if (envelope.phaseNumber[0] != -1 && envelope.phaseNumber[1] != -1)
