@@ -4,6 +4,9 @@
 #include "seqSidecar.h"
 #include "seqModLogic.h"
 #include "seqPlinkySeqLogic.h"
+#include "seqPlinkyMorphLogic.h"
+#include "seqNotesViewLogic.h"
+#include "seqTracks.h"
 #include "seqTracksLogic.h"
 #include "mtAudioEngine.h"
 #include "mtSequencer.h"
@@ -31,6 +34,36 @@ uint32_t s_loadedId = 0;       // project folder whose sidecar was loaded (valid
 bool s_loadedValid = false;
 bool s_newerFile = false;      // written by a newer mod version: left alone (no downgrade, nothing written)
 
+// plan 012: snapshots per pattern (5.4 KB) and the file buffer in EXTERNAL_RAM, not in the internal SRAM
+__NOINIT(EXTERNAL_RAM) plinkymorph::Controller s_ctl;
+__NOINIT(EXTERNAL_RAM) uint8_t s_fbuf[plinkymorph::kFileMaxAll];
+
+// hash of everything that is saved: the values, the morph time and the snapshots
+uint16_t stateHash(const Params& p)
+{
+    uint16_t h = seqsidecar::crc16(p.v, P_COUNT);
+    h = seqsidecar::crc16Update(h, &s_ctl.halfSec, 1);
+    h = seqsidecar::crc16Update(h, s_ctl.store.bits, sizeof(s_ctl.store.bits));
+    for (int i = 1; i < plinkymorph::kPatterns; i++)
+        if (s_ctl.store.has(i))
+            h = seqsidecar::crc16Update(h, s_ctl.store.v[i], P_COUNT);
+    return h;
+}
+
+inline int shownPattern() { return (int)mtProject.values.actualPattern; }
+
+// applies the values the morph / a snapshot changed to the engine (not a hand edit: the project is not marked changed)
+void applyMask(const uint8_t* vals, uint32_t mask)
+{
+    if (!mask)
+        return;
+    for (int i = 1; i < P_COUNT; i++)
+        if ((mask >> i) & 1u)
+            eng().setParam(i, vals[i]);
+    if (mask & ((1u << P_REVERB) | (1u << P_DELAY)))
+        engine.applyPlinkySends();
+}
+
 const char kWorkspaceFile[] = "Workspace/plinky.bin";
 const char kFileName[] = "plinky.bin";
 
@@ -53,12 +86,11 @@ bool writeValues(const char* path)
 {
     if (s_newerFile)
         return false;
-    uint8_t* buf = seqsidecar::ioBuffer();
     const Params p = current();
-    size_t n = p.save(buf, seqsidecar::ioCapacity());
-    if (!n || !seqsidecar::writeFile(path, buf, n))
+    size_t n = plinkymorph::saveFile(s_fbuf, sizeof(s_fbuf), p, s_ctl.store, s_ctl.halfSec);
+    if (!n || !seqsidecar::writeFile(path, s_fbuf, n))
         return false;
-    s_savedHash = p.hash();
+    s_savedHash = stateHash(p);
     return true;
 }
 } // namespace
@@ -121,11 +153,23 @@ bool seqPlinkyTrackUsesVoice(uint8_t track)
 
 int seqPlinkyGet(int param)
 {
+    if (param == kPlinkyMorphParam)
+        return s_ctl.halfSec;
     return eng().param(param);
 }
 
 void seqPlinkySet(int param, int value)
 {
+    if (param == kPlinkyMorphParam)
+    {
+        const int v = value < 0 ? 0 : (value > plinkymorph::kHalfSecMax ? plinkymorph::kHalfSecMax : value);
+        if (v != s_ctl.halfSec)
+        {
+            s_ctl.halfSec = (uint8_t)v;
+            s_dirty.mark();
+        }
+        return;
+    }
     const uint8_t before = eng().param(param);
     if (param == P_CHANNEL && clampParam(P_CHANNEL, value) != before && clampParam(P_CHANNEL, value) != 0)
         sendCC(123, 0, clampParam(P_CHANNEL, value), false); // the notes still sounding on the MIDI outputs of the new voice channel end first
@@ -140,13 +184,57 @@ void seqPlinkySet(int param, int value)
         }
         if (param == P_REVERB || param == P_DELAY)
             engine.applyPlinkySends();
+        if (param != P_CHANNEL)
+        {   // plan 012: a hand edit leaves the morph and writes the snapshot of the playing (or shown) pattern
+            const Params now = current();
+            s_ctl.edit(shownPattern(), param, eng().param(param), now.v);
+        }
         s_dirty.mark();
     }
 }
 
 void seqPlinkyDefault(int param)
 {
-    seqPlinkySet(param, paramInfo(param).def);
+    seqPlinkySet(param, param == kPlinkyMorphParam ? (int)plinkymorph::kHalfSecDefault : (int)paramInfo(param).def);
+}
+
+bool seqPlinkyMorphStatus(uint16_t* remainMs, uint8_t* pattern)
+{
+    if (!s_ctl.morph.running)
+        return false;
+    uint32_t r = s_ctl.morph.remainMs(seqNowMs());
+    if (remainMs)
+        *remainMs = (uint16_t)(r > 65535 ? 65535 : r);
+    if (pattern)
+        *pattern = s_ctl.morph.pattern;
+    return true;
+}
+
+bool seqPlinkyVoice(int i, uint8_t* note, uint8_t* level, uint8_t* releasing)
+{
+    if (i < 0 || i >= kMaxVoices)
+        return false;
+    const Voice& v = eng().voice(i); // plain reads of the audio side's state: enough for a display
+    if (v.stage == ST_IDLE)
+        return false;
+    float e = v.env * (float)seqnotes::kVoiceBar;
+    *note = v.note;
+    *level = (uint8_t)(e < 0.0f ? 0 : (e > (float)seqnotes::kVoiceBar ? seqnotes::kVoiceBar : (int)e));
+    *releasing = v.stage == ST_RELEASE ? 1 : 0;
+    return true;
+}
+
+uint32_t seqPlinkyMarks()
+{
+    return s_ctl.store.marks(shownPattern());
+}
+
+void seqPlinkyClipLaunched(uint8_t track, uint8_t pattern)
+{
+    if (!seqPlinkyTrackUsesVoice(track))
+        return;
+    Params cur = current();
+    applyMask(cur.v, s_ctl.onClip(pattern, true, sequencer.isPlay(), cur.v, seqNowMs()));
 }
 
 float seqPlinkyCpu() { return engine.getPlinkyCpuPercent(); }
@@ -170,10 +258,16 @@ void seqPlinkyUpdate()
             engine.applyPlinkySends();
         }
     }
+    {   // plan 012: the playing (or shown) pattern changed on any path (stock switch, song, scene, queue, follow action): morph to its snapshot
+        Params cur = current();
+        const uint32_t now = seqNowMs();
+        applyMask(cur.v, s_ctl.onPattern(shownPattern(), sequencer.isPlay(), cur.v, now));
+        applyMask(cur.v, s_ctl.tick(cur.v, now));
+    }
     // never ask for a write while the transport plays: the dirty flag waits for the stop
     if (!s_newerFile && !s_wsWritePending && s_dirty.take(sequencer.isPlay()))
     {
-        if (current().hash() != s_savedHash)
+        if (stateHash(current()) != s_savedHash)
         {
             s_hadFile = true;
             newFileManager.setProjectStructChanged();
@@ -188,17 +282,22 @@ void seqPlinkyLoadWorkspace()
     s_hadFile = false;
     s_loadedValid = false;
     s_newerFile = false;
+    s_ctl.store.clear();
+    s_ctl.halfSec = plinkymorph::kHalfSecDefault;
+    s_ctl.resync(); // the next main loop pass applies the snapshot of the shown pattern at once (no morph)
     if (seqsidecar::exists(kWorkspaceFile))
     {
-        size_t n = seqsidecar::readFile(kWorkspaceFile, seqsidecar::ioBuffer(), seqsidecar::ioCapacity());
+        size_t n = seqsidecar::readFile(kWorkspaceFile, s_fbuf, sizeof(s_fbuf));
         bool newer = false;
-        if (n && p.load(seqsidecar::ioBuffer(), n, &newer))
+        if (n && plinkymorph::loadFile(s_fbuf, n, p, s_ctl.store, s_ctl.halfSec, &newer))
             s_hadFile = true;
         else
         {
             p = Params(); // short, corrupt or newer file: defaults, the file itself is left alone
-            s_newerFile = newer;
+            s_ctl.store.clear();
+            s_ctl.halfSec = plinkymorph::kHalfSecDefault;
         }
+        s_newerFile = newer;
         s_loadedValid = true;
     }
     s_loadedId = seqlogic::projectId(newFileManager.getCurrentProjectPath(), newFileManager.getCurrentProjectName());
@@ -206,7 +305,7 @@ void seqPlinkyLoadWorkspace()
     if (p.v[P_CHANNEL] == 0)
         p.v[P_CHANNEL] = paramInfo(P_CHANNEL).def; // v0.3.2: the PolySynth instrument always exists (a v0.3 file with the voice off: MIDI instrument 16)
     apply(p); // a file of v0.3 / v0.3.1 keeps its claimed channel: that MIDI instrument is the PolySynth instrument
-    s_savedHash = p.hash();
+    s_savedHash = stateHash(p);
     s_wsWritePending = false;
     s_dirty.dirty = false;
 }
@@ -232,7 +331,8 @@ void seqPlinkySaveProject(const char* path, const char* name)
     char file[PATCH_SIZE];
     seqsidecar::projectFilePath(file, sizeof(file), path, name, kFileName);
     uint32_t id = seqlogic::projectId(path, name);
-    switch (seqlogic::sidecarAction(s_hadFile || !current().isDefault(), s_loadedValid && s_loadedId == id))
+    switch (seqlogic::sidecarAction(s_hadFile || !current().isDefault() || plinkymorph::needsTrailer(s_ctl.store, s_ctl.halfSec),
+                                    s_loadedValid && s_loadedId == id))
     {
         case seqlogic::SIDE_WRITE:
             if (writeValues(file))

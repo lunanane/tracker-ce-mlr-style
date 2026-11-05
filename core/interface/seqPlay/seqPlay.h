@@ -9,6 +9,7 @@
 
 #include "displayControls.h"
 #include "seqPlayLogic.h"
+#include "seqNotesViewLogic.h"
 #include "seqPlinkyUiLogic.h"
 #include "seqRecLogic.h"
 
@@ -37,6 +38,7 @@ struct SeqPlayViewData
     seqplay::HrSnap hr = {}; // LEGEND (HYPER_RASP types): title, help and cells reported by the script
     uint8_t edge = 0;  // 0 none; 1 / 2: the selected track is on the higher / lower strip page than the one shown (edge marker)
     uint8_t edgeTrack = 0; // that track's number 1..16
+    seqnotes::Band notes;  // HIDDEN mode: the notes the selected track's sequencer sounds (v0.3.3)
 };
 
 // One custom control for both temporary overlays (type list and pad legend); drawn on rows 12-15 of the pattern view.
@@ -105,6 +107,7 @@ class SeqPlayOverlay
     void plinkyDefault();
     void plinkyClose();
     bool editKey(uint8_t button, uint8_t state);
+    bool paramsKey(uint8_t state);
     void borrowEdit();
     void returnEdit();
 
@@ -131,8 +134,12 @@ class SeqPlayOverlay
     seqplay::EditKeys keys_;       // v0.3.2: stock editing keys (Note / Instr / FX1 / FX2 / Copy / Insert / Delete)
     bool editBorrowed_ = false;    // the stock edit mode is on for a held editing key (Rec is the take key in Play mode)
     bool plinkyOpen_ = false;      // the Plinky parameter overlay (plan 010 B)
+    bool shiftSeen_ = false;       // Shift was down at the last pass (it closes an open type list)
+    bool paramsTaken_ = false;     // the Instrument Parameters press was ours (its hold / release are too)
     seqplinky::Cursor plinkyCur_;
     uint32_t plinkyTime_ = 0;
+    uint32_t notesTime_ = 0;
+    seqnotes::Band notesBand_;
     char ownerMsg_[24];
     char line1_[8][12];
     char line2_[8][12];

@@ -48,9 +48,10 @@ C and, while the range is <= 24 semitones, at the natural notes. Envelope curve:
 0x00E8BE, Instrument 0xFEF749, FX1 0xBB58F1, FX2 0x57F1FF = the stock theme pattern text colours (`patternTrackerColors`); the
 envelope line is the same colour mixed 50 % into the background. Display list (host measured): 4 full voices over a wide range
 2.6 KB, worst on / off pattern 2.3 KB (limit 4 KB). Refresh <= 25 fps, only while visible, nothing runs when hidden.
-Toggle: Play-mode overlay: **FX2** while the PolySynth parameter overlay is open (title: "PolySynth T<n> CPU .. pk ..  FX2: pitch view";
-to keep the overlay display-list test at <= 3600 B the long hint line now says "Del: reset" instead of "Default: reset"); instrument
-page: page 3/3, screen button 7 (the formerly empty place) is "Pitch view" / "Params". Any other screen button also returns.
+Toggle: Play-mode overlay: **FX2** while the PolySynth parameter overlay is open (hint line "Jog edit, Shift fine, Del reset, Instr
+close, FX2 pitch"; to keep the overlay display-list test at 3600 B the overlay title lost the peak CPU, "PolySynth T<n> CPU ..%"); instrument
+page: after v0.3.3 (Morph at page 3 place 7) all places of pages 1-3 are used, so there is a **page 4/4** reached with Next whose place 2 is
+"Pitch view" / "Params" (other places empty). Any other screen button also returns.
 
 **M amplitude view.** `AudioEffectLimiter::tapPeak` (after the limiter, i.e. the digital output before the codec volume): one pass of
 `abs` over the 128 output samples per channel, only while `setPeakTap(true)`; `takePeak()` exchanges and clears the maximum.

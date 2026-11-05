@@ -3,6 +3,7 @@
 // the whole parameter space, silence / idle behaviour (no denormals), voice stealing, parameter smoothing and note changes without
 // clicks, the anti-aliasing of the saw, the event queue, and a cost measurement (printed, not asserted).
 #include "plinky_voice.h"
+#include "seqPlinkyMorphLogic.h"
 #include <chrono>
 #include <math.h>
 #include <stdio.h>
@@ -677,6 +678,341 @@ static double nsPerVoiceSample(int voices, int width, int shape, int reps)
     return ns / ((double)reps * kBlock * voices);
 }
 
+// ---------------------------------------------------------------- plan 012: snapshots per pattern and the timed morph
+using namespace plinkymorph;
+
+static void fill(uint8_t* v, int cutoff, int reso, int voices = 4, int interval = 12, int lfoDest = 0)
+{
+    Params p;
+    memcpy(v, p.v, P_COUNT);
+    v[P_CUTOFF] = (uint8_t)cutoff;
+    v[P_RESO] = (uint8_t)reso;
+    v[P_VOICES] = (uint8_t)voices;
+    v[P_INTERVAL] = (uint8_t)interval;
+    v[P_LFO_DEST] = (uint8_t)lfoDest;
+}
+
+static void test_morph_math()
+{
+    uint8_t cur[P_COUNT], tgt[P_COUNT];
+    fill(cur, 0, 100);
+    fill(tgt, 100, 0);
+    Morph m;
+    // endpoints: at the start the values are the current ones, after the time exactly the target ones
+    uint32_t t0 = 5000;
+    CHECK(m.begin(cur, tgt, 7, t0, 6000) == 0 && m.running); // nothing is stepped here: all continuous
+    CHECK(cur[P_CUTOFF] == 0 && cur[P_RESO] == 100);
+    CHECK(m.step(cur, t0) == 0 && cur[P_CUTOFF] == 0);
+    // linear: every 10 % of the time moves 10 % of the way (rounded)
+    for (int k = 1; k <= 10; k++)
+    {
+        m.step(cur, t0 + 600u * k - (k == 10 ? 0 : 0));
+        CHECK(cur[P_CUTOFF] == 10 * k);
+        CHECK(cur[P_RESO] == 100 - 10 * k);
+    }
+    CHECK(!m.running); // done at the last step
+    CHECK(m.step(cur, t0 + 7000) == 0 && cur[P_CUTOFF] == 100 && cur[P_RESO] == 0);
+    // monotonic, no overshoot, whole run in 5 ms control ticks
+    fill(cur, 20, 90);
+    fill(tgt, 80, 10);
+    Morph n;
+    n.begin(cur, tgt, 3, 0, 6000);
+    int lastC = cur[P_CUTOFF], lastR = cur[P_RESO];
+    for (uint32_t t = 5; t <= 6000; t += 5)
+    {
+        n.step(cur, t);
+        CHECK(cur[P_CUTOFF] >= lastC && cur[P_CUTOFF] <= 80);
+        CHECK(cur[P_RESO] <= lastR && cur[P_RESO] >= 10);
+        lastC = cur[P_CUTOFF];
+        lastR = cur[P_RESO];
+    }
+    CHECK(cur[P_CUTOFF] == 80 && cur[P_RESO] == 10 && !n.running);
+    CHECK(lastC == 80);
+    // time 0 = jump: everything at once, nothing left running
+    fill(cur, 0, 100);
+    fill(tgt, 100, 0);
+    Morph z;
+    const uint32_t ch = z.begin(cur, tgt, 2, 100, 0);
+    CHECK(!z.running && cur[P_CUTOFF] == 100 && cur[P_RESO] == 0 && (ch & (1u << P_CUTOFF)) && (ch & (1u << P_RESO)));
+    // stepped parameters switch at the start, continuous ones move
+    fill(cur, 0, 50, 4, 12, 0);
+    fill(tgt, 100, 50, 2, 0, 2);
+    Morph s;
+    const uint32_t cs = s.begin(cur, tgt, 2, 0, 6000);
+    CHECK(cur[P_VOICES] == 2 && cur[P_INTERVAL] == 0 && cur[P_LFO_DEST] == 2 && cur[P_CUTOFF] == 0);
+    CHECK((cs & (1u << P_VOICES)) && (cs & (1u << P_INTERVAL)) && (cs & (1u << P_LFO_DEST)) && !(cs & (1u << P_CUTOFF)));
+    s.step(cur, 3000);
+    CHECK(cur[P_CUTOFF] == 50 && cur[P_VOICES] == 2);
+    // the channel never takes part
+    fill(cur, 0, 50);
+    fill(tgt, 100, 50);
+    tgt[P_CHANNEL] = 3;
+    Morph c;
+    c.begin(cur, tgt, 2, 0, 1000);
+    c.step(cur, 5000);
+    CHECK(cur[P_CHANNEL] == 16);
+    // identical target: nothing runs
+    fill(cur, 40, 40);
+    fill(tgt, 40, 40);
+    Morph e;
+    e.begin(cur, tgt, 2, 0, 6000);
+    CHECK(!e.running);
+    // a wrapping millisecond clock
+    fill(cur, 0, 50);
+    fill(tgt, 100, 50);
+    Morph w;
+    w.begin(cur, tgt, 2, 0xFFFFFE00u, 1000);
+    w.step(cur, 0xFFFFFE00u + 500u);
+    CHECK(cur[P_CUTOFF] == 50);
+    CHECK(w.remainMs(0xFFFFFE00u + 500u) == 500);
+}
+
+static void test_morph_interrupt()
+{
+    // another change in the middle: the new morph starts from the CURRENT values, over the full time again
+    uint8_t cur[P_COUNT], a[P_COUNT], b[P_COUNT];
+    fill(cur, 0, 50);
+    fill(a, 100, 50);
+    fill(b, 20, 50);
+    Morph m;
+    m.begin(cur, a, 1, 0, 6000);
+    m.step(cur, 3000);
+    CHECK(cur[P_CUTOFF] == 50);
+    m.begin(cur, b, 2, 3000, 6000);
+    CHECK(cur[P_CUTOFF] == 50 && m.running && m.pattern == 2);
+    m.step(cur, 6000); // half way: 50 -> 20 is 35
+    CHECK(cur[P_CUTOFF] == 35);
+    m.step(cur, 9000);
+    CHECK(cur[P_CUTOFF] == 20 && !m.running);
+    // hand edit: the parameter leaves the morph, the others go on
+    fill(cur, 0, 100);
+    fill(a, 100, 0);
+    Morph h;
+    h.begin(cur, a, 1, 0, 6000);
+    h.step(cur, 1500);
+    CHECK(cur[P_CUTOFF] == 25 && cur[P_RESO] == 75);
+    cur[P_CUTOFF] = 60; // the hand
+    h.hold(P_CUTOFF);
+    h.step(cur, 3000);
+    CHECK(cur[P_CUTOFF] == 60 && cur[P_RESO] == 50);
+    h.step(cur, 6000);
+    CHECK(cur[P_CUTOFF] == 60 && cur[P_RESO] == 0 && !h.running);
+    // a held parameter is free again with the next morph
+    Morph h2 = h;
+    uint8_t t2[P_COUNT];
+    fill(t2, 10, 0);
+    h2.begin(cur, t2, 3, 10000, 1000);
+    h2.step(cur, 11000);
+    CHECK(cur[P_CUTOFF] == 10);
+}
+
+static void test_inherit_and_controller()
+{
+    Controller c;
+    uint8_t v[P_COUNT], s5[P_COUNT], s9[P_COUNT];
+    Params base;
+    memcpy(v, base.v, P_COUNT);
+    fill(s5, 80, 10);
+    fill(s9, 10, 90);
+    c.store.set(5, s5);
+    c.store.set(9, s9);
+    CHECK(c.store.has(5) && c.store.has(9) && !c.store.has(6) && !c.store.has(0) && c.store.count() == 2);
+    // the first pass after a load applies the shown pattern's snapshot at once
+    CHECK(c.onPattern(5, true, v, 1000) != 0 && v[P_CUTOFF] == 80 && !c.morph.running);
+    // same pattern: nothing
+    CHECK(c.onPattern(5, true, v, 1100) == 0);
+    // a pattern without a snapshot inherits: nothing changes, no morph
+    CHECK(c.onPattern(6, true, v, 2000) == 0 && v[P_CUTOFF] == 80 && !c.morph.running);
+    // a pattern with a snapshot while playing: morph over the project time (default 6 s)
+    CHECK(c.halfSec == 12 && c.durMs() == 6000);
+    CHECK(c.onPattern(9, true, v, 3000) == 0 && c.morph.running && c.morph.pattern == 9);
+    c.tick(v, 3000 + 3000);
+    CHECK(v[P_CUTOFF] == 45 && v[P_RESO] == 50);
+    c.tick(v, 3000 + 6000);
+    CHECK(v[P_CUTOFF] == 10 && v[P_RESO] == 90 && !c.morph.running);
+    // stopped: the shown pattern's sound at once
+    CHECK(c.onPattern(5, false, v, 20000) != 0 && v[P_CUTOFF] == 80 && !c.morph.running);
+    // morph time 0 = jump while playing
+    c.halfSec = 0;
+    c.onPattern(9, true, v, 30000);
+    CHECK(v[P_CUTOFF] == 10 && !c.morph.running);
+    // 30 s
+    c.halfSec = kHalfSecMax;
+    CHECK(c.durMs() == 30000);
+    c.onPattern(5, true, v, 40000);
+    c.tick(v, 55000);
+    CHECK(v[P_CUTOFF] == 45);
+    c.tick(v, 70000);
+    CHECK(v[P_CUTOFF] == 80);
+    // invalid pattern numbers do nothing
+    CHECK(c.onPattern(0, true, v, 0) == 0 && c.onPattern(300, true, v, 0) == 0);
+
+    // edit: the first edit of a pattern without a snapshot makes the current sound the pattern's own
+    Controller d;
+    memcpy(v, base.v, P_COUNT);
+    d.onPattern(3, true, v, 0);
+    v[P_CUTOFF] = 33;
+    CHECK(d.edit(3, P_CUTOFF, 33, v));
+    CHECK(d.store.has(3) && d.store.get(3)[P_CUTOFF] == 33 && d.store.get(3)[P_RESO] == base.v[P_RESO]);
+    CHECK(!d.edit(3, P_CUTOFF, 33, v)); // no change: not dirty
+    CHECK(d.edit(3, P_RESO, 77, v) && d.store.get(3)[P_RESO] == 77 && d.store.get(3)[P_CUTOFF] == 33);
+    CHECK(!d.edit(0, P_RESO, 5, v) && !d.edit(3, P_CHANNEL, 5, v));
+    // another pattern's snapshot is not touched
+    CHECK(!d.store.has(4));
+    // an edit during a morph: out of the morph, in the snapshot of the pattern that plays; a new snapshot starts from the morph's target
+    Controller e;
+    memcpy(v, base.v, P_COUNT);
+    e.store.set(1, s5);
+    e.onPattern(2, true, v, 0);
+    e.onPattern(1, true, v, 100);   // morph 1: towards s5
+    e.tick(v, 3100);
+    CHECK(v[P_CUTOFF] > base.v[P_CUTOFF] && v[P_CUTOFF] < 80);
+    v[P_CUTOFF] = 5;                  // hand
+    CHECK(e.edit(1, P_CUTOFF, 5, v));
+    e.tick(v, 6100);
+    CHECK(v[P_CUTOFF] == 5 && v[P_RESO] == 10 && e.store.get(1)[P_CUTOFF] == 5);
+    Controller f;
+    memcpy(v, base.v, P_COUNT);
+    f.store.set(7, s9);
+    f.onPattern(8, true, v, 0);
+    f.onPattern(7, true, v, 10); // morph towards s9 while pattern 7 plays; pattern 7 has a snapshot
+    f.tick(v, 3010);
+    f.onPattern(8, true, v, 3010); // 8 inherits: the morph goes on (nothing changes)
+    CHECK(f.morph.running);
+    v[P_NOISE] = 12;
+    CHECK(f.edit(8, P_NOISE, 12, v)); // a first edit on 8 while morphing: the snapshot gets the target values, not the values on the way
+    CHECK(f.store.get(8)[P_CUTOFF] == 10 && f.store.get(8)[P_RESO] == 90 && f.store.get(8)[P_NOISE] == 12);
+
+    // the mark: a snapshot differs from the inherited one (nearest lower snapshot, else the base)
+    Store st;
+    uint8_t x[P_COUNT];
+    fill(x, 70, 20);
+    st.set(2, x);
+    CHECK(st.marks(2) == (1u << P_CUTOFF));       // the base has cutoff 60
+    fill(x, 70, 25);
+    st.set(6, x);
+    CHECK(st.marks(6) == (1u << P_RESO));         // inherits from 2
+    CHECK(st.marks(1) == 0 && st.marks(5) == 0);  // no snapshot: no mark
+    CHECK(!st.differs(6, P_CUTOFF) && st.differs(6, P_RESO));
+    CHECK(clipTarget(true, 12) == 12 && clipTarget(false, 12) == 0 && clipTarget(true, 0) == 0 && clipTarget(true, 256) == 0);
+}
+
+static void test_clip_target()
+{
+    // a clip launch on a PolySynth track morphs to the clip's source pattern snapshot; last launch wins; non-PolySynth tracks do nothing
+    Controller c;
+    uint8_t v[P_COUNT], s4[P_COUNT], s8[P_COUNT];
+    Params base;
+    memcpy(v, base.v, P_COUNT);
+    fill(s4, 90, 20);
+    fill(s8, 10, 20);
+    c.store.set(4, s4);
+    c.store.set(8, s8);
+    c.onPattern(1, true, v, 0);
+    CHECK(c.onClip(4, false, true, v, 100) == 0 && !c.morph.running); // the track does not play the PolySynth
+    CHECK(c.onClip(5, true, true, v, 100) == 0 && !c.morph.running);  // the source pattern has no snapshot: inherits
+    CHECK(c.onClip(4, true, true, v, 100) == 0 && c.morph.running && c.morph.pattern == 4);
+    c.tick(v, 3100);
+    const int mid = v[P_CUTOFF];
+    CHECK(mid > base.v[P_CUTOFF] && mid < 90);
+    c.onClip(8, true, true, v, 3100); // last launch wins, from where the first one is
+    CHECK(c.morph.pattern == 8 && c.morph.running);
+    c.tick(v, 9100);
+    CHECK(v[P_CUTOFF] == 10 && !c.morph.running);
+    // stopped: at once
+    c.onClip(4, true, false, v, 20000);
+    CHECK(v[P_CUTOFF] == 90 && !c.morph.running);
+    // the playing pattern did not change: no second morph from the pattern watcher
+    CHECK(c.onPattern(1, true, v, 20010) == 0);
+}
+
+static void test_morph_file()
+{
+    Params cur;
+    cur.v[P_CUTOFF] = 41;
+    cur.v[P_REVERB] = 25;
+    Store st;
+    uint8_t a[P_COUNT], b[P_COUNT];
+    fill(a, 11, 22, 3, 5, 1);
+    fill(b, 99, 98, 1, 24, 2);
+    st.set(3, a);
+    st.set(255, b);
+    uint8_t buf[kFileMaxAll];
+    size_t n = saveFile(buf, sizeof(buf), cur, st, 20);
+    CHECK(n > (size_t)kFileMax && n <= (size_t)kFileMaxAll);
+    CHECK(n == (size_t)kFileMax + seqsidecar::kOverhead + 2 + 2 * kEntry);
+    // round trip
+    Params base;
+    Store st2;
+    uint8_t half = 0;
+    bool newer = true;
+    CHECK(loadFile(buf, n, base, st2, half, &newer) && !newer);
+    CHECK(base == cur && half == 20 && st2.count() == 2);
+    CHECK(st2.has(3) && st2.has(255) && !st2.has(4));
+    CHECK(memcmp(st2.get(3) + 1, a + 1, P_COUNT - 1) == 0 && memcmp(st2.get(255) + 1, b + 1, P_COUNT - 1) == 0);
+    CHECK(memcmp(st2.base, cur.v, P_COUNT) == 0);
+    // an older mod reads the same file: frame 1 (version 1) first, the trailer is ignored
+    Params old;
+    bool nw = true;
+    CHECK(old.load(buf, n, &nw) && !nw && old == cur);
+    // an older file (frame 1 only) loads as the base, no snapshots, default time
+    uint8_t obuf[64];
+    size_t on = cur.save(obuf, sizeof(obuf));
+    Params b2;
+    Store st3;
+    half = 99;
+    CHECK(loadFile(obuf, on, b2, st3, half, &newer) && b2 == cur && st3.count() == 0 && half == kHalfSecDefault && !newer);
+    // nothing to say: the file is exactly the old one
+    Store empty;
+    CHECK(saveFile(buf, sizeof(buf), cur, empty, kHalfSecDefault) == on && memcmp(buf, obuf, on) == 0);
+    // only the time differs: a trailer without entries
+    n = saveFile(buf, sizeof(buf), cur, empty, 0);
+    CHECK(n == (size_t)kFileMax + seqsidecar::kOverhead + 2);
+    CHECK(loadFile(buf, n, b2, st3, half, &newer) && half == 0 && st3.count() == 0);
+    // a bad trailer CRC: the base stays, no snapshots, default time
+    n = saveFile(buf, sizeof(buf), cur, st, 20);
+    buf[kFileMax + 12] ^= 0x5A;
+    CHECK(loadFile(buf, n, b2, st3, half, &newer) && b2 == cur && st3.count() == 0 && half == kHalfSecDefault && !newer);
+    buf[kFileMax + 12] ^= 0x5A;
+    // a truncated file (trailer cut): the old part still loads
+    CHECK(loadFile(buf, n - 7, b2, st3, half, &newer) && st3.count() == 0);
+    // a trailer of a newer version: values load as far as known, the file is left alone
+    buf[kFileMax + 4] = 9;
+    uint16_t crc = seqsidecar::crc16(buf + kFileMax, n - kFileMax - 2);
+    buf[n - 2] = (uint8_t)(crc & 0xFF);
+    buf[n - 1] = (uint8_t)(crc >> 8);
+    newer = false;
+    CHECK(loadFile(buf, n, b2, st3, half, &newer) && newer && st3.count() == 0);
+    // out of range values in an entry fall back to their default; pattern 0 is dropped
+    n = saveFile(buf, sizeof(buf), cur, st, 20);
+    buf[kFileMax + seqsidecar::kHeader + 2 + 1 + (P_VOICES - 1)] = 9;     // entry 0 (pattern 3): voices out of range
+    buf[kFileMax + seqsidecar::kHeader + 2 + kEntry] = 0;                 // entry 1: pattern 0
+    crc = seqsidecar::crc16(buf + kFileMax, n - kFileMax - 2);
+    buf[n - 2] = (uint8_t)(crc & 0xFF);
+    buf[n - 1] = (uint8_t)(crc >> 8);
+    CHECK(loadFile(buf, n, b2, st3, half, &newer) && st3.count() == 1 && st3.get(3)[P_VOICES] == paramInfo(P_VOICES).def);
+    // all 255 patterns: fits the buffer
+    Store full;
+    for (int p = 1; p < 256; p++)
+        full.set(p, a);
+    n = saveFile(buf, sizeof(buf), cur, full, 12);
+    CHECK(n > 0 && n <= sizeof(buf));
+    CHECK(loadFile(buf, n, b2, st3, half, &newer) && st3.count() == 255);
+    CHECK(saveFile(buf, 100, cur, full, 12) == 0); // a buffer too small
+    // texts
+    char t[32];
+    titleText(t, sizeof t, 3200, 12);
+    CHECK(strcmp(t, "Morph 3.2s > P12") == 0);
+    titleText(t, sizeof t, 3150, 255);
+    CHECK(strcmp(t, "Morph 3.2s > P255") == 0);
+    timeText(12, t, sizeof t);
+    CHECK(strcmp(t, "6.0 s") == 0);
+    timeText(0, t, sizeof t);
+    CHECK(strcmp(t, "Jump") == 0);
+    timeText(59, t, sizeof t);
+    CHECK(strcmp(t, "29.5 s") == 0);
+}
+
 static void test_cost()
 {
     printf("  host cost, ns per voice-sample (saw / pulse, stereo / mono):\n");
@@ -703,6 +1039,11 @@ int main()
     test_cc_release_and_short_notes();
     test_determinism_and_levels();
     test_cutoff_brightness_and_lfo();
+    test_morph_math();
+    test_morph_interrupt();
+    test_inherit_and_controller();
+    test_clip_target();
+    test_morph_file();
     test_cost();
     printf("plinky: %d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;

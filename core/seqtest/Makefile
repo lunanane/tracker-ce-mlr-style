@@ -45,9 +45,9 @@ build/seq_fx_tests$(EXE): test_fx.cpp ../source/seqFxDsp.h ../source/seqFxLogic.
 	$(CXX) $(CXXFLAGS) test_fx.cpp -o $@
 
 # plan 009 S: synth voice engine (libs/Audio/PlinkyVoice, header only). -O2: the cost lines of the test are only meaningful optimised
-build/seq_plinky_tests$(EXE): test_plinky.cpp ../libs/Audio/PlinkyVoice/plinky_voice.h ../libs/Audio/PlinkyVoice/plinky_params.h ../source/seqSidecarLogic.h
+build/seq_plinky_tests$(EXE): test_plinky.cpp ../libs/Audio/PlinkyVoice/plinky_voice.h ../libs/Audio/PlinkyVoice/plinky_params.h ../source/seqSidecarLogic.h ../source/seqPlinkyMorphLogic.h
 	mkdir -p build
-	$(CXX) $(CXXFLAGS) -O2 -I../libs/Audio/PlinkyVoice test_plinky.cpp -o $@
+	$(CXX) $(CXXFLAGS) -O2 -I../libs/Audio/PlinkyVoice -I../libs/Audio test_plinky.cpp -o $@
 
 # plan 013: pitch trace (engine ring, follower, layout, display list size), amplitude view, launcher budgets
 build/seq_trace_tests$(EXE): test_trace.cpp ../libs/Audio/PlinkyVoice/plinky_voice.h ../source/seqPitchTraceLogic.h ../source/seqAmpViewLogic.h ../source/seqPalette.h ../source/seqSessionLogic.h

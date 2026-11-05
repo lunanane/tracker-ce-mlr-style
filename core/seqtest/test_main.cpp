@@ -1459,6 +1459,7 @@ int main()
     test_mlr_take_snaps_to_the_grid();
     test_mlr_quantise_off_is_at_once();
     test_mlr_bar_follows_the_pattern();
+    test_live_velocity_matches_recorded();
     test_play_rec_key_flow();
     test_play_rec_idle_take_changes_nothing();
     test_play_rec_wrap_keeps_lap1();
@@ -1475,6 +1476,7 @@ int main()
     test_plinky_sidecar();
     test_plinky_overlay_logic();
     test_plinky_overlay_draw_budget();
+    test_note_band();
     printf("%d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

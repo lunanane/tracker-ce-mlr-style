@@ -119,82 +119,64 @@ static void test_type_list_pending()
     CHECK(!k.open && k.release(0, 0xFF) == -1);
 }
 
+// v0.3.3: the legend gate: a tap on the screen button of the track that is already selected toggles the pad legend
 static void test_legend_gate()
 {
     LegendGate g;
-    CHECK(!g.visible(1000));
-    g.shiftChanged(true, 1000);
-    CHECK(!g.visible(1100)); // a mute gesture is shorter than 250 ms: no flash
-    CHECK(g.visible(1250));
-    // a screen button pressed while Shift is held (a mute) hides it until Shift is released
-    g.screenButton();
-    CHECK(!g.visible(2000));
-    g.shiftChanged(false, 2100);
-    CHECK(!g.visible(2500));
-    g.shiftChanged(true, 3000);
-    CHECK(!g.visible(3100) && g.visible(3300)); // a new hold starts fresh
-    // a screen button without Shift does not block the next hold
-    LegendGate h;
-    h.screenButton();
-    h.shiftChanged(true, 100);
-    CHECK(h.visible(400));
-    // timer wrap
-    LegendGate w;
-    w.shiftChanged(true, 0xFFFFFF00u);
-    CHECK(!w.visible(0xFFFFFFF0u) && w.visible(0x100u));
+    CHECK(!g.visible());
+    // first tap on another track: selected, no legend
+    g.pressed(2, false);
+    g.released(2);
+    CHECK(!g.visible());
+    // second tap on the selected track shows it (at the release), the next one hides it
+    g.pressed(2, true);
+    CHECK(!g.visible()); // not before the release: a press may still become hold + wheel
+    g.released(2);
+    CHECK(g.visible());
+    g.pressed(2, true);
+    g.released(2);
+    CHECK(!g.visible());
+    // a press that turned the wheel never toggles; turning the wheel closes a shown legend
+    g.pressed(2, true);
+    g.wheel();
+    g.released(2);
+    CHECK(!g.visible());
+    g.pressed(2, true);
+    g.released(2);
+    CHECK(g.visible());
+    g.pressed(2, true);
+    g.wheel();
+    CHECK(!g.visible());
+    g.released(2);
+    CHECK(!g.visible());
+    // a tap on another track closes it
+    g.pressed(2, true);
+    g.released(2);
+    CHECK(g.visible());
+    g.pressed(5, false);
+    CHECK(!g.visible());
+    g.released(5);
+    CHECK(!g.visible());
+    // another button's release does not toggle; close() (track change, leave, synth overlay, popup) ends it and forgets the press
+    g.pressed(1, true);
+    g.released(4);
+    CHECK(!g.visible());
+    g.released(1);
+    CHECK(g.visible());
+    g.close();
+    CHECK(!g.visible());
+    g.pressed(1, true);
+    g.close();
+    g.released(1);
+    CHECK(!g.visible());
 }
 
 static void test_screen_hold()
 {
     using H = ScreenHold;
     H h;
-    // a plain press is taken; hold events of it are taken; the release is taken
-    CHECK(h.event(2, H::PRESS, true, false) == H::TAKE_PRESS);
-    CHECK(h.mask == 4 && h.wheelButton() == 2);
-    CHECK(h.event(2, H::HOLD, true, false) == H::TAKE_HOLD);
-    CHECK(h.event(2, H::RELEASE, true, false) == H::TAKE_RELEASE);
-    CHECK(h.mask == 0 && h.wheelButton() == -1);
-    // Shift + screen button = the stock mute button: passes, press and release
-    CHECK(h.event(3, H::PRESS, true, true) == H::PASS);
-    CHECK(h.mask == 0);
-    CHECK(h.event(3, H::RELEASE, true, false) == H::PASS);
-    // a press when not routable (a popup is open) passes
-    CHECK(h.event(1, H::PRESS, false, false) == H::PASS);
-    // hold / release without a taken press pass (the stock code decides)
-    CHECK(h.event(1, H::HOLD, true, false) == H::PASS);
-    CHECK(h.event(1, H::RELEASE, true, false) == H::PASS);
-    // a taken press stays ours when Shift or a popup comes up before the release (no half gesture for the stock code)
-    CHECK(h.event(5, H::PRESS, true, false) == H::TAKE_PRESS);
-    CHECK(h.event(5, H::RELEASE, false, true) == H::TAKE_RELEASE);
-    // two buttons: the wheel goes to the open list's button, else the lowest held
-    CHECK(h.event(6, H::PRESS, true, false) == H::TAKE_PRESS);
-    CHECK(h.event(4, H::PRESS, true, false) == H::TAKE_PRESS);
-    CHECK(h.wheelButton() == 4);
-    h.listBtn = 6;
-    CHECK(h.wheelButton() == 6);
-    // the release of the list's button keeps listBtn for the owner (it must know it was the list's) but the wheel no longer uses it
-    CHECK(h.event(6, H::RELEASE, true, false) == H::TAKE_RELEASE);
-    CHECK(h.listBtn == 6 && h.wheelButton() == 4);
-    h.clear();
-    CHECK(h.mask == 0 && h.listBtn == -1);
     // button index is masked to 0..7
     CHECK(h.event(9, H::PRESS, true, false) == H::TAKE_PRESS && h.mask == 2);
-}
-
-static void test_shift_mute_blocks_legend()
-{
-    // M-1: Shift held, a screen button pressed = a stock mute (PASS from ScreenHold); the overlay still has to tell the gate
-    ScreenHold h;
-    LegendGate g;
-    g.shiftChanged(true, 1000);
-    bool shift = true;
-    // the overlay's rule: any screen-button press while Shift is held blocks the legend
-    if (h.event(2, ScreenHold::PRESS, true, shift) == ScreenHold::PASS) g.screenButton();
-    CHECK(h.mask == 0);
-    CHECK(!g.visible(1400));
-    g.shiftChanged(false, 1500);
-    g.shiftChanged(true, 2000);
-    CHECK(g.visible(2300)); // a fresh Shift hold without a button shows it again
 }
 
 // v0.3.2: the router's rules for the stock editing keys (Note / Instr / FX1 / FX2 / Copy / Insert / Delete) in Play mode
@@ -248,9 +230,10 @@ static void test_edit_keys()
     CHECK(!e.editWanted() && e.taken == 0);
 }
 
-// v0.3.2: the Shift legend on the key / tick flow of the hardware: Shift down, ticks of the main loop (update() every ~5 ms), screen
-// buttons (the stock mute buttons while Shift is down) and the view the overlay control gets.
-struct ShiftFlow
+// v0.3.3: the legend on the key / tick flow of the hardware: a screen button down, the hold events of the keys driver (they come
+// repeatedly, the gaps shrink: 333, 233, 143 ms ...), ticks of the main loop (update() every ~5 ms), the wheel, the release and the
+// view the overlay control gets. The press / hold / release handling mirrors SeqPlayOverlay::screenButton / button / jog.
+struct HoldFlow
 {
     LegendGate gate;
     ScreenHold hold;
@@ -258,81 +241,161 @@ struct ShiftFlow
     bool listOpen = false;
     bool synthOpen = false;
     uint8_t type = seqlogic::TYPE_MONO;
+    uint8_t selected = 0; // selected track = strip slot (strip page 1)
     uint32_t now = 0;
+    uint32_t nextHold = 0, gap = 333;
+    int8_t down = -1;
     uint8_t view = 0;
     void tick(uint32_t ms)
     {
         for (uint32_t i = 0; i < ms; i += 5)
         {
             now += 5;
-            gate.shiftChanged(shift, now); // update(): sampled from the key state
-            view = viewKind(synthOpen, true, listOpen, gate.visible(now), type == seqlogic::TYPE_OFF);
+            if (down >= 0 && now >= nextHold) // the keys driver's hold event
+            {
+                button((uint8_t)down, ScreenHold::HOLD);
+                nextHold = now + gap;
+                gap = gap > 143 ? (gap == 333 ? 233 : 143) : 143;
+            }
+            view = viewKind(synthOpen, true, listOpen, gate.visible(), type == seqlogic::TYPE_OFF);
         }
     }
-    void shiftKey(bool down) { shift = down; }
-    void screenButton(uint8_t b, ScreenHold::Kind kind)
+    void button(uint8_t b, ScreenHold::Kind kind)
     {
-        // the overlay's button(): a press with Shift down that the overlay does not take is a stock mute press: no legend
-        if (kind == ScreenHold::PRESS && shift) gate.screenButton();
-        hold.event(b, kind, true, shift);
+        switch (hold.event(b, kind, true, shift))
+        {
+            case ScreenHold::TAKE_PRESS:
+                gate.pressed(b, b == selected);
+                listOpen = false;
+                selected = b;
+                break;
+            case ScreenHold::TAKE_RELEASE: gate.released(b); listOpen = false; break;
+            default: break; // TAKE_HOLD: nothing; PASS: the stock mute button
+        }
     }
+    void press(uint8_t b)
+    {
+        button(b, ScreenHold::PRESS);
+        if (hold.mask & (1u << b))
+        {
+            down = (int8_t)b;
+            nextHold = now + 333;
+            gap = 333;
+        }
+    }
+    void release(uint8_t b)
+    {
+        button(b, ScreenHold::RELEASE);
+        down = -1;
+    }
+    void tap(uint8_t b, uint32_t heldMs)
+    {
+        press(b);
+        tick(heldMs);
+        release(b);
+        tick(10);
+    }
+    void wheel() { gate.wheel(); listOpen = true; } // jog(): the legend gives way to the type list
 };
 
-static void test_shift_legend_flow()
+static void test_hold_legend_flow()
 {
-    // hold Shift 400 ms with a sequencer track selected, no screen button: the legend is there after 250 ms and not before
-    ShiftFlow f;
+    HoldFlow f;
     f.tick(1000);
-    f.shiftKey(true);
-    f.tick(240);
+    // first tap on another track: selects it, no legend, however long the finger stays (the hold events change nothing)
+    f.tap(2, 80);
+    CHECK(f.view == 0 && f.selected == 2);
+    f.tap(2, 1500);
+    CHECK(f.view == 2); // second tap on the selected track: the legend
+    f.tick(2000);
+    CHECK(f.view == 2); // it stays until it is toggled off
+    f.tap(2, 120);
     CHECK(f.view == 0);
-    f.tick(20);
-    CHECK(f.view == 2);
-    f.tick(500);
-    CHECK(f.view == 2);
-    f.shiftKey(false);
-    f.tick(10);
-    CHECK(f.view == 0);
-    // a quick tap (the stock mute gesture) never shows it
-    f.shiftKey(true);
-    f.tick(150);
-    f.shiftKey(false);
-    f.tick(400);
-    CHECK(f.view == 0);
-    // Shift + screen button (mute) hides it until Shift is released; the next hold shows it again
-    f.shiftKey(true);
-    f.tick(300);
-    CHECK(f.view == 2);
-    f.screenButton(3, ScreenHold::PRESS);
-    f.tick(10);
-    CHECK(f.view == 0);
-    f.screenButton(3, ScreenHold::RELEASE);
-    f.tick(400);
-    CHECK(f.view == 0);
-    f.shiftKey(false);
-    f.tick(10);
-    f.shiftKey(true);
-    f.tick(300);
-    CHECK(f.view == 2);
-    CHECK(f.hold.mask == 0); // the mute presses were not the overlay's
-    // an Off track has no legend; the type list and the synth overlay win over it
-    f.type = seqlogic::TYPE_OFF;
-    f.tick(10);
-    CHECK(f.view == 0);
-    f.type = seqlogic::TYPE_CHORDARP;
-    f.listOpen = true;
+    // hold + wheel on the selected track: the type list; this press never toggles the legend
+    f.press(2);
+    f.tick(200);
+    f.wheel();
     f.tick(10);
     CHECK(f.view == 1);
-    f.listOpen = false;
+    f.tick(1000);
+    f.release(2);
+    f.tick(10);
+    CHECK(f.view == 0);
+    // legend shown, then hold + wheel: the legend closes, the list opens
+    f.tap(2, 100);
+    CHECK(f.view == 2);
+    f.press(2);
+    f.tick(100);
+    f.wheel();
+    f.tick(10);
+    CHECK(f.view == 1);
+    f.release(2);
+    f.tick(10);
+    CHECK(f.view == 0);
+    // legend shown, a tap on another track closes it (and selects that track)
+    f.tap(2, 100);
+    CHECK(f.view == 2);
+    f.tap(6, 100);
+    CHECK(f.view == 0 && f.selected == 6);
+    // Shift + screen button is the stock mute: no selection change, no legend
+    f.shift = true;
+    f.tap(6, 100);
+    f.tap(6, 100);
+    CHECK(f.view == 0 && f.hold.mask == 0);
+    f.shift = false;
+    // an Off track has no legend; the synth overlay wins over it
+    f.type = seqlogic::TYPE_OFF;
+    f.tap(6, 100);
+    CHECK(f.view == 0);
+    f.tap(6, 100);
+    f.type = seqlogic::TYPE_CHORDARP;
+    f.tick(10);
     f.synthOpen = true;
+    f.gate.close(); // plinkyToggle(): the legend does not stay under the overlay
     f.tick(10);
     CHECK(f.view == 3);
-    // the legend panel is above the bottom label row (stock mute labels start at y 424; the panel ends at 424)
-    CHECK(334 - 38 + 4 * 22 + 40 <= 424);
+    f.synthOpen = false;
+    f.tick(10);
+    CHECK(f.view == 0);
+    // the legend panel (now with the close hint line above the captions) stays above the bottom label row (y 424) and below the title bar
+    CHECK(334 - 52 >= 30 && 334 - 52 + 4 * 22 + 54 <= 424);
+}
+
+// v0.3.3: the Instrument Parameters key in Play mode and the jump to the next PolySynth track
+static void test_params_key()
+{
+    // a popup of the editor owns the inputs: the key is stock
+    CHECK(paramsKey(false, false, true) == PK_STOCK && paramsKey(false, true, false) == PK_STOCK && paramsKey(false, true, true) == PK_STOCK);
+    // plain key: PolySynth track = the overlay, any other instrument = the stock page (as today)
+    CHECK(paramsKey(true, false, true) == PK_TOGGLE);
+    CHECK(paramsKey(true, false, false) == PK_STOCK);
+    // Shift + key always jumps to the next PolySynth track (also from a PolySynth track), no stock page
+    CHECK(paramsKey(true, true, false) == PK_JUMP);
+    CHECK(paramsKey(true, true, true) == PK_JUMP);
+    // jump / cycle selection: the next PolySynth track after the current one, wrapping; none = -1
+    CHECK(nextSynthTrack(0, 3) == -1);
+    const uint16_t m = (uint16_t)((1u << 2) | (1u << 9) | (1u << 15));
+    CHECK(nextSynthTrack(m, 0) == 2);
+    CHECK(nextSynthTrack(m, 2) == 9); // repeated presses cycle: 2 -> 9 -> 15 -> 2
+    CHECK(nextSynthTrack(m, 9) == 15);
+    CHECK(nextSynthTrack(m, 15) == 2);
+    CHECK(nextSynthTrack(m, 14) == 15);
+    CHECK(nextSynthTrack((uint16_t)(1u << 5), 5) == 5); // the only one: itself (the overlay stays / opens)
+    CHECK(nextSynthTrack((uint16_t)(1u << 5), 6) == 5);
+    // the whole cycle visits every PolySynth track once
+    int t = 0, seen = 0;
+    for (int i = 0; i < 3; i++)
+    {
+        t = nextSynthTrack(m, (uint8_t)t);
+        seen |= 1 << t;
+    }
+    CHECK(seen == m);
+    // the track jumped to is on the strip page its screen button would be
+    CHECK(stripPageOfTrack(9) == 1 && stripPageOfTrack(2) == 0);
 }
 
 // v0.3.2: the strip hint line
-static void test_strip_shift_hint()
+static void test_strip_tap_hint()
 {
     char b[16];
     StripCell c;
@@ -340,10 +403,10 @@ static void test_strip_shift_hint()
     c.selected = true;
     c.shiftHint = true;
     stripLine2(b, sizeof b, c);
-    CHECK(strcmp(b, "Shift: pads") == 0 && strlen(b) <= 11);
+    CHECK(strcmp(b, "tap: help") == 0 && strlen(b) <= 11);
     c.type = seqlogic::TYPE_PLINKY;
     stripLine2(b, sizeof b, c);
-    CHECK(strcmp(b, "Shift: pads") == 0);
+    CHECK(strcmp(b, "tap: help") == 0);
     // state and messages win over the hint; an Off track has none
     c.takenOver = true;
     stripLine2(b, sizeof b, c);
@@ -365,13 +428,13 @@ static void test_strip_shift_hint()
     c.synthHint = true;
     c.alt = false;
     stripLine2(b, sizeof b, c);
-    CHECK(strcmp(b, "Shift: pads") == 0);
+    CHECK(strcmp(b, "tap: help") == 0);
     c.alt = true;
     stripLine2(b, sizeof b, c);
     CHECK(strcmp(b, "Hold+Instr") == 0);
     c.synthHint = false;
     stripLine2(b, sizeof b, c);
-    CHECK(strcmp(b, "Shift: pads") == 0); // no synth: nothing to open
+    CHECK(strcmp(b, "tap: help") == 0); // no synth: nothing to open
     // the Strings legend is a pad interface for the track's own instrument
     LegendState st;
     st.type = seqlogic::TYPE_PLINKY;
@@ -716,10 +779,10 @@ int main()
     test_type_list_pending();
     test_legend_gate();
     test_screen_hold();
-    test_shift_mute_blocks_legend();
     test_edit_keys();
-    test_shift_legend_flow();
-    test_strip_shift_hint();
+    test_hold_legend_flow();
+    test_params_key();
+    test_strip_tap_hint();
     test_rec_hints_and_priority();
     test_legend_state();
     test_edge_side();

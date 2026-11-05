@@ -378,15 +378,17 @@ class cInstrumentEditor : public ModuleBase
     bool plinkyActive() const;
     void showPlinkyParams();
     void showPlinkyValue(uint8_t place);
+    void plinkyPlaceName(uint8_t place);
     void showPlinkyCpu(bool force);
     void plinkyChange(int d);
     void plinkyDefault();
     bool plinkyButton(uint8_t button, uint8_t state); // true = consumed
     void plinkyRefresh();                             // main loop: CPU in the title every 50 ms
-    uint8_t plinkyPage = 1;                           // 1 .. 3
+    uint8_t plinkyPage = 1;                           // 1 .. 4 (4 = Pitch view)
     bool plinkyPitchView = false;                     // plan 013 V: page 3 place 7 "Pitch view" / "Params"
     uint32_t plinkyLastMs = 0;
     char plinkyVal[8][12];
+    char plinkyName[8][12];
     char plinkyTitle[64];
 #endif
 

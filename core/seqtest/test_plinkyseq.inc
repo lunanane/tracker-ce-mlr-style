@@ -335,7 +335,7 @@ static void test_plinky_overlay_logic()
     using namespace seqplinky;
     using namespace plinkyvoice;
     // every voice parameter except the channel is in exactly one cell
-    int seen[P_COUNT] = {};
+    int seen[kUiParams] = {};
     int cells = 0;
     for (int s = 0; s < kSections; s++)
     {
@@ -346,8 +346,8 @@ static void test_plinky_overlay_logic()
             cells++;
         }
     }
-    for (int p = 0; p < P_COUNT; p++) CHECK(seen[p] == (p == P_CHANNEL ? 0 : 1));
-    CHECK(cells == P_COUNT - 1);
+    for (int p = 0; p < kUiParams; p++) CHECK(seen[p] == (p == P_CHANNEL ? 0 : 1)); // plan 012: the morph time is the one cell beyond the engine's
+    CHECK(cells == P_COUNT); // 20 voice parameters (no channel) + the morph time
     CHECK(strcmp(section(0).name, "Oscillator") == 0 && strcmp(section(4).name, "Voice") == 0);
     // navigation: Left / Right inside the section (no wrap), Up / Down between sections (no wrap, column kept as far as it exists)
     Cursor c;
@@ -359,7 +359,8 @@ static void test_plinky_overlay_logic()
     CHECK(!c.vertical(-1));
     for (int i = 0; i < 10; i++) c.vertical(1);
     CHECK(c.sec == 4 && !c.vertical(1));
-    CHECK(c.horizontal(1) && c.horizontal(1) && c.horizontal(1) && c.horizontal(1) && c.horizontal(1) && !c.horizontal(1) && c.param() == P_DELAY);
+    CHECK(c.horizontal(1) && c.horizontal(1) && c.horizontal(1) && c.horizontal(1) && c.horizontal(1) && c.param() == P_DELAY);
+    CHECK(c.horizontal(1) && c.param() == P_MORPH && !c.horizontal(1)); // seven cells in the Voice row
     CHECK(c.vertical(-1) && c.sec == 3 && c.idx == 2 && c.param() == P_LFO_DEST);
     // every cursor position resolves to a valid parameter
     for (int s = 0; s < kSections; s++)
@@ -368,7 +369,7 @@ static void test_plinky_overlay_logic()
             Cursor q;
             q.sec = (uint8_t)s;
             q.idx = (uint8_t)i;
-            CHECK(q.param() >= 0 && q.param() < P_COUNT);
+            CHECK(q.param() >= 0 && q.param() < kUiParams);
         }
     // jog: coarse 5 on 0..100 parameters, 1 on short ranges, Shift = fine 1, clamped to the range
     CHECK(jogValue(P_CUTOFF, 60, 1, false) == 65 && jogValue(P_CUTOFF, 60, -1, false) == 55 && jogValue(P_CUTOFF, 60, 1, true) == 61);
@@ -392,13 +393,91 @@ static void test_plinky_overlay_logic()
     CHECK(strcmp(t, "70") == 0);
 }
 
+// v0.3.3: the notes the selected track sounds (note band of Play mode) and the voice row
+static void test_note_band()
+{
+    using namespace seqnotes;
+    uint8_t mask[16];
+    memset(mask, 0, sizeof mask);
+    char t[24];
+    // note names: 60 = C3 (the Tracker's middle C), 0 = C-2, 127 = G8
+    noteName(60, t, sizeof t);
+    CHECK(strcmp(t, "C3") == 0);
+    noteName(63, t, sizeof t);
+    CHECK(strcmp(t, "D#3") == 0);
+    noteName(0, t, sizeof t);
+    CHECK(strcmp(t, "C-2") == 0);
+    noteName(127, t, sizeof t);
+    CHECK(strcmp(t, "G8") == 0);
+    noteName(200, t, sizeof t);
+    CHECK(strcmp(t, "---") == 0);
+    // extraction: pitch classes and the list, low to high
+    CHECK(pitchClasses(mask) == 0);
+    noteList(mask, t, sizeof t);
+    CHECK(t[0] == 0);
+    auto setn = [&](int n) { mask[n >> 3] = (uint8_t)(mask[n >> 3] | (1u << (n & 7))); };
+    setn(67); setn(60); setn(63); setn(72); // G3 C3 D#3 C4
+    CHECK(pitchClasses(mask) == (uint16_t)((1u << 0) | (1u << 3) | (1u << 7))); // C, D#, G (the octave folds)
+    noteList(mask, t, sizeof t);
+    CHECK(strcmp(t, "C3 D#3 G3 C4") == 0 || strcmp(t, "C3 D#3 G3 +1") == 0);
+    CHECK(strlen(t) <= (size_t)kNamesMax - 1);
+    setn(0); setn(127);
+    noteList(mask, t, sizeof t);
+    CHECK(strncmp(t, "C-2 C3", 6) == 0 && strchr(t, '+') != nullptr && strlen(t) <= 14); // the line is capped, the rest counted
+    uint8_t all[16];
+    memset(all, 0xFF, sizeof all);
+    noteList(all, t, sizeof t);
+    CHECK(strcmp(t, "C-2 C#-2 +126") == 0 && pitchClasses(all) == 0xFFF); // 128 notes: two names and the count of the rest
+    // the band: nothing for an Off track; root only when the sequencer has one
+    Band b;
+    fillBand(b, false, mask, 5);
+    CHECK(!b.show && b.pc == 0 && b.names[0] == 0);
+    fillBand(b, true, mask, 7);
+    CHECK(b.show && b.root == 7 && b.pc == pitchClasses(mask));
+    fillBand(b, true, mask, -1);
+    CHECK(b.root == -1);
+    fillBand(b, true, mask, 12);
+    CHECK(b.root == -1);
+    // layout: inside the screen, above the strip labels (y 424), clear of the edge markers (x 14..82 and 714..782) and the type list / overlays
+    Palette pal = { 1, 2, 3, 4, 5 };
+    int worst = 0;
+    for (int variant = 0; variant < 3; variant++)
+    {
+        Band v;
+        if (variant == 0) fillBand(v, true, all, 11);
+        else if (variant == 1) fillBand(v, true, mask, 0);
+        else fillBand(v, true, all, -1);
+        PlCtx c;
+        drawBand(c, v, pal);
+        CHECK(c.minX >= 86 && c.maxX <= 710 && c.minY >= 400 && c.maxY <= 424);
+        if (c.bytes() > worst) worst = c.bytes();
+    }
+    Band none;
+    PlCtx e;
+    drawBand(e, none, pal);
+    CHECK(e.bytes() == 0 && e.rects == 0);
+    printf("  note band display list: worst %d bytes\n", worst);
+    CHECK(worst <= 600);
+    // the voice row of the PolySynth overlay sits on the footer line 2 and stays clear of the "newer file" notice's line (only one of them is drawn)
+    CHECK(kVoiceX + (kVoices - 1) * kVoiceStep + kVoiceBar + 44 + 40 <= 800 && kVoiceY - 4 >= 396 && kVoiceY + 4 <= 424);
+}
+
 static void test_plinky_overlay_draw_budget()
 {
     using namespace seqplinky;
     using namespace plinkyvoice;
     Palette pal = { 0x111111, 0x222222, 0x555555, 0xffffff, 0x00ffff, 0xffff00, 0x000000, 0x00ffff };
     Model m;
-    for (int i = 0; i < P_COUNT; i++) m.v[i] = (uint8_t)paramInfo(i).max; // worst case: longest value texts, full bars
+    for (int i = 0; i < kUiParams; i++) m.v[i] = (uint8_t)uiInfo(i).max; // worst case: longest value texts, full bars
+    m.mark = 0x1FFFFEu;  // every parameter marked as different (plan 012)
+    m.morphPat = 255;    // ... and a morph running
+    m.morphMs = 30000;
+    for (int i = 0; i < seqnotes::kVoices; i++)  // four voices sounding (v0.3.3), the longest names
+    {
+        m.voice[i].note = (uint8_t)(126 - i);
+        m.voice[i].level = seqnotes::kVoiceBar;
+        m.voice[i].rel = 1;
+    }
     m.v[P_INTERVAL] = 24;
     m.v[P_LFO_DEST] = 2;
     m.v[P_SHAPE] = 100;
@@ -420,24 +499,44 @@ static void test_plinky_overlay_draw_budget()
             CHECK(c.minX >= 0 && c.maxX <= 800 && c.minY >= 30 && c.maxY <= 424);
             CHECK(c.phase);
         }
+    m.morphPat = 0; // the plain title (CPU and peak) is longer than the morph title
+    for (int s = 0; s < kSections; s++)
+        for (int i = 0; i < section((uint8_t)s).count; i++)
+        {
+            m.sec = (uint8_t)s;
+            m.idx = (uint8_t)i;
+            PlCtx c;
+            draw(c, m, pal);
+            if (c.bytes() > worst) worst = c.bytes();
+            CHECK(c.minX >= 0 && c.maxX <= 800 && c.minY >= 30 && c.maxY <= 424);
+        }
     m = Model();
     PlCtx z;
     draw(z, m, pal);
     printf("  PolySynth overlay display list: worst %d bytes, empty bars %d bytes, %d rects, %d texts\n", worst, z.bytes(), z.rects, z.texts);
     // the frame holds the pattern editor under the overlay as well: the overlay keeps to a share of the 8172 bytes
     CHECK(worst <= 3600);
-    // cells and rows do not overlap and fit: 6 cells in the widest row
-    CHECK(kCellX0 + 5 * kCellStep + kCellW <= kBoxX1);
+    // cells and rows do not overlap and fit: 7 cells in the widest row (the Voice row, plan 012)
+    CHECK(kCellX0 + 6 * kCellStep + kCellW <= kBoxX1 && kCellW <= kCellStep);
     CHECK(kRowY0 + (kSections - 1) * kRowStep + kRowH <= 396);
     // the Voice row text widths: the longest names and values fit a 108 px cell at 9 px per character
-    for (int p = 0; p < P_COUNT; p++)
+    for (int p = 0; p < kUiParams; p++)
     {
-        char t[16];
-        for (int v = paramInfo(p).min; v <= paramInfo(p).max; v++)
+        char t[16], nm[16];
+        for (int v = uiInfo(p).min; v <= uiInfo(p).max; v++)
         {
             valueText(p, v, t, sizeof t);
             CHECK(strlen(t) * 9 <= (size_t)kCellW - 6);
         }
         CHECK(strlen(cellName(p)) * 9 <= (size_t)kCellW - 6);
+        CHECK(strlen(markedName(p, 0xFFFFFFFFu, nm)) * 9 <= (size_t)kCellW - 6); // with the mark
+    }
+    // the mark and the title of a running morph
+    {
+        Model k;
+        k.mark = 1u << P_CUTOFF;
+        char nm[16];
+        CHECK(strcmp(markedName(P_CUTOFF, k.mark, nm), "Cutoff*") == 0 && strcmp(markedName(P_RESO, k.mark, nm), "Reso") == 0);
+        CHECK(strcmp(markedName(P_MORPH, 0xFFFFFFFFu, nm), "Morph") == 0);
     }
 }

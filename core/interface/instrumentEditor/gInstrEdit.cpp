@@ -4,6 +4,7 @@
 #include "seqTracks.h"
 #include "PlinkyVoice/plinky_params.h"
 #include "seqPlay/pitchTrace.h"
+#include "seqPlinkyUiLogic.h"
 #endif
 #include "instrumentEditor/instrumentEditor.h"
 #include "mtWavetableEnvelopes.h"
@@ -1937,10 +1938,11 @@ const char* const InstrumentCCNames[] = {
 namespace
 {
 using namespace plinkyvoice;
-const int8_t kPlinkyPages[3][8] = {
+const int8_t kPlinkyPages[4][8] = {
     { P_VOICES, P_LEVEL, P_REVERB, P_DELAY, P_GLIDE, P_WIDTH, P_INTERVAL, -1 },
     { P_SHAPE, P_DETUNE, P_NOISE, P_CUTOFF, P_RESO, P_DRIVE, P_ATTACK, -1 },
-    { P_DECAY, P_SUSTAIN, P_RELEASE, P_LFO_RATE, P_LFO_DEPTH, P_LFO_DEST, -2, -1 },
+    { P_DECAY, P_SUSTAIN, P_RELEASE, P_LFO_RATE, P_LFO_DEPTH, P_LFO_DEST, kPlinkyMorphParam, -1 }, // plan 012: the morph time
+    { -3, -2, -2, -2, -2, -2, -2, -1 }, // plan 013 V: page 4 = "Pitch view" (-3) only
 };
 const char* const kPlinkyLfoDest[3] = { "Pitch", "Shape", "Cutoff" };
 } // namespace
@@ -1953,8 +1955,16 @@ bool cInstrumentEditor::plinkyActive() const
 void cInstrumentEditor::showPlinkyCpu(bool force)
 {
     char t[sizeof(plinkyTitle)];
-    snprintf(t, sizeof(t), "PolySynth %d/3  CPU %d%% pk %d%%%s", plinkyPage, (int)(seqPlinkyCpu() + 0.5f), (int)(seqPlinkyCpuPeak() + 0.5f),
-             seqPlinkyNewerFile() ? "  (newer synth file: edits not saved)" : "");
+    char mt[24] = "";
+    uint16_t remain = 0;
+    uint8_t mpat = 0;
+    if (seqPlinkyMorphStatus(&remain, &mpat))
+        plinkymorph::titleText(mt, sizeof(mt), remain, mpat);
+    if (mt[0])
+        snprintf(t, sizeof(t), "PolySynth %d/4  %s  CPU %d%%", plinkyPage, mt, (int)(seqPlinkyCpu() + 0.5f));
+    else
+        snprintf(t, sizeof(t), "PolySynth %d/4  CPU %d%% pk %d%%%s", plinkyPage, (int)(seqPlinkyCpu() + 0.5f), (int)(seqPlinkyCpuPeak() + 0.5f),
+                 seqPlinkyNewerFile() ? "  (newer synth file: edits not saved)" : "");
     if (force || strcmp(t, plinkyTitle) != 0)
     {
         memcpy(plinkyTitle, t, sizeof(plinkyTitle));
@@ -1982,16 +1992,30 @@ void cInstrumentEditor::plinkyRefresh()
     showPlinkyCpu(false);
 }
 
+// the label of a place: the name, with a '*' when the value differs from the inherited one (plan 012)
+void cInstrumentEditor::plinkyPlaceName(uint8_t place)
+{
+    const int p = kPlinkyPages[plinkyPage - 1][place];
+    if (p < 0)
+    {
+        plinkyName[place][0] = 0;
+        return;
+    }
+    const bool mark = p < P_COUNT && ((seqPlinkyMarks() >> p) & 1u);
+    snprintf(plinkyName[place], sizeof(plinkyName[0]), "%s%s", seqplinky::uiInfo(p).name, mark ? "*" : "");
+}
+
 void cInstrumentEditor::showPlinkyValue(uint8_t place)
 {
     const int p = kPlinkyPages[plinkyPage - 1][place];
     if (p < 0)
         return;
     const int v = seqPlinkyGet(p);
-    const ParamInfo& pi = paramInfo(p);
+    const ParamInfo& pi = seqplinky::uiInfo(p);
     char* s = plinkyVal[place];
     switch (p)
     {
+        case kPlinkyMorphParam: plinkymorph::timeText(v, s, sizeof(plinkyVal[0])); break;
         case P_CHANNEL: snprintf(s, sizeof(plinkyVal[0]), v ? "MIDI %d" : "Off", v); break;
         case P_INTERVAL: snprintf(s, sizeof(plinkyVal[0]), "%+d st", v - 12); break;
         case P_LFO_DEST: snprintf(s, sizeof(plinkyVal[0]), "%s", kPlinkyLfoDest[v > 2 ? 2 : v]); break;
@@ -2018,9 +2042,10 @@ void cInstrumentEditor::showPlinkyParams()
         display.setControlColors(label[i], display.getTheme().activeLabelsColors);
         display.setRemoveControlStyle(label[i], controlStyleLimitTextWidth);
         display.setControlStyle2(label[i], controlStyleCenterX | controlStyleCenterY | controlStyleFont2);
-        display.setControlText(label[i], p >= 0 ? paramInfo(p).name : (p == -2 ? "" : "Next"));
-        display.setControlText2(label[i], p >= 0 || p == -2 ? "" : (plinkyPage == 1 ? "p1/3" : (plinkyPage == 2 ? "p2/3" : "p3/3")));
-        if (p == -2) // plan 013 V: the free place of page 3 is the pitch trace toggle
+        plinkyPlaceName(i);
+        display.setControlText(label[i], p >= 0 ? plinkyName[i] : (p < -1 ? "" : "Next"));
+        display.setControlText2(label[i], p >= 0 || p < -1 ? "" : (plinkyPage == 1 ? "p1/4" : (plinkyPage == 2 ? "p2/4" : (plinkyPage == 3 ? "p3/4" : "p4/4"))));
+        if (p == -3) // plan 013 V: place 1 of page 4 is the pitch trace toggle
             display.setControlText(label[i], plinkyPitchView ? "Params" : "Pitch view");
         display.setRemoveControlStyle(label[i], controlStyleShowBitmap);
         display.setRemoveControlStyle(label[i], controlStyleSpecialFx2);
@@ -2075,6 +2100,18 @@ void cInstrumentEditor::plinkyChange(int d)
     if (p < 0)
         return;
     seqPlinkySet(p, seqPlinkyGet(p) + d);
+    if (p != kPlinkyMorphParam)
+        for (uint8_t i = 0; i < 8; i++) // a first edit makes the pattern's snapshot: the marks of the other places may change
+            if (kPlinkyPages[plinkyPage - 1][i] >= 0)
+            {
+                const bool was = plinkyName[i][strlen(plinkyName[i]) - 1] == '*';
+                plinkyPlaceName(i);
+                if (was != (plinkyName[i][strlen(plinkyName[i]) - 1] == '*'))
+                {
+                    display.setControlText(label[i], plinkyName[i]);
+                    display.refreshControl(label[i]);
+                }
+            }
     if (!plinkyActive())
     {
         showInstrumentMidiParams(); // the channel was changed away: back to the MIDI settings
@@ -2103,10 +2140,10 @@ bool cInstrumentEditor::plinkyButton(uint8_t button, uint8_t state)
     {
         if (state != buttonPress)
             return true;
-        if (plinkyPitchView || (kPlinkyPages[plinkyPage - 1][button] == -2 && plinkyPage == 3))
+        if (plinkyPitchView || kPlinkyPages[plinkyPage - 1][button] == -3)
         {
-            // plan 013 V: "Pitch view" (page 3, place 7) opens the trace, "Params" or any other screen button closes it again
-            const bool open = !plinkyPitchView && button == 6;
+            // plan 013 V: "Pitch view" (page 4, place 1) opens the trace, "Params" or any other screen button closes it again
+            const bool open = !plinkyPitchView && kPlinkyPages[plinkyPage - 1][button] == -3;
             plinkyPitchView = open;
             pitchTraceView.show(open, "Params: close");
             showPlinkyParams();
@@ -2120,7 +2157,7 @@ bool cInstrumentEditor::plinkyButton(uint8_t button, uint8_t state)
         }
         if (kPlinkyPages[plinkyPage - 1][button] == -2)
             return true;
-        plinkyPage = plinkyPage < 3 ? plinkyPage + 1 : 1; // Next
+        plinkyPage = plinkyPage < 4 ? plinkyPage + 1 : 1; // Next
         selectedPlace[mode] = 0;
         showPlinkyParams();
         activateLabelsBorder();

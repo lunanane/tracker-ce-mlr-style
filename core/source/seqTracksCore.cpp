@@ -754,7 +754,7 @@ void Engine::onEvent(const seqgen::Event& e)
                 byte = (uint8_t)(byte | bit);
                 t.nSounding++;
             }
-            host_->noteOn(track, e.note, velocityToVolume(e.vel));
+            host_->noteOn(track, e.note, liveVolume(velocityToVolume(e.vel), host_->recParams().velocity)); // v0.3.3: as the recorded step plays
         }
         recFeedOn(track, e);
     }
