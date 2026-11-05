@@ -32,7 +32,9 @@
 #include "util_math.h"
 #include "mtWavetableEnvelopes.h"
 
-#define SAMPLES_PER_MSEC (AUDIO_SAMPLE_RATE_EXACT / 1000.0)
+// plan 009 P#10: float (was a double: soft-float arithmetic in the control-rate envelope sync); the result differs only by one sample count
+// in a fraction of a percent of the cases
+#define SAMPLES_PER_MSEC (AUDIO_SAMPLE_RATE_EXACT / 1000.0f)
 
 AUDIO_CORE_FLASH void AudioPlayMemory::envelopeSetSustain()
 {
@@ -445,11 +447,7 @@ AUDIO_CORE_RAM void AudioPlayMemory::envelopeUpdate(audio_block_t* block)
     if (envelope.state == envelopePhaseIdle)
     {
         if (!block)
-        {
-            block = allocate();
-            if (!block)
-                return;
-        }
+            return; // plan 009 P#2: an idle voice sends no block at all; was: allocate, clear and transmit 256 zero bytes through the whole chain
         memset(block->data, 0, AUDIO_BLOCK_SAMPLES * 2);
         transmit(block);
         AudioStream::release(block);
@@ -731,36 +729,36 @@ AUDIO_CORE_RAM void AudioPlayMemory::envelopeUpdate(audio_block_t* block)
                       17; // podejrzewam ze przeskalowanie na 13 bitow aby suma takich osmiu (3bity)
                           // obslugiwala 8 probek (inc_hires wyliczone dla 8 bitowego cyklu)
 
-        envelope.sample12 = *p;
-        envelope.sample34 = *(p + 1);
-        envelope.sample56 = *(p + 2);
-        envelope.sample78 = *(p + 3);
-        //		p -= 4;
+        // plan 009 P#9: the temporaries are locals (the stores through p, a uint32_t*, may alias the uint32_t fields of `envelope`, so the
+        // compiler reloaded and stored them for every sample); same arithmetic
+        uint32_t s12 = p[0], s34 = p[1], s56 = p[2], s78 = p[3];
+        int32_t t1, t2;
         mult += inc;
-        envelope.tmp1 = signed_multiply_32x16b(mult, envelope.sample12);
+        t1 = signed_multiply_32x16b(mult, s12);
         mult += inc;
-        envelope.tmp2 = signed_multiply_32x16t(mult, envelope.sample12);
-        envelope.sample12 = pack_16b_16b(envelope.tmp2, envelope.tmp1);
+        t2 = signed_multiply_32x16t(mult, s12);
+        s12 = pack_16b_16b(t2, t1);
         mult += inc;
-        envelope.tmp1 = signed_multiply_32x16b(mult, envelope.sample34);
+        t1 = signed_multiply_32x16b(mult, s34);
         mult += inc;
-        envelope.tmp2 = signed_multiply_32x16t(mult, envelope.sample34);
-        envelope.sample34 = pack_16b_16b(envelope.tmp2, envelope.tmp1);
+        t2 = signed_multiply_32x16t(mult, s34);
+        s34 = pack_16b_16b(t2, t1);
         mult += inc;
-        envelope.tmp1 = signed_multiply_32x16b(mult, envelope.sample56);
+        t1 = signed_multiply_32x16b(mult, s56);
         mult += inc;
-        envelope.tmp2 = signed_multiply_32x16t(mult, envelope.sample56);
-        envelope.sample56 = pack_16b_16b(envelope.tmp2, envelope.tmp1);
+        t2 = signed_multiply_32x16t(mult, s56);
+        s56 = pack_16b_16b(t2, t1);
         mult += inc;
-        envelope.tmp1 = signed_multiply_32x16b(mult, envelope.sample78);
+        t1 = signed_multiply_32x16b(mult, s78);
         mult += inc;
-        envelope.tmp2 = signed_multiply_32x16t(mult, envelope.sample78);
-        envelope.sample78 = pack_16b_16b(envelope.tmp2, envelope.tmp1);
+        t2 = signed_multiply_32x16t(mult, s78);
+        s78 = pack_16b_16b(t2, t1);
 
-        *p++ = envelope.sample12;
-        *p++ = envelope.sample34;
-        *p++ = envelope.sample56;
-        *p++ = envelope.sample78;
+        p[0] = s12;
+        p[1] = s34;
+        p[2] = s56;
+        p[3] = s78;
+        p += 4;
 
         // adjust the long-term gain using 30 bit resolution (fix #102)
         // https://github.com/PaulStoffregen/Audio/issues/102
@@ -858,7 +856,7 @@ AUDIO_CORE_FLASH void AudioPlayMemory::envelopeSyncTrackerSeq(uint32_t val, floa
         return;
     }
 
-    float lfoFrequency = (seqSpeed / 15.0);
+    float lfoFrequency = (seqSpeed / 15.0f); // was 15.0 (double): the same result, without the soft-double divide
     float periodTime = (1000 / lfoFrequency) * envelope.syncRate;
 
     if (envelope.phaseNumber[0] != -1 && envelope.phaseNumber[1] != -1)

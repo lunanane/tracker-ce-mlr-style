@@ -17,6 +17,18 @@ extern "C"
     extern void _vStackTop(void); // symbols from linker script
     extern void _vStackBase(void);
 }
+#ifndef PLATFORM_IMX
+extern "C"
+{
+    extern char* __brkval;       // end of the heap (teensy_core _sbrk)
+    extern unsigned long _estack; // top of the stack (linker script)
+}
+// plan 009 P#1: the gap between the heap and the stack is painted once; the lowest address that has lost the paint is the deepest the
+// stack has ever been (a probe for the headroom after the reverb buffers moved into SRAM).
+static uint32_t* s_stackGapLow = nullptr;
+static uint32_t* s_stackGapHigh = nullptr;
+static constexpr uint32_t kGapPaint = 0xAAAAAAAAu;
+#endif
 Profiler* Profiler::instance = nullptr;
 
 void Profiler::init()
@@ -48,6 +60,15 @@ void Profiler::init()
     (void)mi;
     LOGF(
       "memory on init: arena: %d, allocated: %d, free: %d\r\n", mi.arena, mi.uordblks, mi.fordblks);
+
+#ifndef PLATFORM_IMX
+    char* sp;
+    __asm volatile("mov %0, sp" : "=r"(sp));
+    s_stackGapLow = (uint32_t*)(((uintptr_t)__brkval + 3) & ~3u);
+    s_stackGapHigh = (uint32_t*)(((uintptr_t)sp - 128) & ~3u); // keep clear of the live frames
+    for (uint32_t* p = s_stackGapLow; p < s_stackGapHigh; p++)
+        *p = kGapPaint;
+#endif
 
     resetMeasuringAudio();
 }
@@ -87,7 +108,28 @@ size_t Profiler::maxStackBytes()
 
     return (size_t)(top - addr) - watermarksCounter;
 #else
+    // deepest stack use so far: from the top of the stack down to the lowest word that lost the paint
+    if (!s_stackGapLow)
+        return 0;
+    const uint32_t* p = s_stackGapLow;
+    while (p < s_stackGapHigh && *p == kGapPaint)
+        p++;
+    return (size_t)((uintptr_t)&_estack - (uintptr_t)p);
+#endif
+}
+
+// bytes between the end of the heap and the deepest stack point so far (the smallest the headroom has been); 0 when unknown
+size_t Profiler::minFreeStackBytes()
+{
+#ifdef PLATFORM_IMX
     return 0;
+#else
+    if (!s_stackGapLow)
+        return 0;
+    const uint32_t* p = s_stackGapLow;
+    while (p < s_stackGapHigh && *p == kGapPaint)
+        p++;
+    return (size_t)((uintptr_t)p - (uintptr_t)s_stackGapLow);
 #endif
 }
 

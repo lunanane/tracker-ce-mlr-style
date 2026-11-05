@@ -14,7 +14,10 @@ AUDIO_CORE_FLASH void AudioEffectLimiter::begin()
     isSideChainEnable = (bool)mtProject.values.limiterSidechain;
     isAverageGain = false;
 
-    memset(inputStorageBuffer, 0, 10);
+    memset(inputStorageBuffer, 0, sizeof(inputStorageBuffer));
+    memset(outputStorageBuffer, 0, sizeof(outputStorageBuffer)); // plan 009 P#5: both rings start clean (was: the input one only)
+    inPos = 0;
+    outPos = 0;
 }
 
 AUDIO_CORE_FLASH void AudioEffectLimiter::setThreshold(uint16_t ts)
@@ -63,14 +66,14 @@ AUDIO_CORE_RAM void AudioEffectLimiter::update(void)
         processMainStream();
 }
 
+// plan 009 P#5: same arithmetic as before, with the state in locals, the divide only when the peak is above the threshold (below it
+// threshold / xpeak is >= 1 and the result is clamped to 1, so f = 1 exactly) and the 5-sample delays as rings.
 AUDIO_CORE_RAM void AudioEffectLimiter::processSidechain()
 {
     audio_block_t* inputBlock;
     audio_block_t* sidechainBlock;
-    int16_t* inputData;
+    const int16_t* inputData;
     int16_t* outputData;
-    int16_t inputTemp;
-    float localf;
 
     inputBlock = receiveWritable(0);
     sidechainBlock = receiveReadOnly(1);
@@ -84,41 +87,43 @@ AUDIO_CORE_RAM void AudioEffectLimiter::processSidechain()
     inputData = sidechainBlock ? sidechainBlock->data : zeroblock;
     outputData = inputBlock->data;
 
+    const float attack = attackTime;
+    const float release_ = releaseTime;
+    const uint16_t thr = threshold;
+    float gain = g;
+    uint16_t peak = xpeak;
+    float sum = sumGain;
+    uint8_t ip = inPos, op = outPos;
+
     for (uint8_t n = 0; n < AUDIO_BLOCK_SAMPLES; n++)
     {
-        a = (*inputData < 0) ? -*inputData : *inputData;
+        const int16_t in = *inputData++;
+        const uint16_t a = (in < 0) ? -in : in;
 
-        coeff = (a > xpeak) ? attackTime : releaseTime;
+        float coeff = (a > peak) ? attack : release_;
+        peak = (1 - coeff) * peak + coeff * a;
 
-        xpeak = (1 - coeff) * xpeak + coeff * a;
+        const float f = (peak > thr) ? (float)thr / (float)peak : 1.0f;
 
-        localf = threshold / (float)xpeak;
-        f = (localf < 1.0f) ? localf : 1.0f;
+        coeff = (f < gain) ? attack : release_;
+        gain = (1 - coeff) * gain + coeff * f;
 
-        coeff = (f < g) ? attackTime : releaseTime;
+        const int16_t outputTemp = *outputData;
+        *outputData++ = gain * outputStorageBuffer[op] + (1 - gain) * in;
 
-        g = (1 - coeff) * g + coeff * f;
+        sum += gain;
 
-        inputTemp = *inputData;
-
-        int16_t outputTemp = *outputData;
-
-        *outputData = g * outputStorageBuffer[LIMITER_DELAY - 1] + (1 - g) * (*inputData);
-
-        sumGain += g;
-
-        for (uint8_t i = (LIMITER_DELAY - 1); i >= 1; i--)
-        {
-            inputStorageBuffer[i] = inputStorageBuffer[i - 1];
-            outputStorageBuffer[i] = outputStorageBuffer[i - 1];
-        }
-        inputStorageBuffer[0] = inputTemp;
-        outputStorageBuffer[0] = outputTemp;
-        inputData++;
-        outputData++;
+        inputStorageBuffer[ip] = in;
+        outputStorageBuffer[op] = outputTemp;
+        ip = (ip == LIMITER_DELAY - 1) ? 0 : ip + 1;
+        op = (op == LIMITER_DELAY - 1) ? 0 : op + 1;
     }
 
-    averageGain = sumGain / AUDIO_BLOCK_SAMPLES;
+    g = gain;
+    xpeak = peak;
+    inPos = ip;
+    outPos = op;
+    averageGain = sum / AUDIO_BLOCK_SAMPLES;
     sumGain = 0.0f;
     isAverageGain = true;
 
@@ -132,8 +137,6 @@ AUDIO_CORE_RAM void AudioEffectLimiter::processMainStream()
     audio_block_t* inputBlock;
     audio_block_t* sidechainBlock;
     int16_t* inputData;
-    int16_t inputTemp;
-    float localf;
 
     inputBlock = receiveWritable(0);
     sidechainBlock = receiveReadOnly(1);
@@ -151,43 +154,44 @@ AUDIO_CORE_RAM void AudioEffectLimiter::processMainStream()
     }
     inputData = inputBlock->data;
 
+    const float attack = attackTime;
+    const float release_ = releaseTime;
+    const uint16_t thr = threshold;
+    float gain = g;
+    uint16_t peak = xpeak;
+    float sum = sumGain;
+    uint8_t ip = inPos;
+
     for (uint8_t n = 0; n < AUDIO_BLOCK_SAMPLES; n++)
     {
-        a = (*inputData < 0) ? -*inputData : *inputData;
+        const int16_t in = *inputData;
+        const uint16_t a = (in < 0) ? -in : in;
 
-        coeff = (a > xpeak) ? attackTime : releaseTime;
+        float coeff = (a > peak) ? attack : release_;
+        peak = (1 - coeff) * peak + coeff * a;
 
-        xpeak = (1 - coeff) * xpeak + coeff * a;
+        const float f = (peak > thr) ? (float)thr / (float)peak : 1.0f;
 
-        localf = threshold / (float)xpeak;
-        f = (localf < 1.0f) ? localf : 1.0f;
+        coeff = (f < gain) ? attack : release_;
+        gain = (1 - coeff) * gain + coeff * f;
 
-        coeff = (f < g) ? attackTime : releaseTime;
+        *inputData++ = gain * inputStorageBuffer[ip];
 
-        g = (1 - coeff) * g + coeff * f;
+        sum += gain;
 
-        inputTemp = *inputData;
-
-        *inputData = g * inputStorageBuffer[LIMITER_DELAY - 1];
-
-        sumGain += g;
-
-        for (uint8_t i = (LIMITER_DELAY - 1); i >= 1; i--)
-        {
-            inputStorageBuffer[i] = inputStorageBuffer[i - 1];
-        }
-        inputStorageBuffer[0] = inputTemp;
-        inputData++;
+        inputStorageBuffer[ip] = in;
+        ip = (ip == LIMITER_DELAY - 1) ? 0 : ip + 1;
     }
 
-    averageGain = sumGain / AUDIO_BLOCK_SAMPLES;
+    g = gain;
+    xpeak = peak;
+    inPos = ip;
+    averageGain = sum / AUDIO_BLOCK_SAMPLES;
     sumGain = 0.0f;
     isAverageGain = true;
 
     transmit(inputBlock, 0);
     release(inputBlock);
-    if (sidechainBlock)
-        release(sidechainBlock);
 }
 
 AUDIO_CORE_FLASH void AudioEffectLimiter::blockUpdate()

@@ -28,6 +28,7 @@
 #include "utility/dspinst.h"
 #include <cmath>
 #include <cr_section_macros.h>
+#include <stdlib.h>
 #include <stdint.h>
 
 // State Variable Filter (Chamberlin) with 2X oversampling
@@ -197,7 +198,28 @@ AUDIO_CORE_RAM void AudioFilterStateVariable::update(void)
     input_block = receiveReadOnly(0);
     if (nullptr == input_block)
     {
-        return;
+        // plan 009 P#2: a voice that has gone idle sends no block (it used to send zeros). When the filter has nothing left to ring out
+        // (state below a quarter of an output LSB), do now what a block of zeros did: clear the state, take over the settings. Otherwise
+        // (or with a change pending) feed it one block of zeros exactly as before; it stops sending once the tail is gone.
+        constexpr int32_t kQuiet = 1024;
+        if (overdriveGain == 0 && isEnabled == lastEnabled && filterType == lastFilterType &&
+            (!isEnabled || (labs(state_lowpass) < kQuiet && labs(state_bandpass) < kQuiet && labs(state_inputprev) < kQuiet)))
+        {
+            if (isEnabled)
+            {
+                state_lowpass = 0;
+                state_bandpass = 0;
+                lastupdate_fmult = setting_fmult;
+                lastupdate_damp = setting_damp;
+            }
+            state_inputprev = 0;
+            state_outputprev = 0;
+            return;
+        }
+        input_block = allocate();
+        if (nullptr == input_block)
+            return;
+        memset(input_block->data, 0, sizeof(input_block->data));
     }
 
     if (!isEnabled && overdriveGain == 0 && isEnabled == lastEnabled && filterType == lastFilterType)

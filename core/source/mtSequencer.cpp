@@ -2324,11 +2324,11 @@ AUDIO_CORE_RAM float Sequencer::getTimerPeriod_us(void)
 {
     if (player.swing.isActive)
     {
-        return ((3125.0 * player.swing.getTempoCorrection()) / getCurrentTempo()) / 12.0;
+        return ((3125.0f * player.swing.getTempoCorrection()) / getCurrentTempo()) / 12.0f; // plan 009 P#10: float, not soft-double
     }
     else
     {
-        return (312500.0 / getCurrentTempo()) / 12.0;
+        return (312500.0f / getCurrentTempo()) / 12.0f;
     }
 }
 

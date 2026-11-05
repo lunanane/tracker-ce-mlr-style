@@ -35,6 +35,10 @@ class AudioAnalyzeRMS : public AudioStream
     audio_block_t* inputQueueArray[1];
     int64_t accum;
     uint32_t count;
+    // plan 009 P#11: the meter only accumulates while somebody asks for it (available() / read() within the last kWatchBlocks blocks);
+    // 14 meters ran every block although the screens that show them read them only now and then
+    static constexpr uint16_t kWatchBlocks = 1500; // about 4.3 s
+    volatile uint16_t watch = 0;
 
   public:
     AudioAnalyzeRMS(void)
@@ -43,7 +47,11 @@ class AudioAnalyzeRMS : public AudioStream
         accum = 0;
         count = 0;
     }
-    bool available(void) { return count > 0; }
+    bool available(void)
+    {
+        watch = kWatchBlocks;
+        return count > 0;
+    }
     float read(void);
     virtual void update(void);
 };

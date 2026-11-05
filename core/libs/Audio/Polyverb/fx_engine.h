@@ -104,7 +104,8 @@ struct DataType<FORMAT_32_BIT>
     static inline T Compress(float value) { return value; }
 };
 
-template<size_t size, Format format = FORMAT_12_BIT>
+// plan 009 P#1: buffer2 may be shorter than buffer 1 (size2); default = same size, the original behaviour
+template<size_t size, Format format = FORMAT_12_BIT, size_t size2 = size>
 class FxEngine
 {
   public:
@@ -127,7 +128,7 @@ class FxEngine
     void Reset()
     {
         std::fill(&buffer_[0], &buffer_[size], 0);
-        std::fill(&buffer2_[0], &buffer2_[size], 0);
+        std::fill(&buffer2_[0], &buffer2_[size2], 0);
         write_ptr_ = 0;
         write_ptr2_ = 0;
     }
@@ -207,15 +208,15 @@ class FxEngine
         template<typename D>
         inline void Write2(D&, int32_t offset, float scale)
         {
-            STATIC_ASSERT(D::base + D::length <= size, delay_memory_full);
+            STATIC_ASSERT(D::base + D::length <= size2, delay_memory_full);
             T w = DataType<format>::Compress(accumulator_);
             if (offset == -1)
             {
-                buffer2_[(write_ptr2_ + D::base + D::length - 1) % size] = w;
+                buffer2_[(write_ptr2_ + D::base + D::length - 1) % size2] = w;
             }
             else
             {
-                buffer2_[(write_ptr2_ + D::base + offset) % size] = w;
+                buffer2_[(write_ptr2_ + D::base + offset) % size2] = w;
             }
             accumulator_ *= scale;
         }
@@ -279,15 +280,15 @@ class FxEngine
         template<typename D>
         inline void Read2(D&, int32_t offset, float scale)
         {
-            STATIC_ASSERT(D::base + D::length <= size, delay_memory_full);
+            STATIC_ASSERT(D::base + D::length <= size2, delay_memory_full);
             T r;
             if (offset == -1)
             {
-                r = buffer2_[(write_ptr2_ + D::base + D::length - 1) % size];
+                r = buffer2_[(write_ptr2_ + D::base + D::length - 1) % size2];
             }
             else
             {
-                r = buffer2_[(write_ptr2_ + D::base + offset) % size];
+                r = buffer2_[(write_ptr2_ + D::base + offset) % size2];
             }
             float r_f = DataType<format>::Decompress(r);
             previous_read_ = r_f;
@@ -329,12 +330,12 @@ class FxEngine
         template<typename D>
         inline void Interpolate2(D& d, float offset, float scale)
         {
-            STATIC_ASSERT(D::base + D::length <= size, delay_memory_full);
+            STATIC_ASSERT(D::base + D::length <= size2, delay_memory_full);
             MAKE_INTEGRAL_FRACTIONAL(offset);
             float a = DataType<format>::Decompress(
-              buffer2_[(write_ptr2_ + offset_integral + D::base) % size]);
+              buffer2_[(write_ptr2_ + offset_integral + D::base) % size2]);
             float b = DataType<format>::Decompress(
-              buffer2_[(write_ptr2_ + offset_integral + D::base + 1) % size]);
+              buffer2_[(write_ptr2_ + offset_integral + D::base + 1) % size2]);
             float x = a + (b - a) * offset_fractional;
             previous_read_ = x;
             accumulator_ += x * scale;
@@ -358,13 +359,13 @@ class FxEngine
         template<typename D>
         inline void Interpolate2(D&, float offset, LFOIndex index, float amplitude, float scale)
         {
-            STATIC_ASSERT(D::base + D::length <= size, delay_memory_full);
+            STATIC_ASSERT(D::base + D::length <= size2, delay_memory_full);
             offset += amplitude * lfo_value_[index];
             MAKE_INTEGRAL_FRACTIONAL(offset);
             float a = DataType<format>::Decompress(
-              buffer2_[(write_ptr2_ + offset_integral + D::base) % size]);
+              buffer2_[(write_ptr2_ + offset_integral + D::base) % size2]);
             float b = DataType<format>::Decompress(
-              buffer2_[(write_ptr2_ + offset_integral + D::base + 1) % size]);
+              buffer2_[(write_ptr2_ + offset_integral + D::base + 1) % size2]);
             float x = a + (b - a) * offset_fractional;
             previous_read_ = x;
             accumulator_ += x * scale;
@@ -397,7 +398,7 @@ class FxEngine
         --write_ptr2_;
         if (write_ptr2_ < 0)
         {
-            write_ptr2_ += size;
+            write_ptr2_ += size2;
         }
         c->accumulator_ = 0.0f;
         c->previous_read_ = 0.0f;
@@ -427,7 +428,7 @@ class FxEngine
         --write_ptr2_;
         if (write_ptr2_ < 0)
         {
-            write_ptr2_ += size;
+            write_ptr2_ += size2;
         }
         c->accumulator_ = 0.0f;
         c->previous_read_ = 0.0f;

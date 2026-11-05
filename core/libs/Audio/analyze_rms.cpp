@@ -32,6 +32,13 @@
 AUDIO_CORE_RAM void AudioAnalyzeRMS::update(void)
 {
     audio_block_t* block = receiveReadOnly();
+    if (watch == 0)
+    {
+        if (block)
+            release(block);
+        return;
+    }
+    watch = watch - 1;
     if (!block)
     {
         count++;
@@ -71,12 +78,15 @@ AUDIO_CORE_RAM void AudioAnalyzeRMS::update(void)
 
 AUDIO_CORE_FLASH float AudioAnalyzeRMS::read(void)
 {
+    watch = kWatchBlocks;
     DISABLE_GLOBAL_INTERRUPTS();
     int64_t sum = accum;
     accum = 0;
     uint32_t num = count;
     count = 0;
     ENABLE_GLOBAL_INTERRUPTS();
+    if (num == 0)
+        return 0.0f; // nothing accumulated yet (the meter was not being watched)
     float meansq = sum / (num * AUDIO_BLOCK_SAMPLES);
     // TODO: shift down to 32 bits and use sqrt_uint32
     //       but is that really any more efficient?

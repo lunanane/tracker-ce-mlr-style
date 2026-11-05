@@ -113,6 +113,8 @@ AUDIO_CORE_FLASH void AudioEffectShortDelay::clear()
     bandpassRight.clear();
     bandpassMono.clear();
     silentSamplesCount = MAX_DELAYLINE_LENGTH;
+    heardPingpong = isPingpong != 0;
+    validSamples = MAX_DELAYLINE_LENGTH; // all lines are zero now
 
     memset(pingpongDelaylineRight, 0, MAX_DELAYLINE_LENGTH * sizeof(int16_t));
     memset(pingpongDelaylineLeft, 0, MAX_DELAYLINE_LENGTH * sizeof(int16_t));
@@ -137,6 +139,27 @@ AUDIO_CORE_RAM void AudioEffectShortDelay::update(void)
     audio_block_t* outputRight;
 
     input = receiveReadOnly(0);
+
+    // plan 009 P#4: nothing in, nothing left in the heard lines (the last timeInSamples samples written were all zero): the block would be
+    // all zero again. Write the zeros, move on and send nothing (the mixers treat a missing block as silence).
+    if (!noRefresh && timeInSamples != 0 && silentSamplesCount >= timeInSamples && heardPingpong == (isPingpong != 0))
+    {
+        bool silentIn = true;
+        if (input != nullptr)
+        {
+            const uint32_t* w = reinterpret_cast<const uint32_t*>(input->data);
+            for (int i = 0; i < AUDIO_BLOCK_SAMPLES / 2; i++)
+                silentIn &= w[i] == 0;
+        }
+        if (silentIn)
+        {
+            skipIdleBlock();
+            if (input != nullptr)
+                release(input);
+            return;
+        }
+    }
+
     outputLeft = allocate();
     outputRight = allocate();
 
@@ -182,10 +205,6 @@ AUDIO_CORE_RAM bool AudioEffectShortDelay::process(int16_t input[],
         return false;
     }
 
-    int32_t newDelayedSampleLeft = 0;
-    int32_t newDelayedSampleRight = 0;
-    int32_t newDelayedSampleMono = 0;
-
     // bandpass in the feedback loop: the control is smoothed once per block; out of the path (mix 0) it costs nothing
     bandpassControl.blockUpdate();
     const float mixPrev = bandpassControl.prevMix();
@@ -199,79 +218,25 @@ AUDIO_CORE_RAM bool AudioEffectShortDelay::process(int16_t input[],
         bandpassRight.clear();
         bandpassMono.clear();
     }
-
-    for (int sample = 0; sample < sampleCount; sample++)
+    if (pingpong != heardPingpong)
     {
-        uint32_t delayedSampleIdx = (headIdx - timeInSamples) & delaylineLengthMask;
-        int16_t delayedSampleRight = pingpongDelaylineRight[delayedSampleIdx];
-        int16_t delayedSampleLeft = pingpongDelaylineLeft[delayedSampleIdx];
-        int16_t delayedSampleMono = monoDelayline[delayedSampleIdx];
-
-        int32_t filteredSampleRight = delayedSampleRight;
-        int32_t filteredSampleLeft = delayedSampleLeft;
-        int32_t filteredSampleMono = delayedSampleMono;
-        if (filterOn)
-        {
-            // the mix ramps linearly over the block: engaging / releasing the band never steps the signal.
-            // Only the lines that are heard run the filter (ping-pong: 2, mono: 1); the other one passes through.
-            const float m = seqfx::mixAt(mixPrev, mixCur, sample, sampleCount);
-            if (pingpong)
-            {
-                float xr = (float)delayedSampleRight, xl = (float)delayedSampleLeft;
-                filteredSampleRight =
-                  signed_saturate_rshift((int32_t)(xr + m * (seqfx::bandpass(bandpassRight, bp, xr) - xr)), 16, 0);
-                filteredSampleLeft =
-                  signed_saturate_rshift((int32_t)(xl + m * (seqfx::bandpass(bandpassLeft, bp, xl) - xl)), 16, 0);
-            }
-            else
-            {
-                float xm = (float)delayedSampleMono;
-                filteredSampleMono =
-                  signed_saturate_rshift((int32_t)(xm + m * (seqfx::bandpass(bandpassMono, bp, xm) - xm)), 16, 0);
-            }
-        }
-
-        int16_t outL = isPingpong ? filteredSampleLeft : filteredSampleMono;
-        int16_t outR = isPingpong ? filteredSampleRight : filteredSampleMono;
-        *outputLeft++ = outL;
-        *outputRight++ = outR;
-
-        int32_t inputShifted = ((*input++) << kFeedbackShift);
-
-        newDelayedSampleLeft = inputShifted + filteredSampleRight * feedback;
-        newDelayedSampleRight = filteredSampleLeft * feedback;
-        newDelayedSampleMono = inputShifted + filteredSampleMono * feedback;
-
-        static constexpr int32_t kFeedbackRoundBias = (1 << kFeedbackShift) - 1;
-        // soft limit instead of the hard 16 bit clip: a loud sustained signal at a high feedback compresses instead of crackling
-        int16_t saturatedLeft = (int16_t)signed_saturate_rshift(
-          seqfx::softLimit((newDelayedSampleLeft + (newDelayedSampleLeft < 0 ? kFeedbackRoundBias : 0)) >> kFeedbackShift), 16, 0);
-        int16_t saturatedRight = (int16_t)signed_saturate_rshift(
-          seqfx::softLimit((newDelayedSampleRight + (newDelayedSampleRight < 0 ? kFeedbackRoundBias : 0)) >> kFeedbackShift), 16, 0);
-        int16_t saturatedMono = (int16_t)signed_saturate_rshift(
-          seqfx::softLimit((newDelayedSampleMono + (newDelayedSampleMono < 0 ? kFeedbackRoundBias : 0)) >> kFeedbackShift), 16, 0);
-
-        bool isSampleSilent =
-          isPingpong ? (outL == 0 && outR == 0 && saturatedLeft == 0 && saturatedRight == 0)
-                     : (outL == 0 && saturatedMono == 0);
-        if (isSampleSilent)
-        {
-            if (silentSamplesCount < MAX_DELAYLINE_LENGTH)
-            {
-                silentSamplesCount++;
-            }
-        }
-        else
-        {
-            silentSamplesCount = 0;
-        }
-
-        uint32_t headSampleIdx = headIdx++ & delaylineLengthMask;
-
-        pingpongDelaylineLeft[headSampleIdx] = saturatedLeft;
-        pingpongDelaylineRight[headSampleIdx] = saturatedRight;
-        monoDelayline[headSampleIdx] = saturatedMono;
+        // the other set of lines starts to be heard: it counts as cleared (see validSamples); the filters start clean, too
+        heardPingpong = pingpong;
+        validSamples = 0;
+        silentSamplesCount = 0;
+        bandpassLeft.clear();
+        bandpassRight.clear();
+        bandpassMono.clear();
     }
+    const uint32_t time = timeInSamples;
+    const uint32_t warm = validSamples < time ? time - validSamples : 0; // the first `warm` samples of this block read a line not yet written
+
+    if (pingpong)
+        runLines<true>(input, outputLeft, outputRight, sampleCount, time, warm, filterOn, mixPrev, mixCur, bp);
+    else
+        runLines<false>(input, outputLeft, outputRight, sampleCount, time, warm, filterOn, mixPrev, mixCur, bp);
+
+    validSamples = validSamples + sampleCount < MAX_DELAYLINE_LENGTH ? validSamples + sampleCount : MAX_DELAYLINE_LENGTH;
 
     if (filterOn)
     {
@@ -281,4 +246,137 @@ AUDIO_CORE_RAM bool AudioEffectShortDelay::process(int16_t input[],
     }
 
     return true;
+}
+
+// One block of the heard lines. PP = ping-pong (left + right lines), otherwise the mono line. Same arithmetic as before plan 009 P#4,
+// per heard line; the lines that are not heard are neither read nor written.
+template<bool PP>
+AUDIO_CORE_RAM void AudioEffectShortDelay::runLines(const int16_t* input,
+                                                int16_t* outputLeft,
+                                                int16_t* outputRight,
+                                                int sampleCount,
+                                                uint32_t time,
+                                                uint32_t warm,
+                                                bool filterOn,
+                                                float mixPrev,
+                                                float mixCur,
+                                                const seqfx::SvfCoef& bp)
+{
+    int16_t* const lineLeft = pingpongDelaylineLeft;
+    int16_t* const lineRight = pingpongDelaylineRight;
+    int16_t* const lineMono = monoDelayline;
+    const int32_t fb = feedback;
+    uint32_t head = headIdx;
+    uint32_t silent = silentSamplesCount;
+    static constexpr int32_t kFeedbackRoundBias = (1 << kFeedbackShift) - 1;
+
+    for (int sample = 0; sample < sampleCount; sample++)
+    {
+        const uint32_t delayedSampleIdx = (head - time) & delaylineLengthMask;
+        const bool cold = (uint32_t)sample < warm;
+        int32_t filteredSampleRight = 0;
+        int32_t filteredSampleLeft = 0;
+        int32_t filteredSampleMono = 0;
+        if (PP)
+        {
+            int16_t delayedSampleRight = cold ? 0 : lineRight[delayedSampleIdx];
+            int16_t delayedSampleLeft = cold ? 0 : lineLeft[delayedSampleIdx];
+            filteredSampleRight = delayedSampleRight;
+            filteredSampleLeft = delayedSampleLeft;
+            if (filterOn)
+            {
+                // the mix ramps linearly over the block: engaging / releasing the band never steps the signal
+                const float m = seqfx::mixAt(mixPrev, mixCur, sample, sampleCount);
+                float xr = (float)delayedSampleRight, xl = (float)delayedSampleLeft;
+                filteredSampleRight =
+                  signed_saturate_rshift((int32_t)(xr + m * (seqfx::bandpass(bandpassRight, bp, xr) - xr)), 16, 0);
+                filteredSampleLeft =
+                  signed_saturate_rshift((int32_t)(xl + m * (seqfx::bandpass(bandpassLeft, bp, xl) - xl)), 16, 0);
+            }
+        }
+        else
+        {
+            int16_t delayedSampleMono = cold ? 0 : lineMono[delayedSampleIdx];
+            filteredSampleMono = delayedSampleMono;
+            if (filterOn)
+            {
+                const float m = seqfx::mixAt(mixPrev, mixCur, sample, sampleCount);
+                float xm = (float)delayedSampleMono;
+                filteredSampleMono =
+                  signed_saturate_rshift((int32_t)(xm + m * (seqfx::bandpass(bandpassMono, bp, xm) - xm)), 16, 0);
+            }
+        }
+
+        int16_t outL = PP ? filteredSampleLeft : filteredSampleMono;
+        int16_t outR = PP ? filteredSampleRight : filteredSampleMono;
+        *outputLeft++ = outL;
+        *outputRight++ = outR;
+
+        int32_t inputShifted = ((*input++) << kFeedbackShift);
+        bool isSampleSilent;
+        const uint32_t headSampleIdx = head++ & delaylineLengthMask;
+
+        // soft limit instead of the hard 16 bit clip: a loud sustained signal at a high feedback compresses instead of crackling
+        if (PP)
+        {
+            int32_t newDelayedSampleLeft = inputShifted + filteredSampleRight * fb;
+            int32_t newDelayedSampleRight = filteredSampleLeft * fb;
+            int16_t saturatedLeft = (int16_t)signed_saturate_rshift(
+              seqfx::softLimit((newDelayedSampleLeft + (newDelayedSampleLeft < 0 ? kFeedbackRoundBias : 0)) >> kFeedbackShift), 16, 0);
+            int16_t saturatedRight = (int16_t)signed_saturate_rshift(
+              seqfx::softLimit((newDelayedSampleRight + (newDelayedSampleRight < 0 ? kFeedbackRoundBias : 0)) >> kFeedbackShift), 16, 0);
+            isSampleSilent = outL == 0 && outR == 0 && saturatedLeft == 0 && saturatedRight == 0;
+            lineLeft[headSampleIdx] = saturatedLeft;
+            lineRight[headSampleIdx] = saturatedRight;
+        }
+        else
+        {
+            int32_t newDelayedSampleMono = inputShifted + filteredSampleMono * fb;
+            int16_t saturatedMono = (int16_t)signed_saturate_rshift(
+              seqfx::softLimit((newDelayedSampleMono + (newDelayedSampleMono < 0 ? kFeedbackRoundBias : 0)) >> kFeedbackShift), 16, 0);
+            isSampleSilent = outL == 0 && saturatedMono == 0;
+            lineMono[headSampleIdx] = saturatedMono;
+        }
+
+        if (isSampleSilent)
+        {
+            if (silent < MAX_DELAYLINE_LENGTH)
+                silent++;
+        }
+        else
+        {
+            silent = 0;
+        }
+    }
+
+    headIdx = head;
+    silentSamplesCount = silent;
+}
+
+// An idle block (see update()): the heard lines get a block of zeros, the head moves on, the filters are clean.
+AUDIO_CORE_RAM void AudioEffectShortDelay::skipIdleBlock()
+{
+    const uint32_t start = headIdx & delaylineLengthMask;
+    const uint32_t first = start + AUDIO_BLOCK_SAMPLES <= MAX_DELAYLINE_LENGTH ? AUDIO_BLOCK_SAMPLES : MAX_DELAYLINE_LENGTH - start;
+    int16_t* lines[2] = { isPingpong ? pingpongDelaylineLeft : monoDelayline, isPingpong ? pingpongDelaylineRight : nullptr };
+    for (int k = 0; k < 2; k++)
+    {
+        if (lines[k] == nullptr)
+            continue;
+        memset(lines[k] + start, 0, first * sizeof(int16_t));
+        if (first < AUDIO_BLOCK_SAMPLES)
+            memset(lines[k], 0, (AUDIO_BLOCK_SAMPLES - first) * sizeof(int16_t));
+    }
+    headIdx += AUDIO_BLOCK_SAMPLES;
+    if (silentSamplesCount + AUDIO_BLOCK_SAMPLES < MAX_DELAYLINE_LENGTH)
+        silentSamplesCount += AUDIO_BLOCK_SAMPLES;
+    else
+        silentSamplesCount = MAX_DELAYLINE_LENGTH;
+    if (validSamples + AUDIO_BLOCK_SAMPLES < MAX_DELAYLINE_LENGTH)
+        validSamples += AUDIO_BLOCK_SAMPLES;
+    else
+        validSamples = MAX_DELAYLINE_LENGTH;
+    bandpassLeft.clear();
+    bandpassRight.clear();
+    bandpassMono.clear();
 }
