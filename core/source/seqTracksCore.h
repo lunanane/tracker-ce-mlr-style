@@ -121,6 +121,19 @@ class Engine
     void withHr(uint8_t t, void (*fn)(const seqgen::HrScript*, void*), void* user) const;
     seqgen::HrBus& hrBus() { return hrBus_; }
     int soundingCount(uint8_t t) const { return t_[t].nSounding; }
+    // Main loop, display only (v0.3.3): the notes the track's sequencer sounds now, as a 128 bit mask (bit n of byte n / 8). Plain byte
+    // reads of the audio side's own mask: a torn read shows one frame of a note too many or too few, nothing else.
+    void soundingNotes(uint8_t t, uint8_t out[16]) const
+    {
+        if (t >= kTracks)
+        {
+            for (int i = 0; i < 16; i++)
+                out[i] = 0;
+            return;
+        }
+        for (int i = 0; i < 16; i++)
+            out[i] = t_[t].sounding[i];
+    }
 
   private:
     enum { kRing = 64 };

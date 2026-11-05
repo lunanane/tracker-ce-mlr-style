@@ -3,6 +3,7 @@
 #include "seqPlinky.h"
 #include "seqTracks.h"
 #include "PlinkyVoice/plinky_params.h"
+#include "seqPlinkyUiLogic.h"
 #endif
 #include "instrumentEditor/instrumentEditor.h"
 #include "mtWavetableEnvelopes.h"
@@ -1935,7 +1936,7 @@ using namespace plinkyvoice;
 const int8_t kPlinkyPages[3][8] = {
     { P_VOICES, P_LEVEL, P_REVERB, P_DELAY, P_GLIDE, P_WIDTH, P_INTERVAL, -1 },
     { P_SHAPE, P_DETUNE, P_NOISE, P_CUTOFF, P_RESO, P_DRIVE, P_ATTACK, -1 },
-    { P_DECAY, P_SUSTAIN, P_RELEASE, P_LFO_RATE, P_LFO_DEPTH, P_LFO_DEST, -2, -1 },
+    { P_DECAY, P_SUSTAIN, P_RELEASE, P_LFO_RATE, P_LFO_DEPTH, P_LFO_DEST, kPlinkyMorphParam, -1 }, // plan 012: the morph time
 };
 const char* const kPlinkyLfoDest[3] = { "Pitch", "Shape", "Cutoff" };
 } // namespace
@@ -1948,8 +1949,16 @@ bool cInstrumentEditor::plinkyActive() const
 void cInstrumentEditor::showPlinkyCpu(bool force)
 {
     char t[sizeof(plinkyTitle)];
-    snprintf(t, sizeof(t), "PolySynth %d/3  CPU %d%% pk %d%%%s", plinkyPage, (int)(seqPlinkyCpu() + 0.5f), (int)(seqPlinkyCpuPeak() + 0.5f),
-             seqPlinkyNewerFile() ? "  (newer synth file: edits not saved)" : "");
+    char mt[24] = "";
+    uint16_t remain = 0;
+    uint8_t mpat = 0;
+    if (seqPlinkyMorphStatus(&remain, &mpat))
+        plinkymorph::titleText(mt, sizeof(mt), remain, mpat);
+    if (mt[0])
+        snprintf(t, sizeof(t), "PolySynth %d/3  %s  CPU %d%%", plinkyPage, mt, (int)(seqPlinkyCpu() + 0.5f));
+    else
+        snprintf(t, sizeof(t), "PolySynth %d/3  CPU %d%% pk %d%%%s", plinkyPage, (int)(seqPlinkyCpu() + 0.5f), (int)(seqPlinkyCpuPeak() + 0.5f),
+                 seqPlinkyNewerFile() ? "  (newer synth file: edits not saved)" : "");
     if (force || strcmp(t, plinkyTitle) != 0)
     {
         memcpy(plinkyTitle, t, sizeof(plinkyTitle));
@@ -1969,16 +1978,30 @@ void cInstrumentEditor::plinkyRefresh()
     showPlinkyCpu(false);
 }
 
+// the label of a place: the name, with a '*' when the value differs from the inherited one (plan 012)
+void cInstrumentEditor::plinkyPlaceName(uint8_t place)
+{
+    const int p = kPlinkyPages[plinkyPage - 1][place];
+    if (p < 0)
+    {
+        plinkyName[place][0] = 0;
+        return;
+    }
+    const bool mark = p < P_COUNT && ((seqPlinkyMarks() >> p) & 1u);
+    snprintf(plinkyName[place], sizeof(plinkyName[0]), "%s%s", seqplinky::uiInfo(p).name, mark ? "*" : "");
+}
+
 void cInstrumentEditor::showPlinkyValue(uint8_t place)
 {
     const int p = kPlinkyPages[plinkyPage - 1][place];
     if (p < 0)
         return;
     const int v = seqPlinkyGet(p);
-    const ParamInfo& pi = paramInfo(p);
+    const ParamInfo& pi = seqplinky::uiInfo(p);
     char* s = plinkyVal[place];
     switch (p)
     {
+        case kPlinkyMorphParam: plinkymorph::timeText(v, s, sizeof(plinkyVal[0])); break;
         case P_CHANNEL: snprintf(s, sizeof(plinkyVal[0]), v ? "MIDI %d" : "Off", v); break;
         case P_INTERVAL: snprintf(s, sizeof(plinkyVal[0]), "%+d st", v - 12); break;
         case P_LFO_DEST: snprintf(s, sizeof(plinkyVal[0]), "%s", kPlinkyLfoDest[v > 2 ? 2 : v]); break;
@@ -2005,7 +2028,8 @@ void cInstrumentEditor::showPlinkyParams()
         display.setControlColors(label[i], display.getTheme().activeLabelsColors);
         display.setRemoveControlStyle(label[i], controlStyleLimitTextWidth);
         display.setControlStyle2(label[i], controlStyleCenterX | controlStyleCenterY | controlStyleFont2);
-        display.setControlText(label[i], p >= 0 ? paramInfo(p).name : (p == -2 ? "" : "Next"));
+        plinkyPlaceName(i);
+        display.setControlText(label[i], p >= 0 ? plinkyName[i] : (p == -2 ? "" : "Next"));
         display.setControlText2(label[i], p >= 0 || p == -2 ? "" : (plinkyPage == 1 ? "p1/3" : (plinkyPage == 2 ? "p2/3" : "p3/3")));
         display.setRemoveControlStyle(label[i], controlStyleShowBitmap);
         display.setRemoveControlStyle(label[i], controlStyleSpecialFx2);
@@ -2060,6 +2084,18 @@ void cInstrumentEditor::plinkyChange(int d)
     if (p < 0)
         return;
     seqPlinkySet(p, seqPlinkyGet(p) + d);
+    if (p != kPlinkyMorphParam)
+        for (uint8_t i = 0; i < 8; i++) // a first edit makes the pattern's snapshot: the marks of the other places may change
+            if (kPlinkyPages[plinkyPage - 1][i] >= 0)
+            {
+                const bool was = plinkyName[i][strlen(plinkyName[i]) - 1] == '*';
+                plinkyPlaceName(i);
+                if (was != (plinkyName[i][strlen(plinkyName[i]) - 1] == '*'))
+                {
+                    display.setControlText(label[i], plinkyName[i]);
+                    display.refreshControl(label[i]);
+                }
+            }
     if (!plinkyActive())
     {
         showInstrumentMidiParams(); // the channel was changed away: back to the MIDI settings

@@ -124,6 +124,11 @@ inline int8_t velocityToVolume(uint8_t vel)
     return (int8_t)((vel * 100 + 63) / 127);
 }
 
+// v0.3.3: the volume a live note of a sequencer gets. The recorder stores a volume only when the stock "record velocity" option is on
+// (recParams().velocity); otherwise the recorded step has none (-1 = the instrument's own default). A live note must sound like the
+// step it records, so without the option it gets -1 as well (it used to get the generator's velocity: full scale, "always too loud").
+inline int8_t liveVolume(int8_t volume, bool recordVelocity) { return recordVelocity ? volume : (int8_t)-1; }
+
 // Does a track take over (mute its pattern, play the generator)?
 //  Chord/Arp: while a pad is held or a note still sounds (arp gaps are covered by the held pad).
 //  Mono: while the transport runs and the sequence has at least one step.

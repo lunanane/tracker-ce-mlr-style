@@ -82,7 +82,7 @@ static void box(int16_t x, int16_t y, int16_t w, int16_t h)
 
 void cSeqPlayLegend::update()
 {
-    if (view == nullptr || (view->mode == SeqPlayViewData::HIDDEN && view->edge == 0))
+    if (view == nullptr || (view->mode == SeqPlayViewData::HIDDEN && view->edge == 0 && !view->notes.show))
         return;
 
     const Theme& th = display.getTheme();
@@ -108,6 +108,12 @@ void cSeqPlayLegend::update()
 
     if (view->mode == SeqPlayViewData::HIDDEN)
     {
+        if (view->notes.show)
+        {
+            seqnotes::Palette pal = { th.backgroundColor, th.grey_22, th.green, th.yellow, th.white };
+            PlinkyCtx c;
+            seqnotes::drawBand(c, view->notes, pal);
+        }
         API_BLEND_FUNC(SRC_ALPHA, ONE_MINUS_SRC_ALPHA);
         return;
     }
@@ -175,7 +181,7 @@ void cSeqPlayLegend::update()
 
     // backing panel: two caption lines (state, how to play) above the 12 x 4 cells
     API_COLOR(th.backgroundColor);
-    box(kLegendX - 4, kLegendY - 38, 12 * kLegendCellW + 8, 4 * kLegendCellH + 40);
+    box(kLegendX - 4, kLegendY - 52, 12 * kLegendCellW + 8, 4 * kLegendCellH + 54);
 
     // cells: one RECTS batch per zone (one colour, one BEGIN / END); the active mode pad is white
     static const uint8_t kZones[] = { seqplay::Z_NONE, seqplay::Z_NOTE, seqplay::Z_STEP, seqplay::Z_PANEL,
@@ -220,6 +226,9 @@ void cSeqPlayLegend::update()
     API_COLOR(th.white);
     API_CMD_TEXT(kLegendX, (int16_t)(kLegendY - 27), font3, OPT_CENTERY, cap);
     API_CMD_TEXT(kLegendX, (int16_t)(kLegendY - 9), font1, OPT_CENTERY, seqplay::legendHelp(st));
+    API_COLOR(th.yellow);
+    API_CMD_TEXT((int16_t)(kLegendX + 12 * kLegendCellW), (int16_t)(kLegendY - 44), font1, OPT_CENTERY | OPT_RIGHTX, "tap track again to close");
+    API_COLOR(th.white);
     API_COLOR(0x000000);
     for (uint8_t row = 0; row < 4; row++)
     {

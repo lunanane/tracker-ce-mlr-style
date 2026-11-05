@@ -1,6 +1,6 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
-// Pure logic of the Play overlay (plan 005 R1): strip paging, track -> view window, the sequencer type list (M3), the Shift legend
-// gate (m3), strip texts and the pad legend. No Polyend includes, host-testable (core/seqtest/test_play.cpp).
+// Pure logic of the Play overlay (plan 005 R1): strip paging, track -> view window, the sequencer type list (M3), the legend gate
+// (tap on the selected track, v0.3.3), the Instrument Parameters key, strip texts and the pad legend. No Polyend includes, host-testable (core/seqtest/test_play.cpp).
 #pragma once
 #include <stdint.h>
 #include <stdio.h>
@@ -103,23 +103,34 @@ struct ScreenHold
     void clear() { mask = 0; listBtn = -1; }
 };
 
-// ---- Shift legend gate (m3): Shift is also the stock mute gesture; the legend shows only after Shift was held for kDelayMs with
-// no screen button pressed in between ----
+// ---- legend gate (v0.3.3): tapping the screen button of the track that is already selected toggles the pad legend ----
+// (Shift is the stock mute gesture and nothing else: the v0.3.2 Shift trigger never showed on the device, see plan 012; no long press.)
+// The first tap on another track only selects it (and closes the legend). The toggle happens at the release of a tap on the selected
+// track; a press that turned the wheel (hold + wheel = the type list) never toggles, and turning the wheel closes the legend.
+// The hold events of the keys driver mean nothing. The legend also closes on a track change, on leaving Play mode, when the synth
+// overlay opens and when a popup takes the inputs (close()).
 struct LegendGate
 {
-    enum { kDelayMs = 250 };
-    bool shift = false;
-    bool blocked = false;
-    uint32_t since = 0;
-    void shiftChanged(bool down, uint32_t nowMs)
+    bool on = false;
+    int8_t btn = -1;
+    bool tapOnSelected = false;
+    bool wheeled = false;
+    void pressed(uint8_t b, bool alreadySelected)
     {
-        if (down == shift) return;
-        shift = down;
-        blocked = false;
-        since = nowMs;
+        btn = (int8_t)(b & 7);
+        tapOnSelected = alreadySelected;
+        wheeled = false;
+        if (!alreadySelected) on = false; // another track: selected, no legend
     }
-    void screenButton() { if (shift) blocked = true; }
-    bool visible(uint32_t nowMs) const { return shift && !blocked && (uint32_t)(nowMs - since) >= (uint32_t)kDelayMs; }
+    void released(uint8_t b)
+    {
+        if (btn != (int8_t)(b & 7)) return;
+        btn = -1;
+        if (tapOnSelected && !wheeled) on = !on;
+    }
+    void wheel() { wheeled = true; on = false; }
+    void close() { on = false; btn = -1; }
+    bool visible() const { return on; }
 };
 
 // ---- v0.3.2: stock keys in Play mode. Note / Instr / FX1 / FX2 / Copy / Insert / Delete belong to the stock pattern editor; the router
@@ -197,7 +208,7 @@ struct StripCell
     bool cut = false;      // plays an MLR (CUT) jam
     const char* hint = nullptr; // hint of the last recording on this track (<= 11 characters), see recHintText
     const char* msg = nullptr;  // transient message (<= 11 characters)
-    bool shiftHint = false;     // v0.3.2: the selected sequencer cell tells how to see the pad map (set by the overlay)
+    bool shiftHint = false;     // v0.3.2: the selected sequencer cell tells how to see the pad map (tap the selected track button) (set by the overlay)
     bool synthHint = false;     // v0.3.2: ... and, in turns, how to open the PolySynth parameters (the track plays the PolySynth instrument)
     bool alt = false;           // which of the two hints is shown now (the overlay flips it every two seconds)
 };
@@ -245,7 +256,7 @@ inline void stripLine2(char* out, size_t n, const StripCell& c)
     else if (type == seqlogic::TYPE_OFF) snprintf(out, n, "pattern");
     else if (c.takenOver) snprintf(out, n, "live");
     else if (c.shiftHint && c.synthHint && c.alt && type != seqlogic::TYPE_OFF) snprintf(out, n, "Hold+Instr");
-    else if (c.shiftHint && type != seqlogic::TYPE_OFF) snprintf(out, n, "Shift: pads");
+    else if (c.shiftHint && type != seqlogic::TYPE_OFF) snprintf(out, n, "tap: help");
     else snprintf(out, n, "ready");
 }
 
@@ -629,6 +640,31 @@ inline uint8_t edgeSide(uint8_t selectedTrack, uint8_t stripPage)
 {
     uint8_t p = stripPageOfTrack(selectedTrack);
     return p == stripPage ? 0 : (p > stripPage ? 1 : 2);
+}
+
+// ---- the Instrument Parameters key in Play mode (plan 012, v0.3.3) ----
+// A popup owns the inputs: stock. Plain key: the selected track plays the PolySynth = the section overlay opens / closes (the pads keep
+// playing), any other instrument = the stock instrument page (as before). Shift + key ALWAYS jumps to the next PolySynth track
+// (wrapping; repeated presses cycle; the only one: the overlay stays / opens) and opens the overlay.
+enum ParamsAction : uint8_t { PK_STOCK = 0, PK_TOGGLE = 1, PK_JUMP = 2 };
+inline ParamsAction paramsKey(bool routable, bool shift, bool selectedIsSynth)
+{
+    if (!routable)
+        return PK_STOCK;
+    if (shift)
+        return PK_JUMP;
+    return selectedIsSynth ? PK_TOGGLE : PK_STOCK;
+}
+// next track after `cur` (wrapping, `cur` itself last) whose bit is set in `synthMask`; -1 = none
+inline int nextSynthTrack(uint16_t synthMask, uint8_t cur)
+{
+    for (int i = 1; i <= kTracks; i++)
+    {
+        const int t = (cur + i) % kTracks;
+        if ((synthMask >> t) & 1u)
+            return t;
+    }
+    return -1;
 }
 
 // ---- what a view change does to the overlay's state (plan 005 M5 survival table, Play-mode rows) ----
