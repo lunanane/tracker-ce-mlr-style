@@ -13,7 +13,7 @@ namespace plinkyvoice {
 
 enum Param : uint8_t
 {
-    P_CHANNEL,   // 0 = off, 1..16 = the MIDI instrument / channel that plays the voice (instrument 1..16 of the MIDI list)
+    P_CHANNEL,   // 1..16 = the MIDI instrument / channel that is the "PolySynth" instrument (default 16; v0.3.2: not visible any more; 0 = off, only from old files)
     P_VOICES,    // 1..4
     P_LEVEL,
     P_REVERB,    // send
@@ -46,7 +46,7 @@ struct ParamInfo
 inline const ParamInfo& paramInfo(int i)
 {
     static const ParamInfo t[P_COUNT] = {
-        { 0, 16, 0, "Channel" },   { 1, 4, 4, "Voices" },    { 0, 100, 70, "Level" },  { 0, 100, 0, "Reverb" },
+        { 0, 16, 16, "Channel" },   { 1, 4, 4, "Voices" },    { 0, 100, 70, "Level" },  { 0, 100, 0, "Reverb" },
         { 0, 100, 0, "Delay" },    { 0, 100, 0, "Glide" },   { 0, 100, 60, "Width" },  { 0, 100, 0, "Shape" },
         { 0, 100, 30, "Detune" },  { 0, 24, 12, "Interval" }, { 0, 100, 0, "Noise" },  { 0, 100, 60, "Cutoff" },
         { 0, 100, 20, "Reso" },    { 0, 100, 30, "Drive" },  { 0, 100, 10, "Attack" }, { 0, 100, 50, "Decay" },

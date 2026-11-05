@@ -103,36 +103,20 @@ void seqPanicPlinky()
     eng().allNotesOff();
 }
 
-void seqPlinkyClaim()
-{
-    if (eng().param(P_CHANNEL) != 0)
-        return;
-    // v0.3.1 minor 5: a channel no pattern track and no last-used instrument uses (that one is likely an external synth), else MIDI 16
-    uint16_t used = 0;
-    const int last = mtProject.values.lastUsedInstrument;
-    if (last >= MIDI_INSTRUMENTS_START_IDX && last < MIDI_INSTRUMENTS_START_IDX + kMidiInstrumentsCount)
-        used = (uint16_t)(used | (1u << (last - MIDI_INSTRUMENTS_START_IDX)));
-    const Sequencer::strPattern* pat = sequencer.getActualPattern();
-    for (uint8_t t = 0; t < kAllTracks; t++)
-    {
-        uint8_t len = pat->track[0].length;
-        if (len > Sequencer::MAXSTEP)
-            len = Sequencer::MAXSTEP;
-        for (uint8_t s = 0; s <= len; s++)
-        {
-            const Sequencer::strPattern::strTrack::strStep& st = pat->track[t].step[s];
-            if (st.note >= Sequencer::STEP_NOTE_MIN && st.instrument >= MIDI_INSTRUMENTS_START_IDX &&
-                st.instrument < MIDI_INSTRUMENTS_START_IDX + kMidiInstrumentsCount)
-                used = (uint16_t)(used | (1u << (st.instrument - MIDI_INSTRUMENTS_START_IDX)));
-        }
-    }
-    seqPlinkySet(P_CHANNEL, seqplinky::claimChannel(used));
-}
-
 int seqPlinkyInstrument()
 {
     const int ch = eng().param(P_CHANNEL);
     return (ch >= 1 && ch <= kMidiInstrumentsCount) ? MIDI_INSTRUMENTS_START_IDX + ch - 1 : -1;
+}
+
+bool seqPlinkyIsVoiceInstrument(int instrument)
+{
+    return instrument >= 0 && instrument == seqPlinkyInstrument();
+}
+
+bool seqPlinkyTrackUsesVoice(uint8_t track)
+{
+    return seqPlinkyIsVoiceInstrument(sequencer.seqPickInstrument(track));
 }
 
 int seqPlinkyGet(int param)
@@ -216,7 +200,9 @@ void seqPlinkyLoadWorkspace()
     }
     s_loadedId = seqlogic::projectId(newFileManager.getCurrentProjectPath(), newFileManager.getCurrentProjectName());
     eng().allNotesOff();
-    apply(p); // a project without the file: the synth voice is off (Channel 0), the MIDI instruments work as before
+    if (p.v[P_CHANNEL] == 0)
+        p.v[P_CHANNEL] = paramInfo(P_CHANNEL).def; // v0.3.2: the PolySynth instrument always exists (a v0.3 file with the voice off: MIDI instrument 16)
+    apply(p); // a file of v0.3 / v0.3.1 keeps its claimed channel: that MIDI instrument is the PolySynth instrument
     s_savedHash = p.hash();
     s_wsWritePending = false;
     s_dirty.dirty = false;

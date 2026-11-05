@@ -126,7 +126,8 @@ struct LegendGate
 // only keeps what the sequencer features need. The stock edit actions (jog edit of the cursor step, copy / paste, insert, delete) need the
 // stock edit mode, and Rec (which toggles it in stock) is the take key here, so the edit mode is borrowed for as long as one of these keys
 // is down (EditKeys.held != 0): the overlay sets it on the press and gives it back on the first pass after the last release.
-// Instr with a screen button held (or with the synth overlay open) is the PolySynth overlay's key, never the stock one.
+// Instr with a screen button held (or with the synth overlay open) is the PolySynth overlay's key, never the stock one (the overlay
+// opens only when the selected track plays the PolySynth instrument; otherwise the key does nothing and a message says so).
 struct EditKeys
 {
     enum Key : uint8_t { K_NOTE = 0, K_INSTR = 1, K_FX1 = 2, K_FX2 = 3, K_COPY = 4, K_INSERT = 5, K_DELETE = 6, K_COUNT = 7 };
@@ -197,6 +198,8 @@ struct StripCell
     const char* hint = nullptr; // hint of the last recording on this track (<= 11 characters), see recHintText
     const char* msg = nullptr;  // transient message (<= 11 characters)
     bool shiftHint = false;     // v0.3.2: the selected sequencer cell tells how to see the pad map (set by the overlay)
+    bool synthHint = false;     // v0.3.2: ... and, in turns, how to open the PolySynth parameters (the track plays the PolySynth instrument)
+    bool alt = false;           // which of the two hints is shown now (the overlay flips it every two seconds)
 };
 
 // v0.1 recording hints on line 2 of the recorded track's cell (overflow beats MIDI-only beats reduced)
@@ -214,12 +217,12 @@ static_assert(sizeof(kHrShort) / sizeof(kHrShort[0]) == seqlogic::kHrScripts && 
 inline const char* typeShort(uint8_t type)
 {
     if (seqlogic::isHrType(type)) return kHrShort[type - seqlogic::TYPE_HR_FIRST];
-    return type == seqlogic::TYPE_CHORDARP ? "CHRD" : type == seqlogic::TYPE_MONO ? "MONO" : type == seqlogic::TYPE_PLINKY ? "POLY" : "---";
+    return type == seqlogic::TYPE_CHORDARP ? "CHRD" : type == seqlogic::TYPE_MONO ? "MONO" : type == seqlogic::TYPE_PLINKY ? "STRG" : "---";
 }
 inline const char* typeName(uint8_t type)
 {
     if (seqlogic::isHrType(type)) return kHrName[type - seqlogic::TYPE_HR_FIRST];
-    return type == seqlogic::TYPE_CHORDARP ? "Chord/Arp" : type == seqlogic::TYPE_MONO ? "Mono" : type == seqlogic::TYPE_PLINKY ? "PolySynth" : "Off";
+    return type == seqlogic::TYPE_CHORDARP ? "Chord/Arp" : type == seqlogic::TYPE_MONO ? "Mono" : type == seqlogic::TYPE_PLINKY ? "Strings" : "Off";
 }
 
 // line 1: "6 MONO*"; the selected track in brackets: "[6 MONO*]"
@@ -241,8 +244,8 @@ inline void stripLine2(char* out, size_t n, const StripCell& c)
     else if (c.cut) snprintf(out, n, "cut");
     else if (type == seqlogic::TYPE_OFF) snprintf(out, n, "pattern");
     else if (c.takenOver) snprintf(out, n, "live");
+    else if (c.shiftHint && c.synthHint && c.alt && type != seqlogic::TYPE_OFF) snprintf(out, n, "Hold+Instr");
     else if (c.shiftHint && type != seqlogic::TYPE_OFF) snprintf(out, n, "Shift: pads");
-    else if (type == seqlogic::TYPE_PLINKY) snprintf(out, n, "voice");
     else snprintf(out, n, "ready");
 }
 
@@ -563,7 +566,7 @@ inline const char* legendCaption(uint8_t type)
     if (seqlogic::isHrType(type)) return typeName(type);
     if (type == seqlogic::TYPE_CHORDARP) return "CHORD/ARP";
     if (type == seqlogic::TYPE_MONO) return "MONO";
-    if (type == seqlogic::TYPE_PLINKY) return "POLYSYNTH";
+    if (type == seqlogic::TYPE_PLINKY) return "STRINGS";
     return "";
 }
 
@@ -587,7 +590,7 @@ inline void legendTitle(const LegendState& st, char* out, size_t n)
     else if (st.type == seqlogic::TYPE_PLINKY)
     {
         static const char* const kPc[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
-        snprintf(out, n, "POLYSYNTH   %s   %s %s   Octave %d   Strings +%d degrees", st.plMenu ? "Setup" : "Notes", kPc[st.pl.root % 12],
+        snprintf(out, n, "STRINGS   %s   %s %s   Octave %d   String step +%d", st.plMenu ? "Setup" : "Notes", kPc[st.pl.root % 12],
                  seqplinky::scaleDef(st.pl.scale).name, (int)st.pl.octave, (int)st.pl.interval);
     }
     else if (seqlogic::isHrType(st.type) && st.hr)
@@ -615,8 +618,8 @@ inline const char* legendHelp(const LegendState& st)
         return "Tap a cell: note on/off. Hold Loop + tap first and last step = loop. Half: steps 9-16.";
     }
     if (st.type == seqlogic::TYPE_PLINKY)
-        return st.plMenu ? "Pick root, scale, octave, string (Str). Notes pad: back. Hold track + Instr: sound." :
-                           "Columns = strings, rows climb a string. Setup pad: key. Hold track + Instr: sound.";
+        return st.plMenu ? "Pick root, scale, octave, string step (Str). Notes pad: back." :
+                           "Columns = strings, rows climb a string. Plays the track's instrument. Setup pad: key.";
     if (seqlogic::isHrType(st.type) && st.hr && st.hr->help) return st.hr->help;
     return "";
 }

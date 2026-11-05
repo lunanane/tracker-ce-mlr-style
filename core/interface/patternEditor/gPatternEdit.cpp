@@ -5,6 +5,9 @@
 #include "mtStructs.h"
 #include "patternEditor/patternEditor.h"
 #include "seqPlay/seqPlay.h"
+#ifdef FEATURE_PLINKY
+#include "seqPlinky.h"
+#endif
 #include "performanceMode/performanceMode.h"
 #include "scales.h"
 
@@ -485,6 +488,10 @@ void cPatternEditor::fillInstrumentNames()
     {
         sprintf(
           &interfaceGlobals.intrumentsNames[kSampleInstrumentsCount + i][0], "MIDI %d", i + 1);
+#ifdef FEATURE_PLINKY
+        if (seqPlinkyIsVoiceInstrument(kSampleInstrumentsCount + i))
+            strcpy(&interfaceGlobals.intrumentsNames[kSampleInstrumentsCount + i][0], "PolySynth");
+#endif
         interfaceGlobals.ptrIntrumentsNames[kSampleInstrumentsCount + i] =
           &interfaceGlobals.intrumentsNames[kSampleInstrumentsCount + i][0];
     }

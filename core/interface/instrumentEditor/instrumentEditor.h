@@ -374,7 +374,7 @@ class cInstrumentEditor : public ModuleBase
     void showInstrumentMidiParams();
 #ifdef FEATURE_PLINKY
     // plan 009 S: a MIDI instrument whose channel is the synth voice channel shows the voice parameters (3 pages of 8) instead
-    // of the MIDI settings; the CPU of the voice is in the title. Shift + screen button 1 on a MIDI instrument claims its channel.
+    // of the MIDI settings; the CPU of the voice is in the title. (v0.3.2: the voice instrument is fixed, no claim gesture.)
     bool plinkyActive() const;
     void showPlinkyParams();
     void showPlinkyValue(uint8_t place);

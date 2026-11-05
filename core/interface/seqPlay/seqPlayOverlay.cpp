@@ -222,26 +222,13 @@ void SeqPlayOverlay::closeList(bool apply)
         int type = list_.release(seqEngine.type(track), seqEngine.pendingType(track));
         if (type == seqlogic::TYPE_PLINKY && seqEngine.plinkyOwner() != 0xFF && seqEngine.plinkyOwner() != track)
         {
-            // one voice: the track that has it keeps it (the refusal is shown on the track that asked)
-            snprintf(ownerMsg_, sizeof(ownerMsg_), "voice on T%d", seqEngine.plinkyOwner() + 1);
+            // one Strings track (its setup is shared): the track that has it keeps it (the refusal is shown on the track that asked)
+            snprintf(ownerMsg_, sizeof(ownerMsg_), "Strings T%d", seqEngine.plinkyOwner() + 1);
             setMessage(ownerMsg_);
         }
         else if (type >= 0)
         {
-            if (seqEngine.postType(track, (uint8_t)type)) // at the next bar while the transport runs
-            {
-#ifdef FEATURE_PLINKY
-                if (type == seqlogic::TYPE_PLINKY)
-                {
-                    seqPlinkyClaim(); // the voice gets its channel now, before the first pad
-                    if (seqPlinkyGet(plinkyvoice::P_CHANNEL) != 0)
-                    {
-                        snprintf(ownerMsg_, sizeof(ownerMsg_), "on MIDI %d", seqPlinkyGet(plinkyvoice::P_CHANNEL));
-                        setMessage(ownerMsg_); // v0.3.1 minor 5: where the voice sits (the strip cell takes 11 characters; the overlay title says 'PolySynth T? on MIDI n')
-                    }
-                }
-#endif
-            }
+            seqEngine.postType(track, (uint8_t)type); // at the next bar while the transport runs
         }
     }
     else
@@ -527,14 +514,17 @@ void SeqPlayOverlay::plinkyToggle()
         plinkyClose();
         return;
     }
-    if (seqEngine.type(selected()) == seqlogic::TYPE_PLINKY)
+#ifdef FEATURE_PLINKY
+    // v0.3.2: the overlay belongs to the PolySynth instrument, whatever sequencer type the track has
+    if (seqPlinkyTrackUsesVoice(selected()))
     {
         plinkyOpen_ = true;
         plinkyCur_.fix();
         legend_.screenButton(); // no Shift legend over it
     }
     else
-        setMessage("not a synth");
+#endif
+        setMessage("not PolySynth");
 }
 
 void SeqPlayOverlay::plinkyNav(uint8_t button)
@@ -609,8 +599,8 @@ void SeqPlayOverlay::refreshStrip(bool force)
         c.msg = (c.selected && msg_) ? msg_ : nullptr;
         c.shiftHint = c.selected && c.type != seqlogic::TYPE_OFF; // v0.3.2: "Shift: pads" where nothing else needs the line
 #ifdef FEATURE_PLINKY
-        if (!c.msg && c.type == seqlogic::TYPE_PLINKY && seqPlinkyInstrument() < 0)
-            c.msg = "voice off"; // v0.3.1 minor 6: the PolySynth track plays nothing without a channel
+        c.synthHint = c.selected && seqPlinkyTrackUsesVoice(t);
+        c.alt = ((seqNowMs() / 2000u) & 1u) != 0;
 #endif
 
         // only the cells whose content changed are rewritten
@@ -619,7 +609,7 @@ void SeqPlayOverlay::refreshStrip(bool force)
         mix(t);
         mix(c.type | (c.pending << 4) | ((uint32_t)c.takenOver << 12) | ((uint32_t)c.rec << 13) | ((uint32_t)c.launched << 14) |
             ((uint32_t)c.cut << 15) | ((uint32_t)c.selected << 16) | ((uint32_t)(c.msg != nullptr) << 17) |
-            ((uint32_t)(c.hint ? c.hint[0] : 0) << 18) | ((uint32_t)c.shiftHint << 26));
+            ((uint32_t)(c.hint ? c.hint[0] : 0) << 18) | ((uint32_t)c.shiftHint << 26) | ((uint32_t)c.synthHint << 27) | ((uint32_t)(c.synthHint && c.alt) << 28));
         if (!force && key == cellKey_[i])
             continue;
         cellKey_[i] = key;
@@ -668,8 +658,10 @@ void SeqPlayOverlay::refreshView()
     uint8_t sel = selected();
     view_.edge = (active_ && !list_.open) ? seqplay::edgeSide(sel, stripPage_) : 0;
     view_.edgeTrack = (uint8_t)(sel + 1);
-    if (plinkyOpen_ && (!routable() || seqEngine.type(sel) != seqlogic::TYPE_PLINKY))
-        plinkyClose(); // another track, another type or a popup: the overlay ends
+#ifdef FEATURE_PLINKY
+    if (plinkyOpen_ && (!routable() || !seqPlinkyTrackUsesVoice(sel)))
+        plinkyClose(); // another track, another instrument or a popup: the overlay ends
+#endif
     if (plinkyOpen_)
     {
 #ifdef FEATURE_PLINKY
@@ -680,7 +672,6 @@ void SeqPlayOverlay::refreshView()
         m.sec = plinkyCur_.sec;
         m.idx = plinkyCur_.idx;
         m.track = (uint8_t)(sel + 1);
-        m.channel = (uint8_t)seqPlinkyGet(plinkyvoice::P_CHANNEL);
         m.cpu = (uint8_t)(seqPlinkyCpu() + 0.5f);
         m.peak = (uint8_t)(seqPlinkyCpuPeak() + 0.5f);
         m.newer = seqPlinkyNewerFile() ? 1 : 0;

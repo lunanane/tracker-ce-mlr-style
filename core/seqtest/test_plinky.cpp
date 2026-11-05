@@ -85,7 +85,7 @@ static void test_params_and_sidecar()
     }
     Params a;
     CHECK(a.isDefault());
-    CHECK(a.v[P_CHANNEL] == 0); // off by default: a project that never used it is unchanged
+    CHECK(a.v[P_CHANNEL] == 16); // v0.3.2: the PolySynth instrument is MIDI instrument 16 by default (was: off)
     a.v[P_CUTOFF] = 12;
     a.v[P_INTERVAL] = 19;
     CHECK(!a.isDefault());

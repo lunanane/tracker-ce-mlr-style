@@ -108,7 +108,7 @@ struct Model
     uint8_t v[P_COUNT];
     uint8_t sec, idx;
     uint8_t track;   // 1..16
-    uint8_t channel; // P_CHANNEL
+    uint8_t channel; // P_CHANNEL (not shown since v0.3.2)
     uint8_t cpu, peak;
     uint8_t newer;   // plinky.bin of a newer mod version: edits are not saved
     Model() { memset(this, 0, sizeof(*this)); }
@@ -160,7 +160,7 @@ template <class C> void draw(C& c, const Model& m, const Palette& p)
     // ---- texts ----
     c.textPhase();
     c.color(p.text);
-    snprintf(buf, sizeof buf, "PolySynth T%d on MIDI %d  CPU %d%% pk %d%%", m.track, m.channel, m.cpu, m.peak);
+    snprintf(buf, sizeof buf, "PolySynth (track %d)  CPU %d%% pk %d%%", m.track, m.cpu, m.peak);
     c.text(12, 42, 3, 2, buf);
     c.text(12, 398, 1, 2, "Left/Right: param  Up/Down: section  Jog: value (Shift: fine)  Default: reset");
     c.text(12, 412, 1, 2, m.newer ? "Instr: close      Newer synth file: edits are not saved" : "Instr: close");

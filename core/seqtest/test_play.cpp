@@ -360,12 +360,24 @@ static void test_strip_shift_hint()
     c.type = seqlogic::TYPE_OFF;
     stripLine2(b, sizeof b, c);
     CHECK(strcmp(b, "pattern") == 0);
-    // the PolySynth legend names the synth overlay key
+    // a selected track that plays the PolySynth instrument alternates the hint with the way to its parameters (hold the track + Instr)
+    c.type = seqlogic::TYPE_MONO;
+    c.synthHint = true;
+    c.alt = false;
+    stripLine2(b, sizeof b, c);
+    CHECK(strcmp(b, "Shift: pads") == 0);
+    c.alt = true;
+    stripLine2(b, sizeof b, c);
+    CHECK(strcmp(b, "Hold+Instr") == 0);
+    c.synthHint = false;
+    stripLine2(b, sizeof b, c);
+    CHECK(strcmp(b, "Shift: pads") == 0); // no synth: nothing to open
+    // the Strings legend is a pad interface for the track's own instrument
     LegendState st;
     st.type = seqlogic::TYPE_PLINKY;
-    CHECK(strstr(legendHelp(st), "Hold track + Instr") != nullptr && strlen(legendHelp(st)) <= 88);
+    CHECK(strstr(legendHelp(st), "instrument") != nullptr && strlen(legendHelp(st)) <= 88);
     st.plMenu = 1;
-    CHECK(strstr(legendHelp(st), "Hold track + Instr") != nullptr && strlen(legendHelp(st)) <= 88);
+    CHECK(strlen(legendHelp(st)) <= 88);
 }
 
 static void test_rec_hints_and_priority()

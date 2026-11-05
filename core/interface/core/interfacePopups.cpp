@@ -13,6 +13,9 @@
 #endif
 
 #include "config.h"
+#ifdef FEATURE_PLINKY
+#include "seqPlinky.h"
+#endif
 #include "patternEditor/patternEditor.h"
 #include "string.h"
 #include "util_math.h"
@@ -1006,6 +1009,10 @@ int InterfacePopups::listInstruments(enumStepPopups mode)
                 "%d. MIDI Channel %d",
                 kSampleInstrumentsCount + i + 3,
                 i + 1);
+#ifdef FEATURE_PLINKY
+        if (seqPlinkyIsVoiceInstrument(kSampleInstrumentsCount + i)) // v0.3.2: the synth voice has its own name
+            sprintf(&interfaceGlobals.intrumentsNames[instrIdx][0], "%d. PolySynth", kSampleInstrumentsCount + i + 3);
+#endif
         interfaceGlobals.ptrIntrumentsNames[instrIdx] =
           &interfaceGlobals.intrumentsNames[instrIdx][0];
         instrIdx++;
