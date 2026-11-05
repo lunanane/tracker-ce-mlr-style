@@ -7,6 +7,10 @@
 #include <cmath>
 #include <masterParams/masterParams.h>
 #include "seqFx.h"
+#ifdef FEATURE_PLINKY
+#include "seqPlinky.h"
+#include "PlinkyVoice/plinky_params.h"
+#endif
 #include "mtAudioEngine.h"
 
 static const uint16_t framesPlaces[8][4] = {
@@ -666,8 +670,14 @@ void cMasterParams::showLimiterScreen()
     display.setControlText2(label[4], " ");
     display.setControlText(label[5], " ");
     display.setControlText2(label[5], " ");
+#ifdef FEATURE_PLINKY
+    display.setControlText(label[6], "Plinky");
+    display.setControlText2(label[6], plinkyEntryVal);
+    plinkyEntryVal[0] = 0;
+#else
     display.setControlText(label[6], " ");
     display.setControlText2(label[6], " ");
+#endif
     display.setControlText(label[7], "Back");
     display.setControlText2(label[7], " ");
 
@@ -708,6 +718,9 @@ void cMasterParams::showLimiterScreen()
     showLimiterThreshold();
     showLimiterGainReduce();
     showLimiterSidechain();
+#ifdef FEATURE_PLINKY
+    showPlinkyEntry();
+#endif
 
     frameData.placesCount = 5;
     frameData.startPlace = selectedPlaceLimiter;
@@ -2073,3 +2086,181 @@ void cMasterParams::hideControlUnderMenu()
         display.setControlHide(blankSpaceCover[2]);
     }
 }
+
+#ifdef FEATURE_PLINKY
+// plan 009 S: Master > Limiter > "Plinky" (slot 7). The synth voice parameters, 3 pages of 8 places, and its CPU in the title.
+namespace
+{
+using namespace plinkyvoice;
+// page 1: voice and sends, page 2: oscillators and filter, page 3: envelope and LFO; -1 = Next / Back
+const int8_t kPlinkyPages[3][8] = {
+    { P_CHANNEL, P_VOICES, P_LEVEL, P_REVERB, P_DELAY, P_GLIDE, P_WIDTH, -1 },
+    { P_SHAPE, P_DETUNE, P_INTERVAL, P_NOISE, P_CUTOFF, P_RESO, P_DRIVE, -1 },
+    { P_ATTACK, P_DECAY, P_SUSTAIN, P_RELEASE, P_LFO_RATE, P_LFO_DEPTH, P_LFO_DEST, -1 },
+};
+const char* const kPlinkyLfoDest[3] = { "Pitch", "Shape", "Cutoff" };
+} // namespace
+
+void cMasterParams::showPlinkyEntry()
+{
+    snprintf(plinkyEntryVal, sizeof(plinkyEntryVal), "%d%% pk %d%%", (int)(seqPlinkyCpu() + 0.5f), (int)(seqPlinkyCpuPeak() + 0.5f));
+    display.setControlText2(label[6], plinkyEntryVal);
+    display.refreshControl(label[6]);
+}
+
+void cMasterParams::showPlinkyCpu()
+{
+    char t[sizeof(plinkyTitle)];
+    snprintf(t, sizeof(t), "Plinky %d/3  CPU %d%% pk %d%%", plinkyPage, (int)(seqPlinkyCpu() + 0.5f), (int)(seqPlinkyCpuPeak() + 0.5f));
+    if (strcmp(t, plinkyTitle) != 0)
+    {
+        memcpy(plinkyTitle, t, sizeof(plinkyTitle));
+        titleBar->setTitle(plinkyTitle);
+    }
+}
+
+void cMasterParams::showPlinkyValue(uint8_t place)
+{
+    const int p = kPlinkyPages[plinkyPage - 1][place];
+    if (p < 0)
+        return;
+    const int v = seqPlinkyGet(p);
+    const ParamInfo& pi = paramInfo(p);
+    char* s = plinkyVal[place];
+    switch (p)
+    {
+        case P_CHANNEL:
+            if (v)
+                snprintf(s, sizeof(plinkyVal[0]), "MIDI %d", v);
+            else
+                snprintf(s, sizeof(plinkyVal[0]), "Off");
+            break;
+        case P_INTERVAL: snprintf(s, sizeof(plinkyVal[0]), "%+d st", v - 12); break;
+        case P_LFO_DEST: snprintf(s, sizeof(plinkyVal[0]), "%s", kPlinkyLfoDest[v > 2 ? 2 : v]); break;
+        default: snprintf(s, sizeof(plinkyVal[0]), "%d", v); break;
+    }
+    display.setControlValue(barControl[place], (v - pi.min) * 100 / (pi.max - pi.min));
+    display.refreshControl(barControl[place]);
+    display.setControlText2(label[place], s);
+    display.refreshControl(label[place]);
+}
+
+void cMasterParams::refreshPlinkyFrame()
+{
+    display.setControlValue(frameControl, plinkyPlace);
+    display.setControlShow(frameControl);
+    display.refreshControl(frameControl);
+}
+
+void cMasterParams::showPlinkyScreen()
+{
+    display.setControlHide(saturationList);
+    display.setControlHide(limiterSidechainList);
+    display.refreshControl(limiterSidechainList);
+
+    for (uint8_t i = 0; i < 8; i++)
+    {
+        barData[i].value = display.getTheme().white;
+    }
+
+    titleBar->show();
+    plinkyTitle[0] = 0;
+    showPlinkyCpu();
+
+    for (uint8_t i = 0; i < 8; i++)
+    {
+        const int p = kPlinkyPages[plinkyPage - 1][i];
+        display.setControlText(label[i], p >= 0 ? paramInfo(p).name : (plinkyPage == 3 ? "Back" : "Next"));
+        display.setControlText2(label[i], " ");
+    }
+
+    resizeToDefaultMaster();
+    resizeBarControl(displayMode::masterValues);
+
+    for (uint8_t i = 0; i < 8; i++)
+    {
+        display.setControlValue(label[i], 1);
+        display.setControlStyle2(label[i], controlStyleCenterX | controlStyleCenterY | controlStyleFont2);
+        display.setControlShow(label[i]);
+        display.refreshControl(label[i]);
+
+        if (kPlinkyPages[plinkyPage - 1][i] >= 0)
+        {
+            display.setControlShow(barControl[i]);
+        }
+        else
+        {
+            display.setControlHide(barControl[i]);
+        }
+        display.refreshControl(barControl[i]);
+    }
+
+    for (uint8_t i = 0; i < 8; i++)
+        showPlinkyValue(i);
+
+    frameData.placesCount = 8;
+    frameData.startPlace = plinkyPlace;
+    for (uint8_t i = 0; i < 8; i++)
+        frameData.places[i] = &framesPlaces[i][0];
+
+    refreshPlinkyFrame();
+
+    display.refreshControl(bgLabel);
+    display.setControlValue(bgLabel, 255);
+
+    display.setControlHide(blankSpaceCover[0]);
+    display.setControlHide(blankSpaceCover[1]);
+    display.setControlHide(blankSpaceCover[2]);
+
+    display.synchronizeRefresh();
+
+    lightUpPadBoard();
+}
+
+void cMasterParams::plinkyChange(int d)
+{
+    const int p = kPlinkyPages[plinkyPage - 1][plinkyPlace];
+    if (p < 0)
+        return;
+    seqPlinkySet(p, seqPlinkyGet(p) + d);
+    showPlinkyValue(plinkyPlace);
+}
+
+void cMasterParams::plinkyMove(int d)
+{
+    const int n = (int)plinkyPlace + d;
+    if (n < 0 || n > 7)
+        return;
+    plinkyPlace = (uint8_t)n;
+    refreshPlinkyFrame();
+}
+
+void cMasterParams::plinkyDefault()
+{
+    const int p = kPlinkyPages[plinkyPage - 1][plinkyPlace];
+    if (p < 0)
+        return;
+    seqPlinkyDefault(p);
+    showPlinkyValue(plinkyPlace);
+}
+
+void cMasterParams::plinkyButton(uint8_t place)
+{
+    if (kPlinkyPages[plinkyPage - 1][place] >= 0)
+    {
+        plinkyPlace = place;
+        refreshPlinkyFrame();
+        return;
+    }
+    if (plinkyPage < 3)
+    {
+        plinkyPage++;
+        plinkyPlace = 0;
+        showPlinkyScreen();
+    }
+    else
+    {
+        switchToLimiterScreen();
+    }
+}
+#endif

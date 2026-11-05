@@ -73,6 +73,10 @@ template class AudioMixer<4>;
 template class AudioMixer<7>;
 template class AudioMixer<8>;
 template class AudioMixer<10>;
+#ifdef FEATURE_PLINKY
+template class AudioMixer<9>;  // plan 009 S: tracks mixers (8 sample voices + the synth voice)
+template class AudioMixer<12>; // plan 009 S: reverb / delay send mixers (+ left / right of the synth voice)
+#endif
 #ifdef PLATFORM_IMX
 template class AudioMixer<18>;
 template class AudioMixer<11>;

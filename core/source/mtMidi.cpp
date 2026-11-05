@@ -13,6 +13,9 @@
 #include "core/interface.h"
 #include "util_math.h"
 #include <cmath>
+#ifdef FEATURE_PLINKY
+#include "seqPlinky.h"
+#endif
 
 extern cPatternEditor patternEditor;
 
@@ -515,6 +518,10 @@ void handleJackSongPosition(unsigned int beats)
 
 AUDIO_CORE_RAM void sendCC(uint8_t index, uint8_t value, uint8_t channel, bool toSynth)
 {
+#ifdef FEATURE_PLINKY
+    if (!toSynth && seqPlinkyControlChange(channel, index, value))
+        return; // plan 009 S: the MIDI instrument of this channel is the synth voice
+#endif
     if (toSynth)
     {
 #ifdef FEATURE_SYNTH
@@ -637,6 +644,11 @@ void sendPitchbend(int16_t value, int8_t channel, bool toSynth)
     assert(channel > 0);
     assert(channel <= 16);
 
+#ifdef FEATURE_PLINKY
+    if (!toSynth && seqPlinkyPitchBend(channel, value))
+        return;
+#endif
+
     if (toSynth)
     {
 #ifdef FEATURE_SYNTH
@@ -666,6 +678,11 @@ void sendMidiNoteOn(uint8_t note, uint8_t velo, uint8_t channel, bool toSynth)
 {
     assert(channel > 0);
     assert(channel <= 16);
+
+#ifdef FEATURE_PLINKY
+    if (!toSynth && seqPlinkyNote(channel, note, velo, true))
+        return;
+#endif
 
     if (toSynth)
     {
@@ -698,6 +715,11 @@ void sendMidiNoteOff(uint8_t note, [[maybe_unused]] uint8_t velo, uint8_t channe
 {
     assert(channel > 0);
     assert(channel <= 16);
+
+#ifdef FEATURE_PLINKY
+    if (!toSynth && seqPlinkyNote(channel, note, 0, false))
+        return;
+#endif
 
     if (toSynth)
     {

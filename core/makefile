@@ -57,6 +57,7 @@ DEFINES += $(FW_VERSION_DEFINES) $(CUSTOM_DEFINES)
 
 ifeq ($(PLATFORM), MK66)
 COMPILER_OPTIONS+=-mcpu=cortex-m4 -mfpu=fpv4-sp-d16 
+DEFINES+=-DFEATURE_PLINKY
 else ifeq ($(PLATFORM), IMX)
 COMPILER_OPTIONS+=-mcpu=cortex-m7 -mfpu=fpv5-sp-d16 -mfp16-format=ieee
 DEFINES+=-DPLATFORM_IMX -DFEATURE_SYNTH
@@ -87,7 +88,7 @@ endif
 # (source/mtSequencer*, seq*), and the three UI files that hold AUDIO_CORE_RAM (interrupt/audio-timed) functions.
 ifeq ($(PLATFORM), MK66)
 OS_DIRS		:= interface FileManager Exporter libs/NewDisplay libs/fonts libs/images libs/FT812
-OS_FILES	:= source/FileBrowser source/ThemeManager source/Themes source/mtRandomNameGenerator source/mtGridEditor source/mtConfig source/mtSliceDetector source/mtSliceManager
+OS_FILES	:= source/FileBrowser source/ThemeManager source/Themes source/mtRandomNameGenerator source/mtGridEditor source/mtConfig source/mtSliceDetector source/mtSliceManager source/seqPlinky
 OS_KEEP_O2	:= interface/core/songTimer interface/performanceMode/fPerformance FileManager/fileManagerSong
 OS_OBJS		:= $(filter $(addprefix $(OBJ_DIR)/,$(addsuffix /%,$(OS_DIRS)) $(addsuffix .o,$(OS_FILES))),$(OBJS))
 OS_OBJS		:= $(filter-out $(addprefix $(OBJ_DIR)/,$(addsuffix .o,$(OS_KEEP_O2))),$(OS_OBJS))

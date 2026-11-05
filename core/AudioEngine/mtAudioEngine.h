@@ -11,6 +11,9 @@
 #include "Platform.h"
 #include "SdStream.h"
 #include "SynthVoice.h"
+#ifdef FEATURE_PLINKY
+#include "synth_plinky.h"
+#endif
 #include "padToBeatNoteConverter.h"
 #include <bitset>
 #include <map>
@@ -198,6 +201,13 @@ class audioEngine
     ExportQueues* getExportQueues();
     MixerAndFxs<kVoices>* getMixerAndFx();
     AudioPlaySdWav* getSdPlayer();
+#ifdef FEATURE_PLINKY
+    // plan 009 S: synth voice engine (original Tracker). Sends are applied from the Plinky parameters.
+    AudioSynthPlinky* getPlinky() { return &plinky; }
+    void applyPlinkySends();
+    float getPlinkyCpuPercent() { return plinky.cpuPercent(); }
+    float getPlinkyCpuPeakPercent() { return plinky.cpuPeakPercent(); }
+#endif
 
     friend class playerEngine;
 
@@ -242,6 +252,9 @@ class audioEngine
     AudioSynthWaveform testWaveform;
     AudioPlayMemory metronomeTick;
     MixerAndFxs<kVoices> mixerAndFxs;
+#ifdef FEATURE_PLINKY
+    AudioSynthPlinky plinky;
+#endif
 
 #ifdef FEATURE_SYNTH
     SynthVoice synthVoice;

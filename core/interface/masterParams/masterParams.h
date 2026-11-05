@@ -65,6 +65,21 @@ class cMasterParams : public ModuleBase
     void showReverbDiffusion();
     void showReverbType();
     void showReverbCpu();
+#ifdef FEATURE_PLINKY
+    // plan 009 S: synth voice parameters, Master > Limiter > "Plinky" (slot 7): 3 pages of 8 places + CPU in the title
+    void switchToPlinkyScreen();
+    void showPlinkyScreen();
+    void showPlinkyValue(uint8_t place);
+    void showPlinkyCpu();
+    void showPlinkyEntry();
+    void plinkyChange(int d);
+    void plinkyMove(int d);
+    void plinkyDefault();
+    void plinkyButton(uint8_t place);
+    void refreshPlinkyFrame();
+    uint8_t plinkyPage = 0; // 0 = not shown, 1 .. 3
+    uint8_t plinkyPlace = 0;
+#endif
     // limiter
     void showLimiterScreen();
     void showLimiterAttack();
@@ -413,6 +428,11 @@ class cMasterParams : public ModuleBase
     char reverbDiffusionVal[4];
     char reverbTypeVal[8];
     char reverbCpuVal[16];
+#ifdef FEATURE_PLINKY
+    char plinkyVal[8][12];
+    char plinkyTitle[32];
+    char plinkyEntryVal[16];
+#endif
 
     char limitAttackVal[8];
     char limitReleaseVal[8];
