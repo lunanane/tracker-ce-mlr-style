@@ -134,7 +134,7 @@ AUDIO_CORE_RAM void AudioPlayMemory::update(void)
         {
             stop();
         }
-        envelopeUpdate(nullptr);
+        envelopeUpdate(nullptr); // plan 009 P#2: idle = no block (the stages after this treat a missing block as silence)
         return;
     }
 

@@ -45,6 +45,10 @@ AUDIO_CORE_RAM void AudioMixer<mixerSize>::update(void)
                 applyGainAndCopy(
                   mixedBuffer, out->data, multiplier[channel], previousMultiplier[channel]);
             }
+            else
+            {
+                previousMultiplier[channel] = multiplier[channel]; // plan 009 P#2: a missing block is a block of zeros
+            }
         }
         else
         {
@@ -54,6 +58,10 @@ AUDIO_CORE_RAM void AudioMixer<mixerSize>::update(void)
                 applyGainThenAdd(
                   mixedBuffer, in->data, multiplier[channel], previousMultiplier[channel]);
                 release(in);
+            }
+            else
+            {
+                previousMultiplier[channel] = multiplier[channel];
             }
         }
     }

@@ -445,11 +445,7 @@ AUDIO_CORE_RAM void AudioPlayMemory::envelopeUpdate(audio_block_t* block)
     if (envelope.state == envelopePhaseIdle)
     {
         if (!block)
-        {
-            block = allocate();
-            if (!block)
-                return;
-        }
+            return; // plan 009 P#2: an idle voice sends no block at all; was: allocate, clear and transmit 256 zero bytes through the whole chain
         memset(block->data, 0, AUDIO_BLOCK_SAMPLES * 2);
         transmit(block);
         AudioStream::release(block);

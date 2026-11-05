@@ -35,6 +35,9 @@ AUDIO_CORE_FLASH void MonoToStereo::update(void)
 
     if (block[Channel::left] == nullptr)
     {
+        // plan 009 P#2: a missing block is a block of zeros: the pending gain ramps are used up as before
+        for (int channel = 0; channel < Channel::channelCount; channel++)
+            previous_multiplier[channel] = multiplier[channel];
         return;
     }
 

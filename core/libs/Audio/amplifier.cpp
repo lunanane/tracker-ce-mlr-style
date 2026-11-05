@@ -47,4 +47,8 @@ AUDIO_CORE_RAM void AudioAmplifier::update(void)
         transmit(block);
         release(block);
     }
+    else
+    {
+        previousMultiplier = multiplier; // plan 009 P#2: a missing block is a block of zeros: the pending gain ramp is used up as before
+    }
 }

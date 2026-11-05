@@ -19,3 +19,13 @@ struct StubProject
     } values;
 };
 extern StubProject mtProject;
+enum SaturationType
+{
+    kSaturationMin,
+    kHardClip = kSaturationMin,
+    kSoftClip,
+    kSaturate,
+    kOverdrive,
+    kOverdrive2,
+    kSaturationTypeEnd
+};

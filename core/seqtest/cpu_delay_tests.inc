@@ -229,3 +229,124 @@ static void testLimiter()
         printf("  limiter %-24s: identical\n", c.name);
     }
 }
+
+// ---- Plan 009 P#2: idle voices send no block. Voice chain (filter -> amplifier -> mono-to-stereo -> mixer), once fed zero blocks while
+// the voice is idle (the old behaviour) and once fed nothing; the output must be the same (bit-exact without filter; the filter tail
+// below a quarter of an output LSB may be cut).
+#include "filter_variable.h"
+#include "amplifier.h"
+#include "monoToStereo.h"
+#include "mixer.h"
+
+namespace
+{
+struct VoiceChain
+{
+    AudioFilterStateVariable filter;
+    AudioAmplifier amp;
+    MonoToStereo m2s;
+    AudioMixer<4> mix;
+    std::vector<int16_t> out; // mixer output per block, 128 zeros when no block was sent
+    int blocksOut = 0;
+
+    static audio_block_t* take(int idx)
+    {
+        audio_block_t* b = stubOut[idx];
+        stubOut[idx] = nullptr;
+        return b;
+    }
+    // one block; in = nullptr: the voice sent nothing; zeros: the voice sent a block of zeros
+    void step(const int16_t* in, bool zeros)
+    {
+        audio_block_t* b = nullptr;
+        if (in)
+        {
+            b = (audio_block_t*)calloc(1, sizeof(audio_block_t));
+            b->ref_count = 1;
+            memcpy(b->data, in, 256);
+        }
+        else if (zeros)
+        {
+            b = (audio_block_t*)calloc(1, sizeof(audio_block_t));
+            b->ref_count = 1;
+        }
+        stubIn[0] = b;
+        filter.update();
+        audio_block_t* f = take(0);
+        stubIn[0] = f;
+        amp.update();
+        audio_block_t* a = take(0);
+        stubIn[0] = a;
+        m2s.update();
+        audio_block_t* l = take(0);
+        audio_block_t* r = take(1);
+        stubIn[0] = l;
+        stubIn[1] = r;
+        mix.update();
+        audio_block_t* o = take(0);
+        size_t at = out.size();
+        out.resize(at + 128, 0);
+        if (o)
+        {
+            memcpy(&out[at], o->data, 256);
+            blocksOut++;
+            free(o);
+        }
+    }
+};
+} // namespace
+
+static void testIdleVoices()
+{
+    AudioFilterStateVariable::initCutoffLookup();
+    for (int useFilter = 0; useFilter < 2; useFilter++)
+        for (int variant = 0; variant < 2; variant++)
+        {
+            // zeroed storage like the statics on the device (the filter leaves some members uninitialised)
+            VoiceChain& a = *new (calloc(1, sizeof(VoiceChain))) VoiceChain();
+            VoiceChain& b = *new (calloc(1, sizeof(VoiceChain))) VoiceChain();
+            VoiceChain* chains[2] = { &a, &b };
+            for (VoiceChain* c : chains)
+            {
+                if (useFilter)
+                {
+                    c->filter.connect();
+                    c->filter.setCutoff(variant ? 0.15f : 0.5f);
+                    c->filter.resonance(variant ? 4.0f : 1.0f);
+                    c->filter.setType(0);
+                }
+                else
+                {
+                    c->filter.disconnect();
+                }
+            }
+            g_rng = 777;
+            int maxDiff = 0;
+            for (int blk = 0; blk < 1500; blk++)
+            {
+                const int cycle = blk % 300;
+                const bool playing = cycle < 40; // 40 blocks of sound, 260 of idle
+                int16_t in[128];
+                for (int s = 0; s < 128; s++)
+                    in[s] = playing ? (int16_t)((int)(rnd() % 20001) - 10000) : 0;
+                // controls change while idle and while playing: volume, track gain, pan, filter settings
+                if (blk % 300 == 100) { for (VoiceChain* c : chains) { c->amp.gain(0.3f); c->mix.gain(0, 0.5f); } }
+                if (blk % 300 == 7) { for (VoiceChain* c : chains) { c->amp.gain(0.9f); c->mix.gain(0, 1.0f); c->mix.gain(1, 0.7f); } }
+                if (useFilter && blk % 300 == 150) { for (VoiceChain* c : chains) { c->filter.setCutoff(0.6f); } }
+                if (useFilter && blk == 905) { for (VoiceChain* c : chains) { c->filter.disconnect(); } }
+                if (useFilter && blk == 1205) { for (VoiceChain* c : chains) { c->filter.connect(); } }
+                a.step(playing ? in : nullptr, true);  // old: zeros while idle
+                b.step(playing ? in : nullptr, false); // new: nothing while idle
+                for (int s = 0; s < 128; s++)
+                {
+                    int d = abs((int)a.out[blk * 128 + s] - (int)b.out[blk * 128 + s]);
+                    if (d > maxDiff) maxDiff = d;
+                }
+            }
+            printf("  idle voice, filter %s%s: %d of %d mixer blocks sent (old: %d), max difference %d LSB\n", useFilter ? "on" : "off",
+                   useFilter ? (variant ? " (low, resonant)" : " (mid)") : "", b.blocksOut, 1500, a.blocksOut, maxDiff);
+            CHECK(b.blocksOut < a.blocksOut);
+            CHECK(useFilter ? maxDiff <= 2 : maxDiff == 0); // the cut filter tail: +-1..2 LSB of rounding noise (-84 dBFS)
+            CHECK(a.out.size() == b.out.size());
+        }
+}
