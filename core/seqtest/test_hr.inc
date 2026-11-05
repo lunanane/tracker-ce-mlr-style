@@ -109,6 +109,75 @@ static void test_hr_arranger_chord_ends_on_transport_stop()
     delete e;
 }
 
+// M2: Euclid Drums, Grid Seq, Bassline Seq, Step Follower must not take their track over (mute the pattern, clear a take) while the
+// transport runs but they have nothing to play
+static void test_hr_idle_script_does_not_take_over()
+{
+    const uint8_t types[4] = { (uint8_t)(TYPE_HR_FIRST + seqgen::HR_BASS), (uint8_t)(TYPE_HR_FIRST + seqgen::HR_EUCLID),
+                               (uint8_t)(TYPE_HR_FIRST + seqgen::HR_GRIDSEQ), (uint8_t)(TYPE_HR_FIRST + seqgen::HR_STEPFOLLOW) };
+    for (int k = 0; k < 4; k++)
+    {
+        MockHost h;
+        Engine* e = mk(h);
+        e->applyType(2, types[k]);
+        Head hd;
+        playRec(*e, h, hd, 48 * 4);
+        CHECK(!e->takenOver(2));                    // running transport, empty script
+        e->postRec(2, Engine::REC_PUNCH);
+        playRec(*e, h, hd, 48 * 6);
+        e->postRec(2, Engine::REC_STOP);
+        playRec(*e, h, hd, 48);
+        int clears = 0, notes = 0;
+        for (const seqrec::Op& o : drainOps(*e))
+        {
+            clears += o.kind == seqrec::OP_CLEAR;
+            notes += o.kind == seqrec::OP_NOTE;
+        }
+        CHECK(clears == 0 && notes == 0);           // the take left the pattern untouched
+        CHECK(!e->takenOver(2) && h.count('B', 2) == 0);
+        delete e;
+    }
+    // with something to play the track IS taken over (and the take then replaces the steps it passes)
+    {
+        MockHost h;
+        Engine* e = mk(h);
+        e->applyType(2, TYPE_HR_FIRST + seqgen::HR_GRIDSEQ);
+        pressPad(*e, 2, 0, 0); // step 1 of the first row
+        Head hd;
+        CHECK(!e->takenOver(2)); // transport not running yet
+        playRec(*e, h, hd, 48 * 4);
+        CHECK(e->takenOver(2));
+        e->postRec(2, Engine::REC_PUNCH);
+        playRec(*e, h, hd, 48 * 6);
+        e->postRec(2, Engine::REC_STOP);
+        playRec(*e, h, hd, 48);
+        int clears = 0;
+        for (const seqrec::Op& o : drainOps(*e))
+            clears += o.kind == seqrec::OP_CLEAR;
+        CHECK(clears > 0);
+        delete e;
+    }
+    // Bass: a held key is performing; Step Follower / Euclid: a set degree / a preset
+    {
+        MockHost h;
+        Engine* e = mk(h);
+        e->applyType(0, TYPE_HR_FIRST + seqgen::HR_BASS);
+        e->applyType(1, TYPE_HR_FIRST + seqgen::HR_EUCLID);
+        e->applyType(3, TYPE_HR_FIRST + seqgen::HR_STEPFOLLOW);
+        Head hd;
+        playRec(*e, h, hd, 48 * 2);
+        CHECK(!e->takenOver(0) && !e->takenOver(1) && !e->takenOver(3));
+        e->applyPad(0, 0, true);          // a scale key held
+        CHECK(e->takenOver(0));
+        e->applyPad(0, 0, false);
+        pressPad(*e, 1, 0, 3);            // Euclid row 4 ... a preset pad
+        pressPad(*e, 3, 0, 0);            // a degree of the step follower
+        playRec(*e, h, hd, 48 * 2);
+        CHECK(e->takenOver(1) || e->takenOver(3));
+        delete e;
+    }
+}
+
 static void test_hr_type_change_silences_and_releases()
 {
     MockHost h;

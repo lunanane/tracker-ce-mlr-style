@@ -21,7 +21,7 @@ class HrBass : public HrScript {
   void start() override { startPlayback(); }
   void stop() override { stopPlayback(); }
   void silence() override { stopPlayback(); stopSounding(); }
-  bool live() const override { return heldN_ != 0 || playing_; }
+  bool live() const override { return heldN_ != 0 || sounding_ >= 0; }  // the keys decide WHICH note: nothing held = nothing to play
   int getParam(int id) const override;
   void setParam(int id, int v) override;
   size_t serialize(uint8_t* buf, size_t cap) const override;
