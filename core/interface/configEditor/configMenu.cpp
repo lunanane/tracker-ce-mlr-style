@@ -87,7 +87,7 @@ cMenuItem melSnapToZeroMode(menuProject, "Snap to zero", snapToZeroDesc,  menuTy
 const strItemTypeListTextWithAction setupRadioRegion{ &mtConfig.general.radioRegion, 4, radioRegion, setRadioRegion };
 const strItemTypeListTextWithAction setupDispBrightness{ &mtConfig.general.dispBrightness, 3, brightness, setDisplayBrightness };
 strItemTypeListTextWithAction setupDispTheme{ &mtConfig.general.theme, DisplayThemes::kCount, themeChoices, setDisplayTheme };
-strItemTypeListTextWithAction setupDispFont{ &mtConfig.general.font, 2,  ptrFont, setDisplayFont };
+strItemTypeListTextWithAction setupDispFont{ &mtConfig.general.font, 1,  ptrFont, setDisplayFont };
 
 void refreshThemeAndFontMenuOptions()
 {

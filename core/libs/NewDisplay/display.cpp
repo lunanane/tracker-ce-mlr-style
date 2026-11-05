@@ -18,11 +18,6 @@
 #include "RobotoMono-Regular_12_L4.h"
 #include "RobotoMono-Regular_14_L4.h"
 
-#include "LiberationSans-Bold_14_L4.h"
-#include "LiberationSans-Bold_17_L4.h"
-#include "LiberationSans-Regular_12_L4.h"
-#include "LiberationSans-Regular_14_L4.h"
-#include "LiberationSans-Regular_17_L4.h"
 
 // BITMAPS
 #ifndef TRACKER_MINI
@@ -85,30 +80,6 @@ __NOINIT(EXTERNAL_RAM) uint8_t decompressedFontsCommonBuffer[kMaxFontBufferSize]
 const uint8_t displayFontCount = 5;
 
 // clang-format off
-
-const CompressedFontData fontsData2[displayFontCount] =
-{
-    {
-      LiberationSans_Regular_14_L4_compressed,
-      sizeof(LiberationSans_Regular_14_L4_compressed) / sizeof(LiberationSans_Regular_14_L4_compressed[0])
-    },
-    {
-      LiberationSans_Regular_17_L4_compressed,
-      sizeof(LiberationSans_Regular_17_L4_compressed) / sizeof(LiberationSans_Regular_17_L4_compressed[0])
-    },
-    {
-      LiberationSans_Bold_14_L4_compressed,
-      sizeof(LiberationSans_Bold_14_L4_compressed) / sizeof(LiberationSans_Bold_14_L4_compressed[0])
-    },
-    {
-      LiberationSans_Bold_17_L4_compressed,
-      sizeof(LiberationSans_Bold_17_L4_compressed) / sizeof(LiberationSans_Bold_17_L4_compressed[0])
-    },
-    {
-      LiberationSans_Regular_12_L4_compressed,
-      sizeof(LiberationSans_Regular_12_L4_compressed) / sizeof(LiberationSans_Regular_12_L4_compressed[0])
-    },
-};
 
 const CompressedFontData fontsData1[displayFontCount] =
 {
@@ -1391,7 +1362,6 @@ void cDisplay::setFont(uint8_t index)
     switch (index)
     {
         case 0: loadFont(fontsData1, displayFontCount); break;
-        case 1: loadFont(fontsData2, displayFontCount); break;
         default: loadFont(fontsData1, displayFontCount); break;
     }
 }
