@@ -112,7 +112,7 @@ inline void valueText(int p, int v, char* out, size_t n)
         case P_INTERVAL: snprintf(out, n, "%+d st", v - 12); break;
         case P_MORPH: plinkymorph::timeText(v, out, n); break;
         case P_LFO_DEST: snprintf(out, n, "%s", kDest[v > 2 ? 2 : v]); break;
-        case P_SHAPE: if (v == 0) snprintf(out, n, "Saws"); else snprintf(out, n, "Pulse %d", v); break;
+        case P_SHAPE: shapeText(v, out, n); break;
         case P_WIDTH: if (v == 0) snprintf(out, n, "Mono"); else snprintf(out, n, "%d", v); break;
         default: snprintf(out, n, "%d", v); break;
     }
