@@ -6,6 +6,7 @@
 #include "elapsedMillis.h"
 #include "seqTracks.h"
 #include "seqLauncher.h"
+#include "seqPlinky.h"
 #include "fileManager.h"
 #include "mtAudioEngine.h"
 #include "mtAudioExport.h"
@@ -102,6 +103,9 @@ void TrackerImpl::init(Platform* platform)
     this->platform = platform;
 
     initWavetableEnvelopes();
+#ifdef FEATURE_PLINKY
+    seqPlinkyInit(); // v0.3.5: the morph state in EXTERNAL_RAM is constructed here (the SDRAM is up), not by a static constructor
+#endif
 
     Timer* timer = getPlatform()->getTimer();
     elapsedMicros::init(timer);

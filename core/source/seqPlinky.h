@@ -41,6 +41,10 @@ bool seqPlinkyVoice(int i, uint8_t* note, uint8_t* level, uint8_t* releasing); /
 uint32_t seqPlinkyMarks();                                       // bit per parameter that differs from the inherited value (shown pattern)
 void seqPlinkyClipLaunched(uint8_t track, uint8_t pattern);      // main loop: a clip was queued on the track (morph to its source pattern)
 
+// TrackerImpl::init (after the SDRAM is up, before any other seqPlinky call that touches the morph state): constructs the
+// EXTERNAL_RAM state (it has no C++ static constructor, see seqPlinky.cpp)
+void seqPlinkyInit();
+
 // ---- sidecar "plinky.bin" ----
 void seqPlinkyLoadWorkspace();                                   // Workspace/plinky.bin -> values (missing / invalid: defaults)
 void seqPlinkySaveWorkspace();                                   // values -> Workspace/plinky.bin when asked (never while playing)
