@@ -15,6 +15,9 @@
 #include "mtSequencer.h"
 #include "patternEditor/patternEditor.h"
 #include "seqTracks.h"
+#ifdef FEATURE_PLINKY
+#include "seqPlinky.h"
+#endif
 
 SeqPlayOverlay seqPlayOverlay;
 
@@ -75,6 +78,7 @@ void SeqPlayOverlay::enter()
         ledShown_[i] = 0xFF;
     }
     stripKeyValid_ = false;
+    plinkyOpen_ = false;
     late_ = seqplay::LateRelease();
     recKey_.reset();
     recStopPending_ = false;
@@ -94,6 +98,7 @@ void SeqPlayOverlay::leave()
     applyPlan(seqplay::EV_LEAVE);
     recKey_.reset();
     recStopPending_ = false;
+    plinkyOpen_ = false;
     active_ = false;
     view_.mode = SeqPlayViewData::HIDDEN;
     view_.edge = 0;
@@ -211,8 +216,22 @@ void SeqPlayOverlay::closeList(bool apply)
     if (apply)
     {
         int type = list_.release(seqEngine.type(track), seqEngine.pendingType(track));
-        if (type >= 0)
-            seqEngine.postType(track, (uint8_t)type); // at the next bar while the transport runs
+        if (type == seqlogic::TYPE_PLINKY && seqEngine.plinkyOwner() != 0xFF && seqEngine.plinkyOwner() != track)
+        {
+            // one voice: the track that has it keeps it (the refusal is shown on the track that asked)
+            snprintf(ownerMsg_, sizeof(ownerMsg_), "Plinky: T%d", seqEngine.plinkyOwner() + 1);
+            setMessage(ownerMsg_);
+        }
+        else if (type >= 0)
+        {
+            if (seqEngine.postType(track, (uint8_t)type)) // at the next bar while the transport runs
+            {
+#ifdef FEATURE_PLINKY
+                if (type == seqlogic::TYPE_PLINKY)
+                    seqPlinkyClaim(); // the voice gets its channel now, before the first pad
+#endif
+            }
+        }
     }
     else
     {
@@ -322,8 +341,30 @@ bool SeqPlayOverlay::button(uint8_t b, uint8_t state)
                     sequencer.stop();
             }
             return true;
+        case interfaceButtonUp:
+        case interfaceButtonDown:
+            if (!plinkyOpen_)
+                return false; // the stock cursor
+            if (state == buttonPress)
+                plinkyNav(b);
+            return true;
+        case interfaceButtonDelete:
+            if (plinkyOpen_ && state == buttonPress)
+                plinkyDefault();
+            return true;
+        case interfaceButtonInstr:
+            // Instrument Parameters (also with screen button 1 held): the Plinky parameter overlay of the selected Plinky track
+            if (state == buttonPress)
+                plinkyToggle();
+            return true;
         case interfaceButtonLeft:
         case interfaceButtonRight:
+            if (plinkyOpen_)
+            {
+                if (state == buttonPress)
+                    plinkyNav(b);
+                return true;
+            }
             if (PE().buttons->isButtonPressed(interfaceButtonPattern))
                 return false; // Pattern + arrows = the stock pattern queue / change
             if (state == buttonPress)
@@ -338,12 +379,10 @@ bool SeqPlayOverlay::button(uint8_t b, uint8_t state)
                 recPressed();
             return true; // hold events and the release are the sequencer's too, they do nothing
         case interfaceButtonNote:
-        case interfaceButtonInstr:
         case interfaceButtonFx1:
         case interfaceButtonFx2:
         case interfaceButtonCopy:
         case interfaceButtonInsert:
-        case interfaceButtonDelete:
             return true; // no popups or edits over the strip
         default: return false;
     }
@@ -352,7 +391,7 @@ bool SeqPlayOverlay::button(uint8_t b, uint8_t state)
 // pads that went to the stock editor (they were pressed before Play mode, or while it did not own them): their release goes there too
 static uint64_t s_stockPads = 0;
 
-bool SeqPlayOverlay::pad(uint8_t pad, uint8_t state, uint8_t)
+bool SeqPlayOverlay::pad(uint8_t pad, uint8_t state, uint8_t velo)
 {
     if (pad >= 48)
         return false;
@@ -391,7 +430,7 @@ bool SeqPlayOverlay::pad(uint8_t pad, uint8_t state, uint8_t)
         uint8_t track = selected();
         if (seqEngine.type(track) == seqlogic::TYPE_OFF || padOwner_[pad] != kNoOwner)
             return true; // an Off track has no pads
-        if (seqPadPress(track, pad)) // a press may be dropped when the queue is full, a release never
+        if (seqPadPress(track, pad, velo > 127 ? 127 : velo)) // a press may be dropped when the queue is full, a release never
             padOwner_[pad] = track;
     }
     return true; // press, hold
@@ -399,10 +438,66 @@ bool SeqPlayOverlay::pad(uint8_t pad, uint8_t state, uint8_t)
 
 bool SeqPlayOverlay::pot(uint8_t pot, int16_t value)
 {
+    if (pot == interfacePot0 && plinkyOpen_ && routable())
+    {
+        plinkyJog(value); // the parameter overlay owns the wheel (also with a screen button held)
+        return true;
+    }
     if (pot != interfacePot0 || !routable() || hold_.mask == 0 || PE().buttons->isButtonPressed(interfaceButtonShift))
         return false; // without a held screen button (or with Shift) the wheel is the stock wheel
     jog(value);
     return true;
+}
+
+//##############################################################################################
+//###############################     PLINKY OVERLAY (010 B)    ################################
+//##############################################################################################
+void SeqPlayOverlay::plinkyClose()
+{
+    plinkyOpen_ = false;
+}
+
+void SeqPlayOverlay::plinkyToggle()
+{
+    if (plinkyOpen_)
+    {
+        plinkyClose();
+        return;
+    }
+    if (seqEngine.type(selected()) == seqlogic::TYPE_PLINKY)
+    {
+        plinkyOpen_ = true;
+        plinkyCur_.fix();
+        legend_.screenButton(); // no Shift legend over it
+    }
+    else
+        setMessage("not Plinky");
+}
+
+void SeqPlayOverlay::plinkyNav(uint8_t button)
+{
+    if (button == interfaceButtonLeft) plinkyCur_.horizontal(-1);
+    else if (button == interfaceButtonRight) plinkyCur_.horizontal(1);
+    else if (button == interfaceButtonUp) plinkyCur_.vertical(-1);
+    else plinkyCur_.vertical(1);
+}
+
+void SeqPlayOverlay::plinkyJog(int16_t value)
+{
+#ifdef FEATURE_PLINKY
+    const int p = plinkyCur_.param();
+    const bool fine = PE().buttons->isButtonPressed(interfaceButtonShift);
+    seqPlinkySet(p, seqplinky::jogValue(p, seqPlinkyGet(p), value, fine));
+#else
+    (void)value;
+#endif
+}
+
+void SeqPlayOverlay::plinkyDefault()
+{
+#ifdef FEATURE_PLINKY
+    seqPlinkyDefault(plinkyCur_.param());
+#endif
 }
 
 //##############################################################################################
@@ -505,7 +600,24 @@ void SeqPlayOverlay::refreshView()
     uint8_t sel = selected();
     view_.edge = (active_ && !list_.open) ? seqplay::edgeSide(sel, stripPage_) : 0;
     view_.edgeTrack = (uint8_t)(sel + 1);
-    if (active_ && list_.open)
+    if (plinkyOpen_ && (!routable() || seqEngine.type(sel) != seqlogic::TYPE_PLINKY))
+        plinkyClose(); // another track, another type or a popup: the overlay ends
+    if (plinkyOpen_)
+    {
+#ifdef FEATURE_PLINKY
+        view_.mode = SeqPlayViewData::PLINKY;
+        seqplinky::Model& m = view_.plinky;
+        for (int i = 0; i < plinkyvoice::P_COUNT; i++)
+            m.v[i] = (uint8_t)seqPlinkyGet(i);
+        m.sec = plinkyCur_.sec;
+        m.idx = plinkyCur_.idx;
+        m.track = (uint8_t)(sel + 1);
+        m.channel = (uint8_t)seqPlinkyGet(plinkyvoice::P_CHANNEL);
+        m.cpu = (uint8_t)(seqPlinkyCpu() + 0.5f);
+        m.peak = (uint8_t)(seqPlinkyCpuPeak() + 0.5f);
+#endif
+    }
+    else if (active_ && list_.open)
     {
         view_.mode = SeqPlayViewData::LIST;
         view_.cell = list_.cell;
@@ -516,6 +628,8 @@ void SeqPlayOverlay::refreshView()
     {
         view_.mode = SeqPlayViewData::LEGEND;
         view_.type = seqEngine.type(sel);
+        view_.plSetup = seqEngine.plinkySetup();
+        view_.plMenu = seqEngine.plinkyMenu() ? 1 : 0;
         if (view_.type == seqlogic::TYPE_CHORDARP)
         {
             const seqgen::ChordArp& ca = seqEngine.chordArp(sel);
@@ -610,7 +724,11 @@ void SeqPlayOverlay::update()
         refreshStrip(false);
     }
 
-    refreshView();
+    if (!plinkyOpen_ || (uint32_t)(now - plinkyTime_) >= 100) // the CPU readout does not need more
+    {
+        plinkyTime_ = now;
+        refreshView();
+    }
 
     if ((uint32_t)(now - ledTime_) >= kLedMs)
     {

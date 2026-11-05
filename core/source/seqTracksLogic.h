@@ -7,8 +7,10 @@ namespace seqlogic {
 
 // Types 3.. are the ported HYPER_RASP pad scripts (seqgen/hr.h, HrType order); kHrScripts must equal seqgen::HR_COUNT (static_assert in seqTracksCore.cpp).
 enum { kHrScripts = 8 };
-enum TrackType : uint8_t { TYPE_OFF = 0, TYPE_CHORDARP = 1, TYPE_MONO = 2, TYPE_HR_FIRST = 3, TYPE_COUNT = TYPE_HR_FIRST + kHrScripts };
-inline bool isHrType(uint8_t type) { return type >= TYPE_HR_FIRST && type < TYPE_COUNT; }
+enum TrackType : uint8_t { TYPE_OFF = 0, TYPE_CHORDARP = 1, TYPE_MONO = 2, TYPE_HR_FIRST = 3,
+                         TYPE_PLINKY = TYPE_HR_FIRST + kHrScripts, // plan 010 B: plays the Plinky voice from the pads (appended: old files load as before)
+                         TYPE_COUNT = TYPE_PLINKY + 1 };
+inline bool isHrType(uint8_t type) { return type >= TYPE_HR_FIRST && type < TYPE_PLINKY; }
 enum { kTracks = 16, kPads = 48, kPadCols = 12 };
 
 // Mode button tap (Pattern / Performance / Song): press and release with no other BUTTON in between, held for at most
@@ -99,6 +101,7 @@ inline bool isNotePad(uint8_t type, uint8_t pad)
     uint8_t col = padCol(pad);
     if (type == TYPE_CHORDARP) return col <= 5;
     if (type == TYPE_MONO) return col < 8;
+    if (type == TYPE_PLINKY) return !(col == 11 && padRow(pad) == 3); // every pad but the Setup pad
     return false;
 }
 
@@ -126,7 +129,7 @@ inline int8_t velocityToVolume(uint8_t vel)
 //  Mono: while the transport runs and the sequence has at least one step.
 inline bool wantTakeover(uint8_t type, int heldPads, int soundingNotes, bool monoHasSteps, bool playing)
 {
-    if (type == TYPE_CHORDARP) return heldPads > 0 || soundingNotes > 0;
+    if (type == TYPE_CHORDARP || type == TYPE_PLINKY) return heldPads > 0 || soundingNotes > 0; // Plinky: only while a pad is held or a note sounds
     if (type == TYPE_MONO) return playing && monoHasSteps;
     return false;
 }

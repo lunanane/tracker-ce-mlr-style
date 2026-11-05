@@ -15,8 +15,8 @@ static void pressPad(Engine& e, uint8_t track, int col, int row)
 
 static void test_hr_type_numbers_and_names()
 {
-    CHECK(TYPE_HR_FIRST == 3 && TYPE_COUNT == TYPE_HR_FIRST + seqgen::HR_COUNT);
-    CHECK(!isHrType(TYPE_OFF) && !isHrType(TYPE_CHORDARP) && !isHrType(TYPE_MONO) && isHrType(TYPE_HR_FIRST) && isHrType(TYPE_COUNT - 1) && !isHrType(TYPE_COUNT));
+    CHECK(TYPE_HR_FIRST == 3 && TYPE_PLINKY == TYPE_HR_FIRST + seqgen::HR_COUNT && TYPE_COUNT == TYPE_PLINKY + 1);
+    CHECK(!isHrType(TYPE_OFF) && !isHrType(TYPE_CHORDARP) && !isHrType(TYPE_MONO) && isHrType(TYPE_HR_FIRST) && isHrType(TYPE_PLINKY - 1) && !isHrType(TYPE_PLINKY) && !isHrType(TYPE_COUNT));
     // old files: the earlier types keep their numbers
     CHECK(TYPE_OFF == 0 && TYPE_CHORDARP == 1 && TYPE_MONO == 2);
     for (uint8_t t = 0; t < TYPE_COUNT; t++)

@@ -12,6 +12,7 @@
 #include "config.h"
 
 extern Sequencer sequencer;
+extern strMtProject mtProject;
 
 namespace
 {
@@ -90,6 +91,23 @@ bool seqPlinkyPitchBend(uint8_t channel, int16_t value)
 void seqPanicPlinky()
 {
     eng().allNotesOff();
+}
+
+void seqPlinkyClaim()
+{
+    if (eng().param(P_CHANNEL) != 0)
+        return;
+    int ch = kMidiInstrumentsCount;
+    const int last = mtProject.values.lastUsedInstrument;
+    if (last >= MIDI_INSTRUMENTS_START_IDX && last < MIDI_INSTRUMENTS_START_IDX + kMidiInstrumentsCount)
+        ch = last - MIDI_INSTRUMENTS_START_IDX + 1;
+    seqPlinkySet(P_CHANNEL, ch);
+}
+
+int seqPlinkyInstrument()
+{
+    const int ch = eng().param(P_CHANNEL);
+    return (ch >= 1 && ch <= kMidiInstrumentsCount) ? MIDI_INSTRUMENTS_START_IDX + ch - 1 : -1;
 }
 
 int seqPlinkyGet(int param)

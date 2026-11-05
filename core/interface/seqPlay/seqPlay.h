@@ -9,12 +9,13 @@
 
 #include "displayControls.h"
 #include "seqPlayLogic.h"
+#include "seqPlinkyUiLogic.h"
 #include "seqRecLogic.h"
 
 // What the overlay control draws (written by the overlay, read by the control on the display refresh).
 struct SeqPlayViewData
 {
-    enum Mode : uint8_t { HIDDEN = 0, LIST = 1, LEGEND = 2 };
+    enum Mode : uint8_t { HIDDEN = 0, LIST = 1, LEGEND = 2, PLINKY = 3 };
     uint8_t mode = HIDDEN;
     uint8_t type = 0; // LEGEND: sequencer type of the selected track
     uint8_t cell = 0; // LIST: strip cell (0..7) the list sits above
@@ -30,6 +31,9 @@ struct SeqPlayViewData
     uint8_t vel = 1;   // LEGEND (Mono): velocity pattern 1..72
     uint8_t tie = 0;   // LEGEND (Mono): tie
     int8_t win = 0;    // LEGEND (Mono): degree window offset
+    seqplinky::Setup plSetup;  // LEGEND (Plinky): root / scale / octave / string interval
+    uint8_t plMenu = 0;        // LEGEND (Plinky): setup view shown
+    seqplinky::Model plinky;   // PLINKY: the parameter overlay
     seqplay::HrSnap hr = {}; // LEGEND (HYPER_RASP types): title, help and cells reported by the script
     uint8_t edge = 0;  // 0 none; 1 / 2: the selected track is on the higher / lower strip page than the one shown (edge marker)
     uint8_t edgeTrack = 0; // that track's number 1..16
@@ -79,6 +83,7 @@ class SeqPlayOverlay
     void panic(); // transport Stop (plan 005 M6): end a recording, release held pads, cancel the type list
 
     uint8_t stripPage() const { return stripPage_; }
+    bool plinkyOpen() const { return plinkyOpen_; }
 
   private:
     bool routable() const;
@@ -94,6 +99,11 @@ class SeqPlayOverlay
     void refreshPads();
     void refreshView();
     void setMessage(const char* text);
+    void plinkyToggle();
+    void plinkyNav(uint8_t button);
+    void plinkyJog(int16_t value);
+    void plinkyDefault();
+    void plinkyClose();
 
     bool active_ = false;
     uint8_t stripPage_ = 0;
@@ -115,6 +125,10 @@ class SeqPlayOverlay
     const char* msg_ = nullptr;
     uint32_t msgUntil_ = 0;
     uint32_t ledTime_ = 0;
+    bool plinkyOpen_ = false;      // the Plinky parameter overlay (plan 010 B)
+    seqplinky::Cursor plinkyCur_;
+    uint32_t plinkyTime_ = 0;
+    char ownerMsg_[16];
     char line1_[8][12];
     char line2_[8][12];
 };

@@ -19,11 +19,12 @@ enum
 };
 
 Engine::Engine()
-  : host_(0), head_(0), tail_(0), takenMask_(0), activeCount_(0), playing_(false), barPulse_(0), idleCount_(0), usAcc_(0), clockSilentUs_(0), epoch_(1),
+  : host_(0), plMenu_(false), head_(0), tail_(0), takenMask_(0), activeCount_(0), playing_(false), barPulse_(0), idleCount_(0), usAcc_(0), clockSilentUs_(0), epoch_(1),
     rHead_(0), rTail_(0), recDrops_(0), recState_(seqrec::Planner::IDLE), recTrack_(0), recHints_(0), recEnds_(0), recWhy_(0), loading_(false), cut_(0), cutRestart_(false), cutRestartPos_(0)
 {
     memset(ring_, 0, sizeof(ring_));
     memset(recRing_, 0, sizeof(recRing_));
+    memset(plNote_, 0, sizeof(plNote_));
     for (int i = 0; i < kTracks; i++)
         initTrack((uint8_t)i);
     rec_.setSink(&Engine::recSinkThunk, this);
@@ -64,11 +65,11 @@ bool Engine::push(const Cmd& c)
     return true;
 }
 
-bool Engine::postPad(uint8_t track, uint8_t pad, bool down)
+bool Engine::postPad(uint8_t track, uint8_t pad, bool down, uint8_t velo)
 {
     if (track >= kTracks || pad >= kPads)
         return false;
-    Cmd c = { CMD_PAD, track, (uint8_t)(pad | (down ? 0x80 : 0)) };
+    Cmd c = { CMD_PAD, track, (uint8_t)(pad | (down ? 0x80 : 0)), velo };
     return push(c);
 }
 
@@ -76,7 +77,7 @@ bool Engine::postType(uint8_t track, uint8_t type)
 {
     if (track >= kTracks || type >= TYPE_COUNT)
         return false;
-    Cmd c = { CMD_TYPE, track, type };
+    Cmd c = { CMD_TYPE, track, type, 0 };
     return push(c);
 }
 
@@ -84,7 +85,7 @@ bool Engine::postRec(uint8_t track, uint8_t mode)
 {
     if (track >= kTracks || mode > REC_STOP_PATTERN)
         return false;
-    Cmd c = { CMD_REC, track, mode };
+    Cmd c = { CMD_REC, track, mode, 0 };
     return push(c);
 }
 
@@ -92,7 +93,7 @@ bool Engine::postCut(uint8_t track, uint8_t arg)
 {
     if (track >= kTracks || seqcut::argSub(arg) >= seqcut::SUB_COUNT)
         return false;
-    Cmd c = { CMD_CUT, track, arg };
+    Cmd c = { CMD_CUT, track, arg, 0 };
     return push(c);
 }
 
@@ -118,6 +119,17 @@ void Engine::leds(uint8_t track, uint8_t out[kPads]) const
         t.mo.leds(out);
     else if (isHrType(t.type) && t.hr.get())
         t.hr.get()->leds(out);
+    else if (t.type == TYPE_PLINKY)
+        for (uint8_t pad = 0; pad < kPads; pad++)
+            out[pad] = seqplinky::padLevel(pl_, plMenu_, padCol(pad), padRow(pad), (t.padBits[pad >> 3] >> (pad & 7)) & 1u);
+}
+
+uint8_t Engine::plinkyOwner(bool withPending) const
+{
+    for (uint8_t i = 0; i < kTracks; i++)
+        if (t_[i].type == TYPE_PLINKY || (withPending && t_[i].pending == TYPE_PLINKY))
+            return i;
+    return 0xFF;
 }
 
 void Engine::createHr(uint8_t track, uint8_t type)
@@ -140,7 +152,7 @@ void Engine::drain()
         tail_ = (uint8_t)((tail_ + 1) % kRing);
         if (c.kind == CMD_PAD)
         {
-            applyPad(c.track, (uint8_t)(c.a & 0x7F), (c.a & 0x80) != 0);
+            applyPad(c.track, (uint8_t)(c.a & 0x7F), (c.a & 0x80) != 0, c.b);
         }
         else if (c.kind == CMD_TYPE)
         {
@@ -248,7 +260,7 @@ void Engine::scanMono(Track& t)
         }
 }
 
-void Engine::applyPad(uint8_t track, uint8_t pad, bool down)
+void Engine::applyPad(uint8_t track, uint8_t pad, bool down, uint8_t velo)
 {
     if (track >= kTracks || pad >= kPads)
         return;
@@ -256,6 +268,11 @@ void Engine::applyPad(uint8_t track, uint8_t pad, bool down)
     if (t.type == TYPE_OFF)
         return;
     epoch_++;
+    if (t.type == TYPE_PLINKY)
+    {
+        padPlinky(track, pad, down, velo);
+        return;
+    }
     uint8_t& byte = t.padBits[pad >> 3];
     uint8_t bit = (uint8_t)(1u << (pad & 7));
     bool was = (byte & bit) != 0;
@@ -278,6 +295,76 @@ void Engine::applyPad(uint8_t track, uint8_t pad, bool down)
     else if (t.hr.get())
     {
         t.hr.get()->pad(col, row, down);
+    }
+    refresh(track);
+}
+
+bool Engine::plinkyNoteHeld(uint8_t note, uint8_t exceptPad) const
+{
+    for (uint8_t track = 0; track < kTracks; track++)
+        if (t_[track].type == TYPE_PLINKY)
+        {
+            for (uint8_t pad = 0; pad < kPads; pad++)
+                if (pad != exceptPad && ((t_[track].padBits[pad >> 3] >> (pad & 7)) & 1u) && plNote_[pad] == note)
+                    return true;
+            break;
+        }
+    return false;
+}
+
+// Plinky type: the pads are strings of the scale (seqPlinkySeqLogic.h). The Setup pad toggles the setup view, whose pads change root /
+// scale / octave / string interval and play nothing. A note that two held pads share (neighbouring strings overlap) ends with the last.
+void Engine::padPlinky(uint8_t track, uint8_t pad, bool down, uint8_t velo)
+{
+    Track& t = t_[track];
+    uint8_t& byte = t.padBits[pad >> 3];
+    const uint8_t bit = (uint8_t)(1u << (pad & 7));
+    const uint8_t col = padCol(pad), row = padRow(pad);
+    if (down)
+    {
+        if (seqplinky::isMenuPad(pad))
+        {
+            plMenu_ = !plMenu_;
+            for (uint8_t q = 0; q < kPads; q++) // held notes end with the switch
+                if (t.padBits[q >> 3] & (1u << (q & 7)))
+                {
+                    t.padBits[q >> 3] = (uint8_t)(t.padBits[q >> 3] & ~(1u << (q & 7)));
+                    if (!plinkyNoteHeld(plNote_[q], q))
+                    {
+                        seqgen::Event e = { seqgen::EV_NOTE_OFF, track, plNote_[q], 0, 0 };
+                        onEvent(e);
+                    }
+                }
+            refresh(track);
+            return;
+        }
+        if (plMenu_)
+        {
+            seqplinky::setupPad(pl_, col, row);
+            return;
+        }
+        if (byte & bit)
+            return;
+        const uint8_t note = seqplinky::padNote(pl_, col, row);
+        const bool already = plinkyNoteHeld(note, pad);
+        byte = (uint8_t)(byte | bit);
+        plNote_[pad] = note;
+        if (!already)
+        {
+            seqgen::Event e = { seqgen::EV_NOTE_ON, track, note, (uint8_t)(velo ? (int)velo : (int)seqplinky::kDefaultVelocity), 0 };
+            onEvent(e);
+        }
+    }
+    else
+    {
+        if (!(byte & bit))
+            return; // setup pad / stray release
+        byte = (uint8_t)(byte & ~bit);
+        if (!plinkyNoteHeld(plNote_[pad], pad))
+        {
+            seqgen::Event e = { seqgen::EV_NOTE_OFF, track, plNote_[pad], 0, 0 };
+            onEvent(e);
+        }
     }
     refresh(track);
 }
@@ -305,6 +392,8 @@ void Engine::applyType(uint8_t track, uint8_t type)
     t.pending = 0xFF;
     if (type >= TYPE_COUNT || type == t.type)
         return;
+    if (type == TYPE_PLINKY && plinkyOwner(false) != 0xFF)
+        return; // one Plinky voice: the track that has it keeps it
 
     // release the pads of the old generator, stop it, silence everything it sounded
     for (int pad = 0; pad < kPads; pad++)
@@ -318,6 +407,8 @@ void Engine::applyType(uint8_t track, uint8_t type)
                 t.hr.get()->pad(padCol((uint8_t)pad), padRow((uint8_t)pad), false);
         }
     memset(t.padBits, 0, sizeof(t.padBits));
+    if (t.type == TYPE_PLINKY)
+        plMenu_ = false;
     if (t.type == TYPE_CHORDARP)
         t.ca.stop();
     else if (t.type == TYPE_MONO)
@@ -731,16 +822,24 @@ size_t Engine::saveState(uint8_t* buf, size_t cap) const
         if (host_)
             host_->critExit(cs);
     }
-    // trailer (only when a track runs a HYPER_RASP script): [lenHR, HR] per track
+    // trailer (only when a track runs a HYPER_RASP script or the Plinky type): [len, block] per track; the version stays the same
+    // (the trailer is optional: files without it, and older firmware that skips it, are unaffected)
     bool anyHr = false;
     for (int i = 0; i < kTracks; i++)
-        anyHr = anyHr || isHrType(t_[i].type);
+        anyHr = anyHr || isHrType(t_[i].type) || t_[i].type == TYPE_PLINKY;
     if (anyHr)
         for (int i = 0; i < kTracks; i++)
         {
             const Track& t = t_[i];
             uint32_t cs = host_ ? host_->critEnter() : 0;
-            size_t n = (isHrType(t.type) && t.hr.get()) ? t.hr.get()->serialize(buf + p + 1, cap - p - 1) : 0;
+            size_t n = 0;
+            if (isHrType(t.type) && t.hr.get())
+                n = t.hr.get()->serialize(buf + p + 1, cap - p - 1);
+            else if (t.type == TYPE_PLINKY)
+            {
+                pl_.save(buf + p + 1);
+                n = seqplinky::kSetupBytes;
+            }
             buf[p] = (uint8_t)n;
             p += 1 + n;
             if (host_)
@@ -794,6 +893,12 @@ uint16_t Engine::stateHash() const
             blk[5] = blk[10] = 0; // edit page, visible half
         c = crc16Update(c, blk, nm);
         c = crc16Update(c, hblk, nh); // HYPER_RASP script: settings only (its serialize leaves out the runtime and view state)
+        if (t.type == TYPE_PLINKY)
+        {
+            uint8_t pb[seqplinky::kSetupBytes];
+            pl_.save(pb);
+            c = crc16Update(c, pb, sizeof(pb));
+        }
     }
     return c;
 }
@@ -810,6 +915,8 @@ void Engine::resetState()
         initTrack(i);
     }
     hrBus_.reset();
+    pl_ = seqplinky::Setup();
+    plMenu_ = false;
     rec_.stop(4);
     recPublish();
     tail_ = head_;
@@ -897,17 +1004,22 @@ bool Engine::loadState(const uint8_t* buf, size_t len)
         if (n)
             ok = t_[i].mo.deserialize(buf + p, n) && ok;
         p += n;
-        if (isHrType(type))
+        size_t hn = 0, hp = 0;
+        if (trailer && (isHrType(type) || type == TYPE_PLINKY))
+        {
+            hp = trailer;
+            for (uint8_t k = 0; k < i; k++)
+                hp += 1 + buf[hp];
+            hn = buf[hp++];
+        }
+        if (type == TYPE_PLINKY)
+        {
+            if (hn)
+                pl_.load(buf + hp, (unsigned)hn); // a missing block: the default setup
+        }
+        else if (isHrType(type))
         {
             // a script type needs its trailer block; the script exists before its settings are restored (applyType keeps it)
-            size_t hn = 0, hp = 0;
-            if (trailer)
-            {
-                hp = trailer;
-                for (uint8_t k = 0; k < i; k++)
-                    hp += 1 + buf[hp];
-                hn = buf[hp++];
-            }
             if (ok)
             {
                 createHr(i, type);
