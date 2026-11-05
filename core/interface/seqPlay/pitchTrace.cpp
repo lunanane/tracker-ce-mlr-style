@@ -2,8 +2,10 @@
 // PolySynth pitch trace view (plan 013 V): feeds the follower from the engine ring and refreshes the control (see pitchTrace.h).
 #include "seqPlay/pitchTrace.h"
 
+#include <new>
 #include <string.h>
 
+#include "cr_section_macros.h"
 #include "display.h"
 #include "seqTracks.h"
 #ifdef FEATURE_PLINKY
@@ -16,6 +18,9 @@ PitchTraceView pitchTraceView;
 namespace
 {
 constexpr uint32_t kRefreshMs = 40; // 25 fps at most, only while visible
+// Raw storage only (an object with a constructor in EXTERNAL_RAM gets a static constructor that runs before the SDRAM is up): the follower
+// is built by placement new on the first show.
+__NOINIT(EXTERNAL_RAM) alignas(pitchtrace::Follower) uint8_t s_followerMem[sizeof(pitchtrace::Follower)];
 }
 
 void PitchTraceView::createControl()
@@ -55,7 +60,9 @@ void PitchTraceView::show(bool on, const char* hint)
     }
     const bool was = data_.kind != TraceViewData::NONE;
     data_.kind = TraceViewData::PITCH;
-    data_.pitch = &follower_;
+    if (follower_ == nullptr)
+        follower_ = new (s_followerMem) pitchtrace::Follower();
+    data_.pitch = follower_;
     data_.range = &range_;
     strncpy(data_.title, "PolySynth pitch  (dim line: envelope)", sizeof(data_.title) - 1);
     data_.title[sizeof(data_.title) - 1] = 0;
@@ -63,7 +70,7 @@ void PitchTraceView::show(bool on, const char* hint)
     data_.hint[sizeof(data_.hint) - 1] = 0;
     if (!was)
     {
-        follower_.reset();
+        follower_->reset();
         range_ = pitchtrace::Range();
         lastMs_ = 0;
         display.setControlShow(control_);
@@ -74,7 +81,7 @@ void PitchTraceView::show(bool on, const char* hint)
 
 void PitchTraceView::update()
 {
-    if (data_.kind != TraceViewData::PITCH || control_ < 0)
+    if (data_.kind != TraceViewData::PITCH || control_ < 0 || follower_ == nullptr)
         return;
     const uint32_t now = seqNowMs();
     if (lastMs_ != 0 && (uint32_t)(now - lastMs_) < kRefreshMs)
@@ -86,9 +93,9 @@ void PitchTraceView::update()
     const pitchtrace::Sample* rings[pitchtrace::kVoices];
     for (int v = 0; v < pitchtrace::kVoices; v++)
         rings[v] = (const pitchtrace::Sample*)seqPlinkyTraceRing(v);
-    follower_.sync(rings, (int)seqPlinkyTraceLen(), seqPlinkyTraceHead(), now);
+    follower_->sync(rings, (int)seqPlinkyTraceLen(), seqPlinkyTraceHead(), now);
 #endif
-    range_.follow(follower_);
+    range_.follow(*follower_);
     display.refreshControl(control_);
     display.synchronizeRefresh();
 }

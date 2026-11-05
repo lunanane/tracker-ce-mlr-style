@@ -32,16 +32,38 @@
 AUDIO_CORE_RAM void AudioAnalyzeRMS::update(void)
 {
     audio_block_t* block = receiveReadOnly();
-    if (watch == 0)
+    const bool tapped = tap.active();
+    const bool meter = watch != 0;
+    if (!meter && !tapped)
     {
         if (block)
             release(block);
         return;
     }
-    watch = watch - 1;
+    if (meter)
+        watch = watch - 1;
     if (!block)
     {
-        count++;
+        if (meter)
+            count++;
+        if (tapped)
+            tap.put(0);
+        return;
+    }
+    if (tapped) // one pass over the block, only while the amplitude view is open
+    {
+        uint32_t pk = 0;
+        for (int n = 0; n < AUDIO_BLOCK_SAMPLES; n++)
+        {
+            const int32_t s = block->data[n];
+            const uint32_t a = (uint32_t)(s < 0 ? -s : s);
+            pk = a > pk ? a : pk;
+        }
+        tap.put(pk);
+    }
+    if (!meter)
+    {
+        release(block);
         return;
     }
 #if defined(KINETISK)

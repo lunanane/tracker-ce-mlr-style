@@ -744,6 +744,21 @@ Host-checked (make test): frame budget model, real engine -> ring -> follower ->
 | Tap the selected track screen button | The pad legend | Opens / closes reliably, also right after a type change or an instrument popup; a tap on another track only selects it. The selected cell says `tap: help` all the time (the PolySynth hint `Hold+Instr` flashes in for 0.7 s every 4 s). |
 | Tap the selected track when its type is Off | The cell | The message `pick type first` (no legend over an Off track). |
 
+## 11k. v0.3.7 part V: higher resolution pitch and amplitude views (plan 015, Original Tracker only)
+Host-checked (make test): engine ring every 2nd block, 672 sample follower, 168 / 84 point curves, tight auto range, display list budget model,
+block peak cascade, time axis (all seven jog scales), resampled contour lines, per block peak taps (analyzer and limiter rings). Previews: `make preview` /
+`make pitch-preview` in core/seqtest (PNG in build/preview). Nothing below is device-tested yet.
+
+| Do | Look at | Expected |
+|---|---|---|
+| Pitch view (FX2 on the PolySynth page), hold a 4 note chord | The graph | Four lines that use **most of the height** (a chord of one octave spans nearly the whole panel, at least one octave of range, no empty bands above or below); LFO to pitch and glide are **smooth** curves (about 4 px per point), the dim envelope line hugs each pitch line. Title and hint sit inside the plot, no header or footer band. |
+| Pitch view, play a staccato chord four times | The graph | Each stab is a short line per voice (about 0.2 s), none missing; the range does not jump around: it follows the notes within about half a second. |
+| Pitch view with one low bass note and high stabs | The graph | The range grows at once to hold both, then shrinks slowly after the stabs scrolled out. |
+| Master key, page 3 "Global Mixer 3/3", screen button 8 **Amp view** | The graph | Plot over the full height (0 dB at the top, **-48 dB** at the bottom: typical levels fill most of the height), one contour per audible track plus the master: a dim line of the block peaks, in front of it the line of the averages, with many more points than v0.3.6 (about 60 per line with eight loud tracks, up to 200 with a few). Silent tracks draw nothing (and have no label). Header (pattern / step, BPM), the title and the jog hint sit inside the plot or in the right column. |
+| Same, play a drum loop | The time axis | The **right half shows the last 4 s almost linearly** (it used to be squeezed after 10 %); the compression builds up gradually towards the left edge, which is the full 2 minutes; time marks 1s / 5s / 15s / 60s / 2m follow the scale. |
+| Same, turn the jog wheel | The label "Jog: time scale, right half = N s" | One step per click through 2 / 3 / 4 / 6 / 10 / 20 / 60 s (default 4); the time marks and the contours move accordingly; 60 s is a straight line. The wheel does nothing else while the view is open. |
+| Open and close the amp view a few times, leave the page | CPU on Config | The per block taps run only while the view is open; the CPU number returns to its old value after closing. |
+
 ## 11f. CPU savings (plan 009 P, v0.2.7): compare with the previous build (v0.2.6) on the same project
 Use one project with 8 sample voices (some with the filter on), the delay and the stock reverb used, the limiter on, and play it. Open Master > Reverb (it resets the average when it opens) and write down "Rev / All CPU" after 30 s of the busiest part; also read Config > audio usage (min / max / avg / last) and "free heap" / "stack ... free ..." (bottom right of the Config page). Do it on v0.2.6 and on this build; the second number of the Master > Reverb item and the Config numbers are the comparison.
 | Press | Expected |

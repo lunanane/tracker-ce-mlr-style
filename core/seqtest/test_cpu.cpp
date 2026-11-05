@@ -163,6 +163,7 @@ int main()
     testIdleVoices();
     testOutputStage();
     testRmsWatch();
+    testPeakTap(); // plan 015 V
     testLimiterMissingBlock(); // plan 010 (last: it draws from the shared generator)
     printf("%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;

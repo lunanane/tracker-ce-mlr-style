@@ -28,6 +28,7 @@
 #define analyze_rms_h_
 
 #include "AudioStream.h"
+#include "peak_ring.h"
 
 class AudioAnalyzeRMS : public AudioStream
 {
@@ -52,6 +53,8 @@ class AudioAnalyzeRMS : public AudioStream
         watch = kWatchBlocks;
         return count > 0;
     }
+    // plan 015 V: the amplitude view reads the peak of every audio block (a ring owned by the view); the RMS meter is not touched
+    PeakRing tap;
     float read(void);
     virtual void update(void);
 };

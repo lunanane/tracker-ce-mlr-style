@@ -7,7 +7,7 @@ HRSRC = ../../seqgen/hr.cpp ../../seqgen/hr_stab.cpp ../../seqgen/hr_arpseq.cpp 
 GLUE = ../source/seqTracksCore.cpp ../source/seqCut.cpp ../interface/seqSession/cutLayer.cpp
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
 
-.PHONY: test clean preview amp-preview
+.PHONY: test clean preview amp-preview pitch-preview
 test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE) build/seq_plinky_tests$(EXE) build/seq_trace_tests$(EXE) build/seq_amp_tests$(EXE)
 	build/seq_cpu_tests$(EXE)
 	build/seq_glue_tests$(EXE)
@@ -42,6 +42,12 @@ preview: build/seq_glue_tests$(EXE)
 amp-preview: build/seq_amp_tests$(EXE)
 	mkdir -p build/preview
 	SEQ_AMP_PREVIEW=build/preview build/seq_amp_tests$(EXE) > /dev/null
+	python amp_preview.py build/preview
+
+# PNG previews of the pitch view (plan 015 V): the real engine through ring, follower and drawing (needs Pillow)
+pitch-preview: build/seq_trace_tests$(EXE)
+	mkdir -p build/preview
+	SEQ_PITCH_PREVIEW=build/preview build/seq_trace_tests$(EXE)
 	python amp_preview.py build/preview
 
 build/seq_play_tests$(EXE): test_play.cpp ../source/seqPlayLogic.h ../source/seqTracksLogic.h $(HRSRC)

@@ -3,6 +3,10 @@
 // 64 points per voice, the auto range, the layout and the drawing over a tiny context (the same code runs on the FT81x display list in
 // interface/seqPlay/pitchTrace.cpp and in the host tests: display-list size, bounds). No Polyend includes.
 //
+// v0.3.7 (plan 015 V): the engine writes a sample every 2nd audio block (5.8 ms), the follower keeps 672 of them (3.9 s) and the drawing
+// shows 168 points per pitch line and 84 per envelope line (display list budget below); the plot uses the full height between the stock
+// title bar and the strip, the auto range is tight around the sounding notes (at least one octave).
+//
 // Look: plain dark ground, no fills. x = time, ~3.9 s scrolling right to left; y = pitch on a light semitone grid, octave lines
 // stronger, note names at the left. Per voice one thin line in a tracker key colour (Note teal, Instrument yellow, FX1 pink, FX2 blue)
 // and a dimmer second line y = pitch + kEnvSemis * envelope hugging it (attack lifts it away, release lets it fall back). The current
@@ -20,20 +24,23 @@ namespace pitchtrace
 enum
 {
     kVoices = 4,
-    kWin = 112,       // samples shown (the engine writes one per ~34.8 ms: 3.9 s)
-    kSampleMs = 35,
-    kMaxPts = 64,     // points per curve after decimation
-    kX0 = 60,         // plot area
+    kWin = 672,       // samples kept (the engine writes one per 2 blocks = 5.805 ms: 3.9 s)
+    kSampleUs = 5805,
+    kIdleMs = 18,     // no new sample for this long: the engine is idle, the follower keeps the time axis running with silence
+    kMaxPts = 168,    // points of a pitch curve after decimation (kWin / 4)
+    kEnvPts = 84,     // points of an envelope curve (kWin / 8: every second pitch point)
+    kX0 = 60,         // plot area: the full height between the stock title bar (28) and the strip (425)
     kX1 = 712,
-    kY0 = 60,
-    kY1 = 404,
-    kPanelY0 = 30,    // background panel (same band as the PolySynth parameter overlay)
+    kY0 = 36,
+    kY1 = 420,
+    kPanelY0 = 30,    // background panel
     kPanelY1 = 424,
     kMaxGridSpan = 40, // above this span only the octave lines are drawn
-    kMinRun = 5        // v0.3.6: a note stays on the screen for at least this many samples (~175 ms): staccato stabs are visible
+    kMinRun = 30,      // v0.3.6: a note stays on the screen for at least this many samples (~175 ms): staccato stabs are visible
+    kDisplayBudget = 5400 // bytes of display list (8172 - 400 margin - title bar 600 - strip / labels 1720); the pattern control is hidden
 };
 constexpr float kEnvSemis = 3.0f; // full envelope lifts the second line by this many semitones
-constexpr float kMinSpan = 14.0f;
+constexpr float kMinSpan = 12.0f; // one octave: a single note or a chord fills most of the height
 
 struct Sample // identical layout to plinkyvoice::TraceSample (checked in pitchTrace.cpp)
 {
@@ -71,6 +78,7 @@ class Follower
         have_ = false;
         last_ = 0;
         lastMs_ = 0;
+        remUs_ = 0;
     }
     // ring[v] points to the engine ringLen (power of two) samples of voice v, head = index of the next sample the engine writes
     void sync(const Sample* const* ring, int ringLen, uint16_t head, uint32_t nowMs)
@@ -100,13 +108,16 @@ class Follower
             }
             last_ = head;
             lastMs_ = nowMs;
+            remUs_ = 0;
             return;
         }
         const uint32_t el = nowMs - lastMs_; // no new sample: idle engine - after 3 periods the time axis keeps running with silence
-        if (el >= 3 * kSampleMs)
+        if (el >= (uint32_t)kIdleMs)
         {
-            uint32_t steps = el / kSampleMs;
-            lastMs_ += steps * kSampleMs;
+            const uint32_t us = el * 1000u + remUs_;
+            uint32_t steps = us / kSampleUs;
+            remUs_ = us % kSampleUs;
+            lastMs_ = nowMs;
             if (steps > kWin) steps = kWin;
             Sample none[kVoices];
             for (int v = 0; v < kVoices; v++)
@@ -142,7 +153,7 @@ class Follower
                 run_[v] = 0;
             s_[v][head_] = s;
         }
-        head_ = (uint8_t)((head_ + 1) % kWin);
+        head_ = (uint16_t)((head_ + 1) % kWin);
     }
     // age 0 = newest .. kWin - 1 = oldest
     const Sample& at(int v, int age) const { return s_[v][(head_ + kWin - 1 - age) % kWin]; }
@@ -152,10 +163,11 @@ class Follower
     uint8_t run_[kVoices];
     uint8_t hold_[kVoices];
     Sample lastOn_[kVoices];
-    uint8_t head_;
+    uint16_t head_;
     bool have_;
     uint16_t last_;
     uint32_t lastMs_;
+    uint32_t remUs_;
 };
 
 // The window of one voice, oldest first, reduced to at most maxPts points (the last sample of each bucket). Returns the count.
@@ -184,7 +196,7 @@ struct Range
 {
     float lo = 48.0f, hi = 72.0f;
     bool init = false;
-    // grows at once, shrinks slowly (10 % per call); holds while nothing sounds
+    // grows at once, shrinks slowly (6 % per call = a time constant of about 0.6 s at 25 calls per second); holds while nothing sounds
     void follow(const Follower& f)
     {
         float mn = 1e9f, mx = -1e9f;
@@ -199,7 +211,7 @@ struct Range
                 if (top > mx) mx = top;
             }
         if (mx < mn) return;
-        float tlo = mn - 2.0f, thi = mx + 2.0f;
+        float tlo = mn - 1.0f, thi = mx + 1.0f;
         if (thi - tlo < kMinSpan)
         {
             const float c = (thi + tlo) * 0.5f;
@@ -213,8 +225,8 @@ struct Range
             init = true;
             return;
         }
-        lo = tlo < lo ? tlo : lo + (tlo - lo) * 0.1f;
-        hi = thi > hi ? thi : hi + (thi - hi) * 0.1f;
+        lo = tlo < lo ? tlo : lo + (tlo - lo) * 0.06f;
+        hi = thi > hi ? thi : hi + (thi - hi) * 0.06f;
     }
     int ilo() const { return (int)(lo < 0 ? lo - 0.999f : lo); } // floor
     int ihi() const { return (int)(hi < 0 ? hi : hi + 0.999f); } // ceil
@@ -292,6 +304,7 @@ template <class C> void draw(C& c, const Follower& f, const Range& r, const char
     // curves: the envelope line first (dim), then the pitch line
     Sample pts[kMaxPts];
     int16_t xy[kMaxPts * 2];
+    const int npe = kEnvPts < kMaxPts ? kEnvPts : kMaxPts;
     int nowY[kVoices];
     int nowNote[kVoices];
     for (int v = 0; v < kVoices; v++)
@@ -301,9 +314,9 @@ template <class C> void draw(C& c, const Follower& f, const Range& r, const char
     }
     for (int v = 0; v < kVoices; v++)
     {
-        const int n = decimate(f, v, pts, kMaxPts);
         for (int curve = 0; curve < 2; curve++) // 0 = envelope (behind), 1 = pitch
         {
+            const int n = decimate(f, v, pts, curve == 0 ? npe : kMaxPts);
             c.color(curve == 0 ? seqpal::dim(voiceColor(v)) : voiceColor(v));
             c.width(curve == 0 ? 12 : 20);
             int cnt = 0;
@@ -350,6 +363,11 @@ template <class C> void draw(C& c, const Follower& f, const Range& r, const char
         ly[k] = nowY[order[k]];
         if (k > 0 && ly[k] < ly[k - 1] + 14) ly[k] = ly[k - 1] + 14;
     }
+    for (int k = cnt - 1; k >= 0; k--) // stacked labels must not leave the plot at the bottom
+    {
+        const int lim = k == cnt - 1 ? kY1 : ly[k + 1] - 14;
+        if (ly[k] > lim) ly[k] = lim;
+    }
     for (int k = 0; k < cnt; k++)
     {
         c.color(voiceColor(order[k]));
@@ -357,9 +375,9 @@ template <class C> void draw(C& c, const Follower& f, const Range& r, const char
     }
 
     c.color(seqpal::kTitle);
-    c.text(12, 42, 3, 2, title);
+    c.text(kX0 + 6, kY0 + 10, 1, 2, title);
     c.color(seqpal::kText);
-    c.text(788, 42, 1, 2 | 4, hint);
+    c.text(kX1 - 6, kY0 + 10, 1, 2 | 4, hint);
     c.finish();
 }
 

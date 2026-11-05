@@ -93,7 +93,11 @@ static void test_engine_ring()
     // ring layout equals the logic header's sample
     CHECK(sizeof(TraceSample) == sizeof(pitchtrace::Sample));
     CHECK(kMaxVoices == pitchtrace::kVoices);
-    CHECK((kTraceLen & (kTraceLen - 1)) == 0 && kTraceLen >= pitchtrace::kWin + 8);
+    // v0.3.7 (plan 015 V): the engine ring only has to bridge the main loop gaps (the follower keeps its own 3.9 s window of kWin samples):
+    // a power of two holding at least 400 ms, one sample every 2 blocks, and kWin samples are 3.9 s
+    CHECK((kTraceLen & (kTraceLen - 1)) == 0 && kTraceLen * kTraceEvery * kBlockSec >= 0.4f);
+    CHECK(pitchtrace::kWin * kTraceEvery * kBlockSec > 3.8f && pitchtrace::kWin * kTraceEvery * kBlockSec < 4.0f);
+    CHECK(pitchtrace::kSampleUs == (int)(kTraceEvery * kBlockSec * 1e6f + 0.5f));
 
     Engine e;
     CHECK(e.traceHeadIndex() == 0);
@@ -168,8 +172,18 @@ static void test_engine_ring()
     runBlocks(r, 40 * kTraceEvery);
     const uint16_t rh = r.traceHeadIndex();
     CHECK(!r.traceRing(0)[(rh - 1) & (kTraceLen - 1)].on);
-    int firstRel = r.traceRing(0)[(rh - 40) & (kTraceLen - 1)].env;
-    CHECK(firstRel < 255);
+    // the envelope falls during the release (v0.3.7: the samples are 5.8 ms apart, the scan replaces the single sample of 40 back)
+    int minRel = 255, prevRel = 256;
+    bool fallsMonotone = true;
+    for (int k = 40; k >= 1; k--)
+    {
+        const TraceSample& t = r.traceRing(0)[(rh - k) & (kTraceLen - 1)];
+        if (!t.on) continue;
+        if (t.env < minRel) minRel = t.env;
+        if (t.env > prevRel) fallsMonotone = false;
+        prevRel = t.env;
+    }
+    CHECK(minRel < 255 && fallsMonotone);
     // a silent engine writes nothing (the reader keeps its own clock then)
     Engine q;
     runBlocks(q, 100);
@@ -214,12 +228,12 @@ static void test_follower_decimate_range()
     // wrap of the 16 bit head and of the 128 ring
     ring.head = 65530;
     ring.sync(f, 150); // overrun branch (head jumped): keeps the newest half, no crash
-    for (int i = 0; i < 20; i++) ring.put(70 * 32, 255, 1);
+    for (int i = 0; i < pitchtrace::kMinRun + 10; i++) ring.put(70 * 32, 255, 1); // a run longer than the minimum shown run
     ring.sync(f, 200);
     CHECK(f.at(0, 0).pitch == 70 * 32);
-    CHECK(f.at(0, 19).pitch == 70 * 32);
+    CHECK(f.at(0, pitchtrace::kMinRun + 9).pitch == 70 * 32);
     // idle: no new samples, the clock keeps scrolling with silence
-    ring.sync(f, 200 + 35 * 5);
+    ring.sync(f, 200 + 30); // 30 ms = 5 sample periods of 5.805 ms
     CHECK(f.at(0, 0).on == 0 && f.at(0, 4).on == 0 && f.at(0, 5).on == 1);
     // a short pause (< 3 periods) does not insert silence
     FakeRing r2;
@@ -230,20 +244,25 @@ static void test_follower_decimate_range()
     r2.sync(f2, 20 + 60);
     CHECK(f2.at(0, 0).on == 1);
 
-    // decimation: at most 64 points, last bucket sample = newest, order preserved
+    // decimation: at most kMaxPts points, last bucket sample = newest, order preserved
     pitchtrace::Follower d;
     FakeRing r3;
     r3.sync(d, 0);
-    for (int i = 0; i < pitchtrace::kWin; i++) r3.put(i * 4, 100, 1);
-    r3.sync(d, 10);
+    for (int i = 0; i < pitchtrace::kWin; i++)
+    {
+        r3.put(i * 4, 100, 1);
+        if ((i & 63) == 63) r3.sync(d, 1 + i); // the ring only holds 128: the main loop reads in between
+    }
+    r3.sync(d, 10 + pitchtrace::kWin);
     pitchtrace::Sample pts[pitchtrace::kMaxPts];
     const int n = pitchtrace::decimate(d, 0, pts, pitchtrace::kMaxPts);
-    CHECK(n == 64);
+    CHECK(n == pitchtrace::kMaxPts && pitchtrace::kMaxPts >= 160 && pitchtrace::kEnvPts * 2 == pitchtrace::kMaxPts);
     CHECK(pts[n - 1].pitch == (pitchtrace::kWin - 1) * 4);
     bool mono = true;
     for (int i = 1; i < n; i++) mono = mono && pts[i].pitch > pts[i - 1].pitch;
     CHECK(mono);
-    CHECK(pitchtrace::decimate(d, 0, pts, 200) == pitchtrace::kWin);
+    pitchtrace::Sample big[pitchtrace::kWin];
+    CHECK(pitchtrace::decimate(d, 0, big, pitchtrace::kWin + 50) == pitchtrace::kWin);
 
     // auto range: min span, grows at once, shrinks slowly, holds in silence
     pitchtrace::Range rg;
@@ -323,7 +342,7 @@ static Seen drawSeen(Sim& s)
 {
     Ctx c;
     pitchtrace::draw(c, s.f, s.rg, "PolySynth pitch", "FX2: close");
-    CHECK(c.bytes <= 4096);
+    CHECK(c.bytes <= pitchtrace::kDisplayBudget);
     Seen o;
     for (int v = 0; v < pitchtrace::kVoices; v++)
     {
@@ -467,24 +486,27 @@ static void test_pitch_layout_and_size()
             x.on = 1;
         }
         ring.head++;
+        if ((i & 63) == 63) ring.sync(f, 1 + i);
     }
-    ring.sync(f, 10);
+    ring.sync(f, 10 + pitchtrace::kWin);
     pitchtrace::Range rg;
     rg.follow(f);
     Ctx c;
     pitchtrace::draw(c, f, rg, "PolySynth pitch  (dim line: envelope)", "FX2: close");
     printf("  pitch trace, 4 full voices, wide range: %d bytes, %d strips, %d texts\n", c.bytes, c.strips, c.texts);
-    CHECK(c.bytes <= 4096);
+    CHECK(c.bytes <= pitchtrace::kDisplayBudget);
     CHECK(c.strips == 8);
     CHECK(c.maxStripPts <= pitchtrace::kMaxPts);
     checkPitchBounds(c);
-    // the envelope line sits above its pitch line (smaller y) wherever the envelope is > 0
+    // the envelope line sits above its pitch line (smaller y) wherever the envelope is > 0 (v0.3.7: the envelope line has every second
+    // point of the pitch line, so point i of it belongs to point 2 i + 1 of the pitch line)
     bool above = true;
     for (int v = 0; v < 4; v++)
     {
         const std::vector<int>& envY = c.stripY[v * 2];
         const std::vector<int>& pitY = c.stripY[v * 2 + 1];
-        for (size_t i = 0; i < envY.size() && i < pitY.size(); i++) above = above && envY[i] <= pitY[i];
+        CHECK(envY.size() * 2 == pitY.size());
+        for (size_t i = 0; i < envY.size() && 2 * i + 1 < pitY.size(); i++) above = above && envY[i] <= pitY[2 * i + 1];
     }
     CHECK(above);
     // colours: the pitch lines carry the four key colours
@@ -502,17 +524,18 @@ static void test_pitch_layout_and_size()
             pitchtrace::Sample& x = r2.s[v][r2.head & 127];
             x.pitch = (int16_t)((48 + v) * 32);
             x.env = 100;
-            x.on = (i % 3) != 2;
+            x.on = (i % (pitchtrace::kMinRun + 5)) < pitchtrace::kMinRun; // v0.3.7: runs of kMinRun (the shortest the follower shows), gaps of 5
         }
         r2.head++;
+        if ((i & 63) == 63) r2.sync(f2, 1 + i);
     }
-    r2.sync(f2, 10);
+    r2.sync(f2, 10 + pitchtrace::kWin);
     pitchtrace::Range rg2;
     rg2.follow(f2);
     Ctx c2;
     pitchtrace::draw(c2, f2, rg2, "PolySynth pitch  (dim line: envelope)", "FX2: close");
     printf("  pitch trace, worst on/off pattern: %d bytes, %d strips\n", c2.bytes, c2.strips);
-    CHECK(c2.bytes <= 4096);
+    CHECK(c2.bytes <= pitchtrace::kDisplayBudget);
     checkPitchBounds(c2);
 
     // case 3: extreme pitches (notes 0 and 127, huge span: the semitone grid is dropped, only octaves)
@@ -529,13 +552,14 @@ static void test_pitch_layout_and_size()
             x.on = 1;
         }
         r3.head++;
+        if ((i & 63) == 63) r3.sync(f3, 1 + i);
     }
-    r3.sync(f3, 10);
+    r3.sync(f3, 10 + pitchtrace::kWin);
     pitchtrace::Range rg3;
     rg3.follow(f3);
     Ctx c3;
     pitchtrace::draw(c3, f3, rg3, "t", "h");
-    CHECK(c3.bytes <= 4096);
+    CHECK(c3.bytes <= pitchtrace::kDisplayBudget);
     checkPitchBounds(c3);
 
     // case 4: empty window: just the panel, grid and texts
@@ -615,18 +639,139 @@ static void test_frame_budget_model()
     const int patternFour = rows * 4 * charsPerCell * 4 + 1200;       // 4 tracks view: 4080
     const int stripLabels = 8 * 200 + 120;                           // eight two-line cells + background label
     const int titleBar = 600;
-    const int overlay = 3600, pitch = 2800; // pitch: measured worst 2784 (limit in the layout test 4096); the overlay control is hidden while it shows
+    const int overlay = 3600, pitch = pitchtrace::kDisplayBudget; // v0.3.7: the pitch view may use its whole budget; the overlay control is hidden while it shows
     // the old overlay: pattern + overlay + strip + title do not fit (this is what pushed the overlay out)
     CHECK(patternWorst + overlay + stripLabels + titleBar > kBudget);
     CHECK(patternFour + overlay + stripLabels + titleBar > kBudget - 1500); // even the four track view has no real room left
     // the view switch: without the pattern control the PolySynth page fits; the pitch view replaces it (both together would not fit)
     CHECK(overlay + stripLabels + titleBar <= kBudget);
-    CHECK(4096 + stripLabels + titleBar <= kBudget);
+    CHECK(pitchtrace::kDisplayBudget + stripLabels + titleBar <= kBudget - 400); // v0.3.7: the raised budget keeps a margin of at least 400 B
     CHECK(overlay + pitch + stripLabels + titleBar > kBudget);
+}
+
+// `make pitch-preview`: draw ops of the real engine through ring -> follower -> drawing for pitch_preview (SEQ_PITCH_PREVIEW=<dir>)
+struct DumpCtx
+{
+    FILE* f;
+    void color(uint32_t rgb) { fprintf(f, "C %06X\n", (unsigned)rgb); }
+    void width(int w) { fprintf(f, "W %d\n", w); }
+    void rect(int x0, int y0, int x1, int y1) { fprintf(f, "R %d %d %d %d\n", x0, y0, x1, y1); }
+    void lines(const int16_t* s, int n)
+    {
+        fprintf(f, "L");
+        for (int i = 0; i < n * 4; i++) fprintf(f, " %d", s[i]);
+        fprintf(f, "\n");
+    }
+    void strip(const int16_t* xy, int n)
+    {
+        fprintf(f, "S");
+        for (int i = 0; i < n * 2; i++) fprintf(f, " %d", xy[i]);
+        fprintf(f, "\n");
+    }
+    void textPhase() {}
+    void text(int x, int y, int font, int opt, const char* s) { fprintf(f, "T %d %d %d %d %s\n", x, y, font, opt, s); }
+    void finish() {}
+};
+
+static void dumpPitch(const char* dir, const char* name, Sim& s)
+{
+    char path[512];
+    snprintf(path, sizeof path, "%s/%s.ops", dir, name);
+    DumpCtx c;
+    c.f = fopen(path, "w");
+    if (!c.f) return;
+    pitchtrace::draw(c, s.f, s.rg, "PolySynth pitch  (dim line: envelope)", "FX2: parameters");
+    fclose(c.f);
+    Ctx m;
+    pitchtrace::draw(m, s.f, s.rg, "PolySynth pitch  (dim line: envelope)", "FX2: parameters");
+    printf("  %s: %d bytes (budget %d), %d strips, %d points\n", name, m.bytes, (int)pitchtrace::kDisplayBudget, m.strips, m.strips ? 0 : 0);
+}
+
+static void dumpPitchPreviews(const char* dir)
+{
+    const uint8_t chord[4] = { 60, 64, 67, 71 };
+    // 1: a sustained four note chord with a slow LFO to pitch, then a second chord on top
+    {
+        Sim s;
+        s.e.setParam(P_VOICES, 4);
+        s.e.setParam(P_ATTACK, 25);
+        s.e.setParam(P_SUSTAIN, 70);
+        s.e.setParam(P_LFO_DEST, 0);
+        s.e.setParam(P_LFO_DEPTH, 12);
+        s.e.setParam(P_LFO_RATE, 40);
+        for (int i = 0; i < 4; i++) s.e.noteOn(chord[i], 100);
+        s.run(14 * 60);
+        for (int i = 0; i < 4; i++) s.e.noteOff(chord[i]);
+        s.run(14 * 10);
+        const uint8_t c2[4] = { 62, 65, 69, 72 };
+        for (int i = 0; i < 4; i++) s.e.noteOn(c2[i], 100);
+        s.run(14 * 36);
+        dumpPitch(dir, "pitch1_chord_lfo", s);
+    }
+    // 2: staccato chord stabs, then a glide
+    {
+        Sim s;
+        s.e.setParam(P_VOICES, 4);
+        s.e.setParam(P_RELEASE, 12);
+        s.e.setParam(P_GLIDE, 0);
+        const uint8_t seq[4][4] = { { 60, 64, 67, 71 }, { 57, 60, 64, 67 }, { 62, 65, 69, 72 }, { 55, 59, 62, 67 } };
+        for (int k = 0; k < 4; k++)
+        {
+            for (int i = 0; i < 4; i++) s.e.noteOn(seq[k][i], 100);
+            s.run(14 * 6);
+            for (int i = 0; i < 4; i++) s.e.noteOff(seq[k][i]);
+            s.run(14 * 20);
+        }
+        dumpPitch(dir, "pitch2_stabs", s);
+    }
+    // 3: one voice with glide between three notes and a fast LFO wiggle
+    {
+        Sim s;
+        s.e.setParam(P_VOICES, 1);
+        s.e.setParam(P_GLIDE, 55);
+        s.e.setParam(P_SUSTAIN, 100);
+        s.e.setParam(P_LFO_DEST, 0);
+        s.e.setParam(P_LFO_DEPTH, 25);
+        s.e.setParam(P_LFO_RATE, 70);
+        s.e.noteOn(60, 100);
+        s.run(14 * 30);
+        s.e.noteOn(72, 100);
+        s.run(14 * 45);
+        s.e.noteOn(65, 100);
+        s.run(14 * 45);
+        dumpPitch(dir, "pitch3_glide_lfo", s);
+    }
+    // 4: chord with glide + stabs mixed: a held bass note, three voices stabbing on top
+    {
+        Sim s;
+        s.e.setParam(P_VOICES, 4);
+        s.e.setParam(P_RELEASE, 15);
+        s.e.setParam(P_SUSTAIN, 80);
+        s.e.setParam(P_LFO_DEST, 0);
+        s.e.setParam(P_LFO_DEPTH, 6);
+        s.e.setParam(P_LFO_RATE, 30);
+        s.e.noteOn(36, 100);
+        for (int k = 0; k < 6; k++)
+        {
+            s.run(14 * 12);
+            s.e.noteOn((uint8_t)(60 + 3 * (k % 4)), 100);
+            s.e.noteOn((uint8_t)(64 + 3 * (k % 3)), 100);
+            s.run(14 * 4);
+            s.e.noteOff((uint8_t)(60 + 3 * (k % 4)));
+            s.e.noteOff((uint8_t)(64 + 3 * (k % 3)));
+        }
+        s.run(14 * 10);
+        dumpPitch(dir, "pitch4_bass_and_stabs", s);
+    }
 }
 
 int main()
 {
+    if (const char* dir = getenv("SEQ_PITCH_PREVIEW"))
+    {
+        dumpPitchPreviews(dir);
+        return 0;
+    }
     test_frame_budget_model();
     test_engine_ring();
     test_follower_decimate_range();

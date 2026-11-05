@@ -67,6 +67,7 @@ AUDIO_CORE_RAM void AudioEffectLimiter::tapPeak(const int16_t* d)
     }
     if (pk > outPeak)
         outPeak = pk;
+    ring.put(pk); // plan 015 V: the peak of this block for the amplitude view (nothing when no ring is attached)
 }
 
 AUDIO_CORE_RAM void AudioEffectLimiter::update(void)

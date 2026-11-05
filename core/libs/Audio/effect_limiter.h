@@ -2,6 +2,7 @@
 #define LIBS_AUDIO_EFFECT_LIMITER_H_
 
 #include "AudioStream.h"
+#include "peak_ring.h"
 
 constexpr uint8_t LIMITER_DELAY = 5;
 
@@ -30,6 +31,13 @@ class AudioEffectLimiter : public AudioStream
     // plan 013 M (master amplitude view): peak |sample| of the blocks this stage sent on since the last call, 0 .. 32768. Measured only
     // while the tap is on (one pass over the block); read from the main loop, tear tolerant.
     void setPeakTap(bool on) { peakTap = on; }
+    // plan 015 V: the peak of every block into a ring owned by the amplitude view (nullptr = off, also switches the tap off)
+    void setPeakRing(uint16_t* buf)
+    {
+        ring.attach(buf);
+        peakTap = buf != nullptr;
+    }
+    PeakRing ring;
     uint32_t takePeak() { return __atomic_exchange_n(&outPeak, (uint32_t)0, __ATOMIC_ACQ_REL); }
 
   private:
