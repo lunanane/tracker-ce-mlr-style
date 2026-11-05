@@ -1,5 +1,6 @@
 #include "ampLogarythmicValues.h"
 #include "mtMasterEnhancer.h"
+#include "masterParams/ampView.h"
 #ifdef FEATURE_SYNTH
 #include "Synth.h"
 #endif
@@ -31,6 +32,7 @@ const char* const saturationListTexts[5] = { "Hard Clip",
 
 void cMasterParams::initDisplayControls()
 {
+    ampView.createControl(); // plan 013 M: first = lowest index = drawn on top of the page
 #ifdef FEATURE_SYNTH
     for (uint8_t trackNo = 0; trackNo < 8 + kSynthParts; trackNo++)
     {
@@ -1588,6 +1590,9 @@ void cMasterParams::showMixerDelayReverbScreen()
     {
         sprintf(mixerLabel[i], " ");
     }
+#ifdef FEATURE_PLINKY
+    sprintf(mixerLabel[7], "%s", ampView.visible() ? "Close" : "Amp view"); // plan 013 M: screen button 8
+#endif
 
     if (displayType == displayMode::mixerDelayReverb)
     {
@@ -1696,6 +1701,16 @@ void cMasterParams::showMixerDelayReverbScreen()
     display.setControlHide(blankSpaceCover[2]);
     display.refreshControl(blankSpaceCover[1]);
     display.refreshControl(blankSpaceCover[2]);
+
+#ifdef FEATURE_PLINKY
+    // plan 013 M: the last place carries the "Amp view" button, so the empty-space cover stops before it
+#ifdef FEATURE_SYNTH
+    display.setControlHide(blankSpaceCover[0]);
+#else
+    display.setControlSize(blankSpaceCover[0], (800 / 8) * 3 - 4, -1);
+#endif
+    display.refreshControl(blankSpaceCover[0]);
+#endif
 
     display.synchronizeRefresh();
 

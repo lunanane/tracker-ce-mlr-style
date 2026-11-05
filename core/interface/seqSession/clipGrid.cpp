@@ -6,6 +6,7 @@
 #include "display.h"
 #include "displayControls.h"
 #include "seqSession/clipGrid.h"
+#include "seqPalette.h"
 #include <stdio.h>
 
 using namespace seqsession;
@@ -13,10 +14,14 @@ using namespace seqsession::clipgrid;
 
 namespace
 {
-// theme colours (songPlayerColors): 0 text, 4 dim, 5 red, 6 black, 7 mid grey, 8 block, 9 green
+// plan 013 C: a clean dark ground, thin outlines, state by colour from the tracker key palette (seqPalette.h):
+//   playing = Note teal (dark teal cell + bright outline and progress line in the marks control), queued = Instrument yellow (blinking
+//   outline), armed follow action = FX1 pink outline, Play 1x = yellow notch, row end = pink notch, pad window frame = FX2 blue,
+//   scene column = dark blue cells, song row bar = FX2 blue. Text and dim colours come from the theme (songPlayerColors).
+// theme colours (songPlayerColors): 0 text, 4 dim, 5 red (status messages only)
 struct Palette
 {
-    uint32_t text, dim, red, black, notes, empty, play;
+    uint32_t text, dim, red;
 };
 
 Palette palette(const uint32_t* c)
@@ -25,10 +30,6 @@ Palette palette(const uint32_t* c)
     p.text = c[0];
     p.dim = c[4];
     p.red = c[5];
-    p.black = c[6];
-    p.notes = c[7];
-    p.empty = c[8];
-    p.play = c[9];
     return p;
 }
 
@@ -99,29 +100,32 @@ void cSeqClipGrid::update()
         API_CMD_NUMBER(kRowNumX + 18, rowY(r) + kCellH / 2, fs->handle, OPT_CENTERX | OPT_CENTERY, v.top + r);
     }
 
-    // ---- cells: one batch per colour
+    // ---- cells: one batch per colour (three states for the clips, three for the scene column)
     API_LINE_WIDTH(16);
-    const uint32_t fill[3] = { pal.empty, pal.notes, pal.play };
+    const uint32_t fill[3] = { seqpal::kCellEmpty, seqpal::kCellNotes, seqpal::kCellPlaying };
+    const uint32_t sceneFill[3] = { seqpal::kSceneEmpty, seqpal::kSceneNotes, seqpal::kScenePlaying };
     for (uint8_t cls = 0; cls < 3; cls++)
     {
         API_COLOR(fill[cls]);
         API_BEGIN(RECTS);
         for (uint8_t r = 0; r < kVisRows; r++)
-        {
             for (uint8_t t = 0; t < kTracks; t++)
                 if (fillsAs(v.cell[r][t], cls))
                     rect(colX(t), rowY(r), colX(t) + kCellW - 1, rowY(r) + kCellH - 1);
+        API_END();
+        API_COLOR(sceneFill[cls]);
+        API_BEGIN(RECTS);
+        for (uint8_t r = 0; r < kVisRows; r++)
             if (fillsAs(v.scene[r], cls))
                 rect(sceneX(), rowY(r), sceneX() + kSceneW - 1, rowY(r) + kCellH - 1);
-        }
         API_END();
     }
 
-    // ---- armed follow actions: a steady green outline (the blink of a launch the performer queued is in the marks control)
+    // ---- armed follow actions: a steady pink outline (the blink of a launch the performer queued is in the marks control)
     if (plan.outlines)
     {
         API_LINE_WIDTH(16);
-        API_COLOR(pal.play);
+        API_COLOR(seqpal::kFx1);
         for (uint8_t r = 0; r < kVisRows; r++)
             for (uint8_t t = 0; t < kTracks; t++)
                 if (v.cell[r][t] == CELL_FOLLOW)
@@ -146,7 +150,7 @@ void cSeqClipGrid::update()
         API_LINE_WIDTH(16);
         for (uint8_t pass = 0; pass < 2; pass++)
         {
-            API_COLOR(pass == 0 ? pal.text : pal.red);
+            API_COLOR(pass == 0 ? seqpal::kInstr : seqpal::kFx1);
             API_BEGIN(RECTS);
             for (uint8_t r = 0; r < kVisRows; r++)
             {
@@ -173,9 +177,9 @@ void cSeqClipGrid::update()
         outline(colX(v.focusTrack) + 1, rowY(r) + 1, colX(v.focusTrack) + kCellW - 2, rowY(r) + kCellH - 2);
     }
 
-    // ---- pad window: a red frame round the 8 x 4 clips and one round their scene pads
-    API_COLOR(pal.red);
-    API_LINE_WIDTH(32);
+    // ---- pad window: a thin blue frame round the 8 x 4 clips and one round their scene pads
+    API_COLOR(seqpal::kFx2);
+    API_LINE_WIDTH(24);
     if (winRow + kWinRows > 0 && winRow < (int)kVisRows)
     {
         int r0 = winRow < 0 ? 0 : winRow;
@@ -255,20 +259,25 @@ void cSeqClipMarks::update()
     const Palette pal = palette(colors);
 
     API_LINE_WIDTH(16);
-    // queued launches blink bright for half of the time
+    // playing clips: a thin teal outline round the cell
+    API_COLOR(seqpal::kNote);
+    for (uint8_t t = 0; t < kTracks; t++)
+        if (m.playRow[t] < kVisRows)
+            outline(colX(t), rowY(m.playRow[t]), colX(t) + kCellW - 1, rowY(m.playRow[t]) + kCellH - 1);
+    // queued launches: a yellow outline that blinks for half of the time
     if (m.blink)
     {
-        API_COLOR(pal.text);
-        API_BEGIN(RECTS);
+        API_COLOR(seqpal::kInstr);
+        API_LINE_WIDTH(24);
         for (uint8_t t = 0; t < kTracks; t++)
             if (m.qRow[t] < kVisRows && m.qKind[t] == MK_BLINK)
-                rect(colX(t), rowY(m.qRow[t]), colX(t) + kCellW - 1, rowY(m.qRow[t]) + kCellH - 1);
+                outline(colX(t), rowY(m.qRow[t]), colX(t) + kCellW - 1, rowY(m.qRow[t]) + kCellH - 1);
         if (m.sceneRow < kVisRows)
-            rect(sceneX(), rowY(m.sceneRow), sceneX() + kSceneW - 1, rowY(m.sceneRow) + kCellH - 1);
-        API_END();
+            outline(sceneX(), rowY(m.sceneRow), sceneX() + kSceneW - 1, rowY(m.sceneRow) + kCellH - 1);
+        API_LINE_WIDTH(16);
     }
-    // progress of the playing clips: a dark bar along the bottom of the cell
-    API_COLOR(pal.black);
+    // progress of the playing clips: a bright teal line along the bottom of the cell
+    API_COLOR(seqpal::kNote);
     API_BEGIN(RECTS);
     for (uint8_t t = 0; t < kTracks; t++)
         if (m.playRow[t] < kVisRows && m.prog[t] > 0)
@@ -277,7 +286,7 @@ void cSeqClipMarks::update()
     // the row the transport plays: a bar on the left edge, in song and in LIVE
     if (m.songRow < kVisRows)
     {
-        API_COLOR(pal.play);
+        API_COLOR(seqpal::kFx2);
         API_BEGIN(RECTS);
         rect(1, rowY(m.songRow), 3, rowY(m.songRow) + kCellH - 1);
         API_END();

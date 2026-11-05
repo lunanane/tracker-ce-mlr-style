@@ -152,7 +152,7 @@ enum { kPanelY0 = 30, kPanelY1 = 424, kRowY0 = 56, kRowH = 62, kRowStep = 66, kB
 
 template <class C> void draw(C& c, const Model& m, const Palette& p)
 {
-    char buf[48], nm[16];
+    char buf[72], nm[16];
     const int selSec = m.sec < kSections ? m.sec : 0;
     // ---- shapes ----
     c.color(p.bg);
@@ -203,9 +203,9 @@ template <class C> void draw(C& c, const Model& m, const Palette& p)
         snprintf(buf, sizeof buf, "T%d  %s", m.track, mt);
     }
     else
-        snprintf(buf, sizeof buf, "PolySynth T%d CPU %d%% pk%d%%", m.track, m.cpu, m.peak);
+        snprintf(buf, sizeof buf, "PolySynth T%d CPU %d%%", m.track, m.cpu); // peak CPU is on the instrument page title (budget for the FX2 hint)
     c.text(12, 42, 3, 2, buf);
-    c.text(12, 398, 1, 2, "Jog: edit, Shift: fine, Del: reset, Instr: close");
+    c.text(12, 398, 1, 2, "Jog edit, Shift fine, Del reset, Instr close, FX2 pitch");
     if (m.newer)
         c.text(12, 412, 1, 2, "Newer synth file: edits are not saved");
     if (!m.newer)

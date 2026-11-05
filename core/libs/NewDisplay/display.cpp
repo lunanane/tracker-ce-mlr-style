@@ -1174,6 +1174,7 @@ void cDisplay::controlIdToString(uint8_t id, char* string)
         case controlIdSeqFaderView: strcpy(string, "seqFaderView"); break;
         case controlIdSeqLanes: strcpy(string, "seqLanes"); break;
         case controlIdSeqPlayheads: strcpy(string, "seqPlayheads"); break;
+        case controlIdSeqTraceView: strcpy(string, "seqTraceView"); break;
         default: strcpy(string, "undefined"); break;
     }
 }

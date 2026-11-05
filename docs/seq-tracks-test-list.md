@@ -691,6 +691,37 @@ How the stock edit mode is handled: Rec is the take key, so the stock edit mode 
 | Same on a track whose instrument is a sample | Nothing opens; the cell shows `not PolySynth`. |
 | Type **Strings** (list entry after the scripts; strip `STRG`) | Pad strings layout as before; it plays the track's own instrument (sample, MIDI or PolySynth); Rec writes ordinary notes of that instrument. A second Strings track is refused (`Strings T3`; the setup is shared). An old `seqtracks.bin` with type 11 loads as Strings. |
 
+## 11i. Pitch trace, master amplitude view, launcher colours (plan 013, v0.3.4, Original Tracker only)
+Colours everywhere: Note key teal, Instrument key yellow, FX1 pink, FX2 blue (the pattern text colours of the stock theme). Dark plain ground, thin lines, no fills.
+
+**Pitch trace (PolySynth)**
+| Do | Look at | Expected |
+|---|---|---|
+| Play mode, a track with the PolySynth instrument: hold its screen button, press **Instrument** (parameter overlay). Hint line reads "... Instr close, FX2 pitch". Press **FX2** | The overlay is replaced by the pitch trace: dark panel, light semitone lines, stronger lines and note names (C4, C#4 ...) at the left, up to 4 thin coloured lines (teal, yellow, pink, blue), top right "FX2: close" | Pads keep playing while it is open. FX2 again, or Instrument, returns. Leaving Play mode ends it. |
+| Play one pad / one note, hold it, release | A teal line starts at the right and scrolls left (about 4 s across); a dimmer teal line runs just above it: it lifts away on the attack and falls back onto the pitch line on the release | The note name of the sounding voice sits at the right edge, in the voice colour |
+| Play a chord (up to 4 notes) | One line per voice, colours in voice order (teal, yellow, pink, blue); right edge names do not overlap | The vertical range follows the sounding notes (at least about an octave and a bit), grows at once, shrinks slowly |
+| Glide parameter > 0, play two notes in a row | The pitch line slopes from the first to the second note | |
+| LFO destination Pitch, depth > 0 | The pitch lines wiggle with the LFO | |
+| Stop all notes, wait | The lines end; the time axis keeps scrolling; the range stays | |
+| Instrument page (Instrument key, PolySynth selected), press **Next** (screen button 8) until page **4/4**: screen button 2 reads **Pitch view** | Press it: the trace appears (hint "Params: close"); the button now reads **Params**; press it (or any screen button) to go back | Play pads / sequencer meanwhile: the lines move. No long press anywhere. |
+| Frame rate | Smooth scrolling, no tearing of the labels, the parameters (CPU %) still sane | Refresh is capped at 25 fps and only while the view is visible; with the view closed there is no extra work |
+
+**Master amplitude view**
+| Do | Look at | Expected |
+|---|---|---|
+| Master key, page 3 "Global Mixer 3/3": screen button 8 reads **Amp view** | Press it: dB history of the final output. L (teal) above the centre line, R (pink) below. 0 dB at the top / bottom edge, -60 dB at the centre line, faint lines at -6 / -12 / -24 / -48, scale at the left, "L -12 dB / R -14 dB" at the right | Scrolls right to left, about 5 s across. Silence: both lines on the centre line. |
+| Play something loud, then quiet | The lines rise and fall logarithmically; clipping shows at the edge | |
+| While open: move the Delay / Reverb / Line In / Synth faders, mute buttons, solo | They keep working | The button now reads **Close**; press it to close |
+| Leave the page (Master key, other page) | The view closes by itself | Level shown is the digital output after the limiter, before the codec volume knob |
+
+**Clip launcher (Session CLIPS)**
+| Do | Look at | Expected |
+|---|---|---|
+| Open the launcher with a few clips | Clean dark cells: empty = near black, with notes = dark grey, playing = dark teal with a thin teal outline and a teal progress line, scene column dark blue, pad window frame thin blue | |
+| Queue a clip | Yellow outline blinks on the queued cell | Countdown text as before |
+| Play 1x clip / row end / armed follow action | Small yellow notch / pink notch / pink outline | |
+| Fill the whole grid, all flags, hold screen button 1 | Nothing disappears except the optional help lines; no flicker; no display-list overflow | `planGrid` budget is unchanged (host test) |
+
 ## 11f. CPU savings (plan 009 P, v0.2.7): compare with the previous build (v0.2.6) on the same project
 Use one project with 8 sample voices (some with the filter on), the delay and the stock reverb used, the limiter on, and play it. Open Master > Reverb (it resets the average when it opens) and write down "Rev / All CPU" after 30 s of the busiest part; also read Config > audio usage (min / max / avg / last) and "free heap" / "stack ... free ..." (bottom right of the Config page). Do it on v0.2.6 and on this build; the second number of the Master > Reverb item and the Config numbers are the comparison.
 | Press | Expected |

@@ -56,6 +56,19 @@ AUDIO_CORE_FLASH bool AudioEffectLimiter::isAvailableGainToGet()
     return isAverageGain;
 }
 
+AUDIO_CORE_RAM void AudioEffectLimiter::tapPeak(const int16_t* d)
+{
+    uint32_t pk = 0;
+    for (uint8_t n = 0; n < AUDIO_BLOCK_SAMPLES; n++)
+    {
+        const int32_t s = d[n];
+        const uint32_t a = (uint32_t)(s < 0 ? -s : s);
+        pk = a > pk ? a : pk;
+    }
+    if (pk > outPeak)
+        outPeak = pk;
+}
+
 AUDIO_CORE_RAM void AudioEffectLimiter::update(void)
 {
     if (isBlocked)
@@ -136,6 +149,8 @@ AUDIO_CORE_RAM void AudioEffectLimiter::processSidechain()
     sumGain = 0.0f;
     isAverageGain = true;
 
+    if (peakTap)
+        tapPeak(inputBlock->data);
     transmit(inputBlock, 0);
     release(inputBlock);
     if (sidechainBlock)
@@ -207,6 +222,8 @@ AUDIO_CORE_RAM void AudioEffectLimiter::processMainStream()
     sumGain = 0.0f;
     isAverageGain = true;
 
+    if (peakTap)
+        tapPeak(inputBlock->data);
     transmit(inputBlock, 0);
     release(inputBlock);
 }
