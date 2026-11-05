@@ -287,3 +287,4 @@ static int arpNotes(Rig& r, int* out, int steps) {
 #include "test_playhead.inc"
 #include "test_cases2.inc"
 #include "test_pads.inc"
+#include "test_hr.inc"

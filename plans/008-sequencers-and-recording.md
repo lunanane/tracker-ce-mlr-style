@@ -121,3 +121,53 @@ Port from E:\claude\_HYPER_RASP\scripts (8x4 pad scripts — map to the Tracker'
 3. arp_lines, arp_seq, chord_arp, chord_stabs; 4. bassline_seq, euclid_trigger, grid_seq, step_follower.
 Prefer porting HYPER_RASP's pad-script API once (C++) and the scripts onto it 1:1, with differential tests against
 the Lua (as seqgen/test/lua_compare does for c34). Each becomes a sequencer type in the type list.
+
+## D as built (branch v025-hyper) - original Tracker (MK66) only
+Owner decision 2026-11-05: only the ORIGINAL Tracker is targeted. The HYPER_RASP types are built and tested for the MK66 image; the Plus and
+Mini builds are unmaintained (they overflowed SRAM_DTC / EXTERNAL_RAM by under 1 KB once the per-track script storage was added, and are not fixed).
+
+**Architecture.** `seqgen/hr.h/.cpp` is a C++ adapter of HYPER_RASP's PadScript API (`event_grid`, `event_midi(248)`, `start_playback` /
+`stop_playback`, `framework_tick`, `set_param`, `midi_note_on/off`, the shared scale / root bus, `euclidean`); each script is one class
+(`hr_stab`, `hr_arpseq`, `hr_chordarp`, `hr_bass`, `hr_euclid`, `hr_gridseq`, `hr_stepfollow`) with the Lua function bodies ported line for
+line. Type numbers: 0 Off, 1 Chord/Arp, 2 Mono (unchanged), then 3 Arp Lines, 4 Chord Stabs, 5 Arp Seq, 6 HR Chord/Arp, 7 Bassline Seq,
+8 Euclid Drums, 9 Grid Seq, 10 Step Follow (`TYPE_COUNT` = 11; the next script only needs an enum entry, a name and its class). One `HrSlot`
+(400 B) per track holds the script (placement new). State: the sidecar stays at its version, each HR track has an optional trailing block
+(script `serialize()`, settings and stored patterns only). The legend, caption and help come from the script itself (`HrSnap` in `seqPlayLogic.h`).
+Engine behaviour shared by all: the script gets the clock only while the transport plays (`start()` at the transport start, `stop()` /
+`silence()` at stop and on a type change), the track is taken over while `live()`, notes outside 0..127 are dropped (as the Lua does),
+the scale / root bus is shared by all HR tracks (Arp Lines "Lead" and HR Chord/Arp publish, Follow roles, Bassline Seq and Step Follow read).
+
+**Pad mapping.** HYPER_RASP (x 1..8, y 1..4) = Tracker pad (col x-1, row y-1); pad columns 8..11 ("extras") carry the encoder / fader parameters
+as -, + and reset pads.
+
+| Type | Pads 0-7 (HYPER_RASP layout, unchanged) | Extras (cols 8-11) |
+|---|---|---|
+| Arp Lines / Chord Stabs | roots x1-6,y1-2; Major / Minor x1,y3-4; ten patterns x2-6,y3-4; eight chords x7-8,y1-4 | r1 Oct- Oct+ Tran- Tran+; r2 Slower Faster Vel- Vel+; r3 (Arp) Lead Follow; r4 reset Oct / rate / Vel / Tran |
+| Arp Seq | roots x1-6,y1-2; Maj/Min x1,y3; five cycle pads x2-6,y3; chord keys x7,y1-3; PLAY x8,y3; steps x1-8,y4 | none (no params in the script) |
+| HR Chord/Arp | four views, function column x8 (tap = view, 3+4 = tracker page, 1+2 = tracker play) | r1 Vel- Vel+ Tran- Tran+; r2 Key- Key+ Scale Latch; r3 Start Play Page; r4 View 1-4 |
+| Bassline Seq | 24-key scale keyboard y1-3 (row 3 lowest); Euclid presets x1-7,y4; Rec x8,y4 | r1 Oct- Oct+ Dir- Dir+; r2 Grv- Grv+; r4 reset Oct / Dir / Grv |
+| Euclid Drums | per row y a drum voice: presets x1-7, Rec x8 | r1 Grp- Grp+ Vel- Vel+; r2 Cha- Cha+ Swg- Swg+; r4 reset Grp / Vel / Chance / Swing |
+| Grid Seq | step cells x1-8 x four drum rows; hold = ratchet | r1 Grp- Grp+ Vel- Vel+; r2 Div- Div+ Tran- Tran+; r3 Lo- Lo+ Hi- Hi+; r4 reset |
+| Step Follow | four scale-degree rows x 8 steps; page up / down x8,y3 / y4 | r1 Oct- Oct+ Vel- Vel+; r2 Div- Div+ Lo- Lo+; r3 Hi- Hi+; r4 reset Oct / Vel / Div / loop |
+
+Shift legend: every pad has a word of at most 6 characters (note names, "E(3,8)", drum names, "Oct+" ...), the zone colour of the pad kind and an
+"on" flag for the active pad. Display budget unchanged: the type list now has 11 boxes of 30 px (bottom aligned, 352 px).
+
+**Deviations (deliberate).**
+1. HR scripts get the clock only while the transport plays (the Lua host runs them against an external clock all the time); a latched
+   Arp Lines root therefore waits for Play. `FOLLOWS_TRANSPORT = false` (chord_arp) is honoured by keeping its own play combo.
+2. chord_arp's mute combo (function keys 1+3) is not implemented: the Tracker has its own track mute.
+3. Notes outside 0..127 are dropped (the Lua host passes them as floats to the synth); Step Follow keeps at most 24 distinct degrees.
+4. The ScriptedPad column-8 switcher / ViewSwitcher of the HYPER_RASP host is emulated inside HrChordArp (the other scripts have none).
+5. Extras (cols 8-11) are chosen per script from its `set_param` parameters; Arp Seq has none. grid_seq's `chance` parameter is stored but never read
+   by the Lua, so it is not ported; euclid_trigger's `swing` likewise is stored only. Euclid / Bassline note params are reachable by the kit grouping only.
+6. No clear gesture was added to Arp Seq.
+7. `math.random` (euclid_trigger chance) is a fixed LCG on both sides of the differential test (and on the device).
+8. `grid_led_bg` (euclid_trigger / bassline_seq chain position) is composited as the host does (visible only where the foreground level is 0);
+   both scripts keep their idle level at 1, so it never shows; Bassline Seq shows the stored step count in its caption.
+9. Strings: "Euclid Drums" (script euclid_trigger), "Step Follow" (step_follower), names are at most 12 characters.
+
+**Tests.** `seqgen/test/test_hr.inc`, `core/seqtest/test_hr.inc` (type list, pads, takeover, transport, silence on type change, sidecar), and the
+differential test `make hr-compare` (see seqgen/README.md): all eight scripts, random command scripts, note events and LED levels identical.
+Changed expectations (type list grew; checks equally strict): `core/seqtest/test_main.cpp` stepTypeSelection clamp, and the sidecar test that used
+the literal type 7 as "invalid type" now uses `TYPE_COUNT`; `core/seqtest/test_play.cpp` type-list walk (loops over `TYPE_HR_FIRST..TYPE_COUNT`).

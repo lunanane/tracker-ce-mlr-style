@@ -522,6 +522,14 @@ void SeqPlayOverlay::refreshView()
             view_.page = (uint8_t)ca.getParam(seqgen::ChordArp::P_PAGE);
             view_.pon = (uint8_t)ca.getParam(seqgen::ChordArp::P_PON);
         }
+        else if (seqlogic::isHrType(view_.type))
+        {
+            // HYPER_RASP script: it reports its own legend (title, help, 12 x 4 cells)
+            if (const seqgen::HrScript* hs = seqEngine.hr(sel))
+                seqplay::fillHrSnap(view_.hr, *hs);
+            else
+                memset(&view_.hr, 0, sizeof(view_.hr));
+        }
         else
         {
             const seqgen::Mono& mo = seqEngine.mono(sel);

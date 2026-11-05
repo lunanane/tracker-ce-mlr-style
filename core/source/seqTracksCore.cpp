@@ -8,6 +8,8 @@ namespace seqtracks {
 
 using namespace seqlogic;
 
+static_assert((int)seqlogic::kHrScripts == (int)seqgen::HR_COUNT, "kHrScripts (seqTracksLogic.h) must equal seqgen::HR_COUNT");
+
 enum
 {
     CMD_PAD = 1,
@@ -42,6 +44,7 @@ void Engine::initTrack(uint8_t i)
     memset(t.sounding, 0, sizeof(t.sounding));
     t.grpNote = -1;
     t.grpEpoch = 0;
+    t.hr.clear();
     t.ca.setChannel(i);
     t.mo.setChannel(i);
     t.ca.setSink(&Engine::sink, this);
@@ -113,6 +116,19 @@ void Engine::leds(uint8_t track, uint8_t out[kPads]) const
         t.ca.leds(out);
     else if (t.type == TYPE_MONO)
         t.mo.leds(out);
+    else if (isHrType(t.type) && t.hr.get())
+        t.hr.get()->leds(out);
+}
+
+void Engine::createHr(uint8_t track, uint8_t type)
+{
+    Track& t = t_[track];
+    seqgen::HrScript* s = t.hr.create((uint8_t)(type - TYPE_HR_FIRST));
+    if (!s)
+        return;
+    s->setBus(&hrBus_);
+    s->setChannel(track);
+    s->setSink(&Engine::sink, this);
 }
 
 // ------------------------------------------------------------------ audio side
@@ -254,10 +270,14 @@ void Engine::applyPad(uint8_t track, uint8_t pad, bool down)
     {
         t.ca.pad(col, row, down);
     }
-    else
+    else if (t.type == TYPE_MONO)
     {
         t.mo.pad(col, row, down);
         scanMono(t);
+    }
+    else if (t.hr.get())
+    {
+        t.hr.get()->pad(col, row, down);
     }
     refresh(track);
 }
@@ -294,12 +314,16 @@ void Engine::applyType(uint8_t track, uint8_t type)
                 t.ca.pad(padCol((uint8_t)pad), padRow((uint8_t)pad), false);
             else if (t.type == TYPE_MONO)
                 t.mo.pad(padCol((uint8_t)pad), padRow((uint8_t)pad), false);
+            else if (isHrType(t.type) && t.hr.get())
+                t.hr.get()->pad(padCol((uint8_t)pad), padRow((uint8_t)pad), false);
         }
     memset(t.padBits, 0, sizeof(t.padBits));
     if (t.type == TYPE_CHORDARP)
         t.ca.stop();
     else if (t.type == TYPE_MONO)
         t.mo.stop();
+    else if (isHrType(t.type) && t.hr.get())
+        t.hr.get()->silence();
     releaseAll(track);
 
     if (t.type == TYPE_OFF)
@@ -314,6 +338,14 @@ void Engine::applyType(uint8_t track, uint8_t type)
             recPublish();
         }
     }
+
+    if (isHrType(type))
+    {
+        if (!t.hr.get() || t.hr.get()->hrType() != type - TYPE_HR_FIRST) // loadState creates the script first, to restore its settings
+            createHr(track, type);
+    }
+    else
+        t.hr.clear();
 
     recomputeContext();
     if (type == TYPE_MONO)
@@ -336,6 +368,10 @@ void Engine::startTrack(uint8_t track)
     else if (t.type == TYPE_MONO)
     {
         t.mo.start();
+    }
+    else if (isHrType(t.type) && t.hr.get() && t.hr.get()->followsTransport())
+    {
+        t.hr.get()->start(); // start_playback
     }
 }
 
@@ -368,6 +404,8 @@ void Engine::setPlaying(bool p)
             epoch_++;
             if (t.type == TYPE_MONO)
                 t.mo.stop(); // Chord/Arp keeps running while stopped (free-running clock)
+            else if (isHrType(t.type) && t.hr.get() && t.hr.get()->followsTransport())
+                t.hr.get()->stop(); // HYPER_RASP scripts that follow the transport: stop_playback
             refresh((uint8_t)i);
         }
     }
@@ -401,6 +439,12 @@ void Engine::pulseAll()
             {
                 epoch_++;
                 t_[i].mo.pulse();
+                refresh((uint8_t)i);
+            }
+            else if (isHrType(t_[i].type) && t_[i].hr.get())
+            {
+                epoch_++;
+                t_[i].hr.get()->pulse(); // event_midi(248): HYPER_RASP clocks its scripts while the transport plays
                 refresh((uint8_t)i);
             }
     }
@@ -491,6 +535,12 @@ void Engine::advanceUs(uint32_t us)
             {
                 t_[i].mo.tick();
             }
+            else if (isHrType(t_[i].type) && t_[i].hr.get())
+            {
+                epoch_++;
+                t_[i].hr.get()->tick(); // framework_tick
+                refresh((uint8_t)i);
+            }
         }
     }
     recPulseEnd();
@@ -500,7 +550,8 @@ void Engine::advanceUs(uint32_t us)
 void Engine::refresh(uint8_t track)
 {
     Track& t = t_[track];
-    bool want = wantTakeover(t.type, heldPads(t), t.nSounding, t.monoSteps, playing_);
+    bool want = isHrType(t.type) ? (t.hr.get() && wantTakeoverHr(t.hr.get()->live(), t.nSounding))
+                                 : wantTakeover(t.type, heldPads(t), t.nSounding, t.monoSteps, playing_);
     bool taken = ((takenMask_ >> track) & 1u) != 0;
     if (want && !taken)
     {
@@ -680,6 +731,21 @@ size_t Engine::saveState(uint8_t* buf, size_t cap) const
         if (host_)
             host_->critExit(cs);
     }
+    // trailer (only when a track runs a HYPER_RASP script): [lenHR, HR] per track
+    bool anyHr = false;
+    for (int i = 0; i < kTracks; i++)
+        anyHr = anyHr || isHrType(t_[i].type);
+    if (anyHr)
+        for (int i = 0; i < kTracks; i++)
+        {
+            const Track& t = t_[i];
+            uint32_t cs = host_ ? host_->critEnter() : 0;
+            size_t n = (isHrType(t.type) && t.hr.get()) ? t.hr.get()->serialize(buf + p + 1, cap - p - 1) : 0;
+            buf[p] = (uint8_t)n;
+            p += 1 + n;
+            if (host_)
+                host_->critExit(cs);
+        }
     size_t plen = p - 8;
     buf[6] = (uint8_t)(plen & 0xFF);
     buf[7] = (uint8_t)(plen >> 8);
@@ -705,8 +771,9 @@ uint16_t Engine::stateHash() const
     for (int i = 0; i < kTracks; i++)
     {
         const Track& t = t_[i];
-        size_t nc, nm;
+        size_t nc, nm, nh;
         uint8_t type;
+        uint8_t hblk[seqgen::HrScript::kMaxSerial];
         uint32_t cs = host_ ? host_->critEnter() : 0;
         type = t.type;
         nc = t.ca.serialize(blk, sizeof(blk));
@@ -720,11 +787,13 @@ uint16_t Engine::stateHash() const
         c = crc16Update(c, blk, nc);
         cs = host_ ? host_->critEnter() : 0;
         nm = t.mo.serialize(blk, sizeof(blk));
+        nh = (isHrType(t.type) && t.hr.get()) ? t.hr.get()->serialize(hblk, sizeof(hblk)) : 0;
         if (host_)
             host_->critExit(cs);
         if (nm >= 11)
             blk[5] = blk[10] = 0; // edit page, visible half
         c = crc16Update(c, blk, nm);
+        c = crc16Update(c, hblk, nh); // HYPER_RASP script: settings only (its serialize leaves out the runtime and view state)
     }
     return c;
 }
@@ -740,6 +809,7 @@ void Engine::resetState()
             applyType(i, TYPE_OFF);
         initTrack(i);
     }
+    hrBus_.reset();
     rec_.stop(4);
     recPublish();
     tail_ = head_;
@@ -782,8 +852,32 @@ bool Engine::loadState(const uint8_t* buf, size_t len)
                 return false;
             p += n;
         }
-        if (p != end)
-            return false;
+        if (p != end) // an optional trailer: one [lenHR, HR] block per track
+        {
+            for (int i = 0; i < kTracks; i++)
+            {
+                if (p + 1 > end)
+                    return false;
+                size_t n = buf[p++];
+                if (p + n > end)
+                    return false;
+                p += n;
+            }
+            if (p != end)
+                return false;
+        }
+    }
+    // where the trailer starts (0 = none): after the 16 track records
+    size_t trailer = 0;
+    {
+        size_t p = 8;
+        for (int i = 0; i < kTracks; i++)
+        {
+            p++;
+            p += 1 + buf[p];
+            p += 1 + buf[p];
+        }
+        trailer = p < end ? p : 0;
     }
 
     // pass 2: apply; a track whose type or blocks are invalid is left Off with fresh state, the others load
@@ -803,6 +897,24 @@ bool Engine::loadState(const uint8_t* buf, size_t len)
         if (n)
             ok = t_[i].mo.deserialize(buf + p, n) && ok;
         p += n;
+        if (isHrType(type))
+        {
+            // a script type needs its trailer block; the script exists before its settings are restored (applyType keeps it)
+            size_t hn = 0, hp = 0;
+            if (trailer)
+            {
+                hp = trailer;
+                for (uint8_t k = 0; k < i; k++)
+                    hp += 1 + buf[hp];
+                hn = buf[hp++];
+            }
+            if (ok)
+            {
+                createHr(i, type);
+                if (!t_[i].hr.get() || (hn && !t_[i].hr.get()->deserialize(buf + hp, hn)))
+                    ok = false;
+            }
+        }
         if (!ok)
             initTrack(i); // invalid block: this track Off, defaults
         else if (type != TYPE_OFF)
