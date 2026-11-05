@@ -727,36 +727,36 @@ AUDIO_CORE_RAM void AudioPlayMemory::envelopeUpdate(audio_block_t* block)
                       17; // podejrzewam ze przeskalowanie na 13 bitow aby suma takich osmiu (3bity)
                           // obslugiwala 8 probek (inc_hires wyliczone dla 8 bitowego cyklu)
 
-        envelope.sample12 = *p;
-        envelope.sample34 = *(p + 1);
-        envelope.sample56 = *(p + 2);
-        envelope.sample78 = *(p + 3);
-        //		p -= 4;
+        // plan 009 P#9: the temporaries are locals (the stores through p, a uint32_t*, may alias the uint32_t fields of `envelope`, so the
+        // compiler reloaded and stored them for every sample); same arithmetic
+        uint32_t s12 = p[0], s34 = p[1], s56 = p[2], s78 = p[3];
+        int32_t t1, t2;
         mult += inc;
-        envelope.tmp1 = signed_multiply_32x16b(mult, envelope.sample12);
+        t1 = signed_multiply_32x16b(mult, s12);
         mult += inc;
-        envelope.tmp2 = signed_multiply_32x16t(mult, envelope.sample12);
-        envelope.sample12 = pack_16b_16b(envelope.tmp2, envelope.tmp1);
+        t2 = signed_multiply_32x16t(mult, s12);
+        s12 = pack_16b_16b(t2, t1);
         mult += inc;
-        envelope.tmp1 = signed_multiply_32x16b(mult, envelope.sample34);
+        t1 = signed_multiply_32x16b(mult, s34);
         mult += inc;
-        envelope.tmp2 = signed_multiply_32x16t(mult, envelope.sample34);
-        envelope.sample34 = pack_16b_16b(envelope.tmp2, envelope.tmp1);
+        t2 = signed_multiply_32x16t(mult, s34);
+        s34 = pack_16b_16b(t2, t1);
         mult += inc;
-        envelope.tmp1 = signed_multiply_32x16b(mult, envelope.sample56);
+        t1 = signed_multiply_32x16b(mult, s56);
         mult += inc;
-        envelope.tmp2 = signed_multiply_32x16t(mult, envelope.sample56);
-        envelope.sample56 = pack_16b_16b(envelope.tmp2, envelope.tmp1);
+        t2 = signed_multiply_32x16t(mult, s56);
+        s56 = pack_16b_16b(t2, t1);
         mult += inc;
-        envelope.tmp1 = signed_multiply_32x16b(mult, envelope.sample78);
+        t1 = signed_multiply_32x16b(mult, s78);
         mult += inc;
-        envelope.tmp2 = signed_multiply_32x16t(mult, envelope.sample78);
-        envelope.sample78 = pack_16b_16b(envelope.tmp2, envelope.tmp1);
+        t2 = signed_multiply_32x16t(mult, s78);
+        s78 = pack_16b_16b(t2, t1);
 
-        *p++ = envelope.sample12;
-        *p++ = envelope.sample34;
-        *p++ = envelope.sample56;
-        *p++ = envelope.sample78;
+        p[0] = s12;
+        p[1] = s34;
+        p[2] = s56;
+        p[3] = s78;
+        p += 4;
 
         // adjust the long-term gain using 30 bit resolution (fix #102)
         // https://github.com/PaulStoffregen/Audio/issues/102
