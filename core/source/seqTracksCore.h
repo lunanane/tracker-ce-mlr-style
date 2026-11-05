@@ -110,6 +110,9 @@ class Engine
     seqgen::Mono& mono(uint8_t t) { return t_[t].mo; }
     const seqgen::HrScript* hr(uint8_t t) const { return t < kTracks ? t_[t].hr.get() : 0; } // the HYPER_RASP script of an HR-type track, else 0
     seqgen::HrScript* hr(uint8_t t) { return t < kTracks ? t_[t].hr.get() : 0; }
+    // Main loop: runs fn(script or 0, user) with the audio context held off. A pending type change can construct another script class
+    // into the same slot from the audio interrupt, so a reader of title() / legend() must not run unprotected. Keep fn short.
+    void withHr(uint8_t t, void (*fn)(const seqgen::HrScript*, void*), void* user) const;
     seqgen::HrBus& hrBus() { return hrBus_; }
     int soundingCount(uint8_t t) const { return t_[t].nSounding; }
 

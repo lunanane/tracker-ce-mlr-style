@@ -178,6 +178,32 @@ static void test_hr_idle_script_does_not_take_over()
     }
 }
 
+// m2: a loaded key-lock Chord/Arp publishes its key to the followers; m1: the legend snapshot runs inside the critical section
+static void test_hr_load_publishes_key_lock_and_snapshot_is_protected()
+{
+    MockHost h;
+    Engine* a = mk(h);
+    a->applyType(5, kHrChordArpType);
+    a->hr(5)->setParam(seqgen::HrChordArp::P_KEYLOCK, 2);
+    a->hr(5)->setParam(seqgen::HrChordArp::P_KEY, 7); // G
+    uint8_t buf[Engine::kSidecarMax];
+    size_t n = a->saveState(buf, sizeof(buf));
+    MockHost h2;
+    Engine* b = mk(h2);
+    b->applyType(0, kArpType);
+    b->hr(0)->setParam(seqgen::HrStab::P_ROLE, 2); // follower
+    CHECK(b->hrBus().scale[0] != 7);
+    CHECK(b->loadState(buf, n) && b->type(5) == kHrChordArpType);
+    CHECK(b->hrBus().nScale == 7 && b->hrBus().scale[0] == 7); // G major, published at load
+    int enters = h2.critEnters;
+    struct Probe { int calls; bool has; } pr = { 0, false };
+    b->withHr(5, [](const seqgen::HrScript* s, void* u) { static_cast<Probe*>(u)->calls++; static_cast<Probe*>(u)->has = s != 0; }, &pr);
+    CHECK(pr.calls == 1 && pr.has && h2.critEnters == enters + 1 && h2.critDepth == 0 && h2.tokenOk);
+    b->withHr(6, [](const seqgen::HrScript* s, void* u) { static_cast<Probe*>(u)->has = s != 0; }, &pr);
+    CHECK(!pr.has);
+    delete a; delete b;
+}
+
 static void test_hr_type_change_silences_and_releases()
 {
     MockHost h;

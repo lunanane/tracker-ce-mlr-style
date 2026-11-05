@@ -375,6 +375,14 @@ void Engine::startTrack(uint8_t track)
     }
 }
 
+void Engine::withHr(uint8_t t, void (*fn)(const seqgen::HrScript*, void*), void* user) const
+{
+    uint32_t cs = host_ ? host_->critEnter() : 0;
+    fn(hr(t), user);
+    if (host_)
+        host_->critExit(cs);
+}
+
 void Engine::applyPending()
 {
     for (int i = 0; i < kTracks; i++)

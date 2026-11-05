@@ -1414,6 +1414,7 @@ int main()
     test_hr_clock_runs_only_while_the_transport_plays();
     test_hr_arranger_chord_ends_on_transport_stop();
     test_hr_idle_script_does_not_take_over();
+    test_hr_load_publishes_key_lock_and_snapshot_is_protected();
     test_hr_type_change_silences_and_releases();
     test_hr_tracks_share_the_scale_bus();
     test_hr_sidecar_roundtrip_and_old_files();
