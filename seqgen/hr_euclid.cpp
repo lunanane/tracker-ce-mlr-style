@@ -115,7 +115,13 @@ void HrEuclid::pulse() {
 }
 
 bool HrEuclid::live() const {
-  if (playing_) return true;
+  if (playing_)  // running AND something to play (a live preset or a stored chain with an onset on a row that is on)
+    for (int r = 0; r < kRows; ++r) {
+      if (off_[r]) continue;
+      if (live_[r]) return true;
+      for (int i = 0; i < chains_[r] * kChain; ++i)
+        if (stored_[r][i >> 3] & (1 << (i & 7))) return true;
+    }
   for (int r = 0; r < kRows; ++r) if (sounding_[r] >= 0) return true;
   return false;
 }
