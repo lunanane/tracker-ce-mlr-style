@@ -392,6 +392,19 @@ static void test_plinky_overlay_logic()
     CHECK(strcmp(t, "70") == 0);
 }
 
+// v0.3.1 minor 5: the claimed channel avoids the channels the pattern and the last used instrument use
+static void test_plinky_claim_channel()
+{
+    using namespace seqplinky;
+    CHECK(claimChannel(0) == 16);
+    CHECK(claimChannel(1u << 15) == 15); // MIDI 16 used
+    CHECK(claimChannel((1u << 15) | (1u << 14) | 1u) == 14);
+    CHECK(claimChannel(0xFFFFu) == 16);  // everything used: MIDI 16
+    CHECK(claimChannel(0x7FFFu) == 16);  // only MIDI 16 free
+    CHECK(claimChannel(0xFFFEu) == 1);   // only MIDI 1 free
+    CHECK(claimChannel(1u << 2) == 16);  // an external synth on MIDI 3 is not touched
+}
+
 static void test_plinky_overlay_draw_budget()
 {
     using namespace seqplinky;

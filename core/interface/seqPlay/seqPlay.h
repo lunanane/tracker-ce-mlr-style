@@ -128,7 +128,7 @@ class SeqPlayOverlay
     bool plinkyOpen_ = false;      // the Plinky parameter overlay (plan 010 B)
     seqplinky::Cursor plinkyCur_;
     uint32_t plinkyTime_ = 0;
-    char ownerMsg_[16];
+    char ownerMsg_[24];
     char line1_[8][12];
     char line2_[8][12];
 };

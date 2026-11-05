@@ -118,6 +118,16 @@ inline uint8_t padLevel(const Setup& s, bool menu, uint8_t col, uint8_t row, boo
     return 0;
 }
 
+// v0.3.1 minor 5: the channel the voice claims when it has none. usedMask: bit i = MIDI instrument i (= MIDI channel i + 1) is used by
+// a pattern track or is the last used instrument (likely an external synth). The highest unused channel wins (external gear usually
+// sits on the low channels); all used: MIDI 16.
+inline uint8_t claimChannel(uint16_t usedMask)
+{
+    for (int c = 16; c >= 1; c--)
+        if (!((usedMask >> (c - 1)) & 1u)) return (uint8_t)c;
+    return 16;
+}
+
 inline const char* noteName(uint8_t note, char* buf6)
 {
     static const char* const kPc[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };

@@ -3,6 +3,7 @@
 #ifdef FEATURE_PLINKY
 #include "seqSidecar.h"
 #include "seqModLogic.h"
+#include "seqPlinkySeqLogic.h"
 #include "seqTracksLogic.h"
 #include "mtAudioEngine.h"
 #include "mtSequencer.h"
@@ -106,11 +107,26 @@ void seqPlinkyClaim()
 {
     if (eng().param(P_CHANNEL) != 0)
         return;
-    int ch = kMidiInstrumentsCount;
+    // v0.3.1 minor 5: a channel no pattern track and no last-used instrument uses (that one is likely an external synth), else MIDI 16
+    uint16_t used = 0;
     const int last = mtProject.values.lastUsedInstrument;
     if (last >= MIDI_INSTRUMENTS_START_IDX && last < MIDI_INSTRUMENTS_START_IDX + kMidiInstrumentsCount)
-        ch = last - MIDI_INSTRUMENTS_START_IDX + 1;
-    seqPlinkySet(P_CHANNEL, ch);
+        used = (uint16_t)(used | (1u << (last - MIDI_INSTRUMENTS_START_IDX)));
+    const Sequencer::strPattern* pat = sequencer.getActualPattern();
+    for (uint8_t t = 0; t < kAllTracks; t++)
+    {
+        uint8_t len = pat->track[0].length;
+        if (len > Sequencer::MAXSTEP)
+            len = Sequencer::MAXSTEP;
+        for (uint8_t s = 0; s <= len; s++)
+        {
+            const Sequencer::strPattern::strTrack::strStep& st = pat->track[t].step[s];
+            if (st.note >= Sequencer::STEP_NOTE_MIN && st.instrument >= MIDI_INSTRUMENTS_START_IDX &&
+                st.instrument < MIDI_INSTRUMENTS_START_IDX + kMidiInstrumentsCount)
+                used = (uint16_t)(used | (1u << (st.instrument - MIDI_INSTRUMENTS_START_IDX)));
+        }
+    }
+    seqPlinkySet(P_CHANNEL, seqplinky::claimChannel(used));
 }
 
 int seqPlinkyInstrument()

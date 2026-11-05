@@ -228,7 +228,14 @@ void SeqPlayOverlay::closeList(bool apply)
             {
 #ifdef FEATURE_PLINKY
                 if (type == seqlogic::TYPE_PLINKY)
+                {
                     seqPlinkyClaim(); // the voice gets its channel now, before the first pad
+                    if (seqPlinkyGet(plinkyvoice::P_CHANNEL) != 0)
+                    {
+                        snprintf(ownerMsg_, sizeof(ownerMsg_), "on MIDI %d", seqPlinkyGet(plinkyvoice::P_CHANNEL));
+                        setMessage(ownerMsg_); // v0.3.1 minor 5: where the voice sits (the strip cell takes 11 characters; the overlay title says 'PolySynth T? on MIDI n')
+                    }
+                }
 #endif
             }
         }
