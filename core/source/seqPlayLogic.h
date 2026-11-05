@@ -103,6 +103,54 @@ struct ScreenHold
     void clear() { mask = 0; listBtn = -1; }
 };
 
+// ---- v0.3.6 A4: pad LED guard. The stock editor (popups, instrument select, lightUpPadBoard) writes the pad LEDs without telling the
+// diff cache of the overlay, so "already shown" can be a lie. A full rewrite of all 48 LEDs happens when a popup / the type list closed,
+// the track or its type changed, the stock editor may have touched the pads (invalidate()), and at least every kFullMs otherwise.
+struct LedGuard
+{
+    static constexpr uint32_t kFullMs = 500;
+    uint32_t last = 0;
+    bool prevRoutable = false;
+    bool prevList = false;
+    uint8_t prevTrack = 0xFF;
+    uint8_t prevType = 0xFF;
+    bool dirty = true;
+    void invalidate() { dirty = true; }
+    bool full(uint32_t now, bool routable, bool listOpen, uint8_t track, uint8_t type)
+    {
+        bool f = dirty || (uint32_t)(now - last) >= kFullMs || (routable && !prevRoutable) || (prevList && !listOpen) || track != prevTrack ||
+                 type != prevType;
+        prevRoutable = routable;
+        prevList = listOpen;
+        prevTrack = track;
+        prevType = type;
+        if (f && routable)
+        {
+            last = now;
+            dirty = false;
+            return true;
+        }
+        return false;
+    }
+};
+// One LED pass: level 0..15 per pad -> pwm; write(i, pwm) for every pad that differs from the cache (all of them when full)
+template <class W> inline int ledPass(uint8_t shown[48], const uint8_t out[48], bool full, W write)
+{
+    int n = 0;
+    for (int i = 0; i < 48; i++)
+    {
+        const uint8_t level = out[i] > 15 ? 15 : out[i];
+        const uint8_t pwm = (uint8_t)(level * 2);
+        if (full || pwm != shown[i])
+        {
+            shown[i] = pwm;
+            write(i, pwm);
+            n++;
+        }
+    }
+    return n;
+}
+
 // ---- legend gate (v0.3.3): tapping the screen button of the track that is already selected toggles the pad legend ----
 // (Shift is the stock mute gesture and nothing else: the v0.3.2 Shift trigger never showed on the device, see plan 012; no long press.)
 // The first tap on another track only selects it (and closes the legend). The toggle happens at the release of a tap on the selected

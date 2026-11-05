@@ -106,6 +106,7 @@ class SeqPlayOverlay
     void plinkyJog(int16_t value);
     void plinkyDefault();
     void plinkyClose();
+    void syncPattern();   // v0.3.6 A1: the pattern control is not drawn while the PolySynth view is shown
     bool editKey(uint8_t button, uint8_t state);
     bool paramsKey(uint8_t state);
     void borrowEdit();
@@ -134,6 +135,10 @@ class SeqPlayOverlay
     seqplay::EditKeys keys_;       // v0.3.2: stock editing keys (Note / Instr / FX1 / FX2 / Copy / Insert / Delete)
     bool editBorrowed_ = false;    // the stock edit mode is on for a held editing key (Rec is the take key in Play mode)
     bool plinkyOpen_ = false;      // the Plinky parameter overlay (plan 010 B)
+    bool patternHidden_ = false;   // v0.3.6 A1: we hid the pattern control (view switch to the PolySynth page, or the frame budget)
+    bool budgetHidden_ = false;    // ... because the shown controls exceeded the display list budget
+    seqplay::LedGuard ledGuard_;   // v0.3.6 A4
+    bool ledWasRoutable_ = true;
     bool shiftSeen_ = false;       // Shift was down at the last pass (it closes an open type list)
     bool paramsTaken_ = false;     // the Instrument Parameters press was ours (its hold / release are too)
     seqplinky::Cursor plinkyCur_;

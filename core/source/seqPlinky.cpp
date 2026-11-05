@@ -7,6 +7,7 @@
 #include "seqPlinkySeqLogic.h"
 #include "seqPlinkyMorphLogic.h"
 #include "seqNotesViewLogic.h"
+#include "seqPlinkyUiLogic.h"
 #include "seqTracks.h"
 #include "seqTracksLogic.h"
 #include "mtAudioEngine.h"
@@ -246,6 +247,32 @@ void seqPlinkyClipLaunched(uint8_t track, uint8_t pattern)
 float seqPlinkyCpu() { return engine.getPlinkyCpuPercent(); }
 float seqPlinkyCpuPeak() { return engine.getPlinkyCpuPeakPercent(); }
 int seqPlinkyVoicesActive() { return eng().activeVoices(); }
+
+void seqPlinkyFillModel(seqplinky::Model& m)
+{
+    for (int i = 0; i <= plinkyvoice::P_COUNT; i++)
+        m.v[i] = (uint8_t)seqPlinkyGet(i); // the last one is the morph time (plan 012)
+    uint16_t ms = 0;
+    uint8_t mp = 0;
+    m.morphPat = seqPlinkyMorphStatus(&ms, &mp) ? mp : 0;
+    m.morphMs = ms;
+    m.mark = seqPlinkyMarks();
+    for (int i = 0; i < seqnotes::kVoices; i++)
+    {
+        uint8_t n = 0, lv = 0, rel = 0;
+        if (seqPlinkyVoice(i, &n, &lv, &rel))
+        {
+            m.voice[i].note = n;
+            m.voice[i].level = lv;
+            m.voice[i].rel = rel;
+        }
+        else
+            m.voice[i] = seqnotes::VoiceView();
+    }
+    m.cpu = (uint8_t)(seqPlinkyCpu() + 0.5f);
+    m.peak = (uint8_t)(seqPlinkyCpuPeak() + 0.5f);
+    m.newer = seqPlinkyNewerFile() ? 1 : 0;
+}
 const void* seqPlinkyTraceRing(int voice) { return eng().traceRing(voice); }
 unsigned seqPlinkyTraceLen() { return plinkyvoice::kTraceLen; }
 uint16_t seqPlinkyTraceHead() { return eng().traceHeadIndex(); }

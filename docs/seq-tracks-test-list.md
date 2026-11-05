@@ -722,6 +722,27 @@ Colours everywhere: Note key teal, Instrument key yellow, FX1 pink, FX2 blue (th
 | Play 1x clip / row end / armed follow action | Small yellow notch / pink notch / pink outline | |
 | Fill the whole grid, all flags, hold screen button 1 | Nothing disappears except the optional help lines; no flicker; no display-list overflow | `planGrid` budget is unchanged (host test) |
 
+## 11j. v0.3.6 part A: PolySynth view switch, instrument page, pitch view, pad LEDs, legend tap (plan 014, Original Tracker only)
+Host-checked (make test): frame budget model, real engine -> ring -> follower -> drawing for chords / stabs / glide / LFO, LED guard, legend tap. Nothing below is device-tested yet.
+
+| Do | Look at | Expected |
+|---|---|---|
+| Play mode, a track with the PolySynth instrument; **Instrument Parameters** key | The screen | The pattern view is **gone** (not covered): the PolySynth page (Oscillator / Filter / Envelope / LFO / Voice) fills the panel, title bar and the track strip stay. The pad LEDs and the strip keep working. |
+| Leave the page open, let the pattern play / the playhead run, press Play / Stop, change pattern | The screen | The page stays; nothing pushes it out; the title bar and the bottom labels never vanish. |
+| Press the key again | The screen | The pattern view returns exactly as it was (cursor, track block, playhead). Leaving Play mode with the page open: pattern view is back. |
+| Page open: **FX2** | The screen | Pitch view replaces the page (the page is not drawn at all); FX2 again returns. |
+| Page open, a stock popup opens and closes (e.g. a menu) | The screen | The page or the pattern view comes back correctly, never both, never a half page. |
+| Hold the pads of a chord (4 notes) on a PolySynth track, pitch view open | The graph | **Four lines** (teal / yellow / pink / blue), at four heights, scrolling right to left. |
+| Staccato chord stabs (short notes) with the pitch view open | The graph | Each stab leaves a visible short line per voice (at least about 0.2 s long), not nothing. |
+| Glide on, play two notes; LFO to Pitch | The graph | A slope between the notes; a wavy line. |
+| Instrument page (leave Play mode, Instrument Parameters key, instrument PolySynth) | The screen | The **new layout**: five section rows, Left / Right = parameter, Up / Down = section, jog = value, Shift + jog = fine, **Delete** = default, the Voice row ends with Morph, the voices footer, `CPU n%` in the title. The old four pages are gone. The bottom labels name the sections (jump) and `Pitch view / FX2`. |
+| Same page: FX2 or the `Pitch view` button | The screen | The pitch view; FX2 / any screen button returns. |
+| Instrument page of a sample / MIDI instrument | The screen | The stock pages, unchanged. |
+| Play mode: choose a sequencer type (hold a track button + wheel, release); choose an instrument (Instrument + jog, the stock instrument popup); close a menu popup | The pads | The sequencer pad LEDs are all there again at once, without pressing pads. |
+| Play mode, any stock action that lights pads, wait half a second | The pads | Self-healing: at the latest 0.5 s later the sequencer LEDs are rewritten. |
+| Tap the selected track screen button | The pad legend | Opens / closes reliably, also right after a type change or an instrument popup; a tap on another track only selects it. The selected cell says `tap: help` all the time (the PolySynth hint `Hold+Instr` flashes in for 0.7 s every 4 s). |
+| Tap the selected track when its type is Off | The cell | The message `pick type first` (no legend over an Off track). |
+
 ## 11f. CPU savings (plan 009 P, v0.2.7): compare with the previous build (v0.2.6) on the same project
 Use one project with 8 sample voices (some with the filter on), the delay and the stock reverb used, the limiter on, and play it. Open Master > Reverb (it resets the average when it opens) and write down "Rev / All CPU" after 30 s of the busiest part; also read Config > audio usage (min / max / avg / last) and "free heap" / "stack ... free ..." (bottom right of the Config page). Do it on v0.2.6 and on this build; the second number of the Master > Reverb item and the Config numbers are the comparison.
 | Press | Expected |

@@ -37,6 +37,9 @@ static void functInstrument(uint8_t state);
 
 static void functEncoder(int16_t value);
 static void functUp();
+#ifdef FEATURE_PLINKY
+static void functPlinkyFx2(uint8_t state);
+#endif
 static void functDown();
 
 static void functLeft();
@@ -283,6 +286,8 @@ void cInstrumentEditor::stop()
 #ifdef FEATURE_PLINKY
     pitchTraceView.forget();
     plinkyPitchView = false;
+    plinkyViewControl = -1; // the interface destroys the module's controls
+    plinkyShownValid = false;
 #endif
     mtPopups.hideInfoPopup();
     keyboardManager.deactivateKeyboard();
@@ -361,6 +366,9 @@ void cInstrumentEditor::setDefaultScreenFunct()
 
     ip->setButtonObj(interfaceButtonDelete, functDelete);
     ip->clearButton(interfaceButtonInsert);
+#ifdef FEATURE_PLINKY
+    ip->setButtonObj(interfaceButtonFx2, functPlinkyFx2);
+#endif
 
     ip->setButtonObj(interfaceButtonShift, functShift);
 
@@ -411,6 +419,7 @@ void cInstrumentEditor::clearDefaultScreenFunct()
     ip->clearButton(interfaceButtonDown);
 
     ip->clearButton(interfaceButtonParams);
+    ip->clearButton(interfaceButtonFx2);
 }
 
 void cInstrumentEditor::switchToEffectScreen()
@@ -831,17 +840,38 @@ static void functEncoder(int16_t value)
 
 static void functUp()
 {
+#ifdef FEATURE_PLINKY
+    if (IE->plinkyNav(interfaceButtonUp))
+        return; // the PolySynth page: previous section
+#endif
     IE->changeParamValue(1);
 }
 
 static void functDown()
 {
+#ifdef FEATURE_PLINKY
+    if (IE->plinkyNav(interfaceButtonDown))
+        return;
+#endif
     IE->changeParamValue(-1);
 }
+
+#ifdef FEATURE_PLINKY
+// v0.3.6: FX2 on the PolySynth page = pitch view <-> parameters (the screen button 7 says so)
+static void functPlinkyFx2(uint8_t state)
+{
+    if (state == buttonPress && IE->plinkyActive())
+        IE->plinkyTogglePitch();
+}
+#endif
 
 //=========================================================================================================
 static void functLeft()
 {
+#ifdef FEATURE_PLINKY
+    if (IE->plinkyNav(interfaceButtonLeft))
+        return;
+#endif
     if (IE->frameData.multiSelActiveNum != 0)
     {
         return;
@@ -874,6 +904,10 @@ static void functLeft()
 
 static void functRight()
 {
+#ifdef FEATURE_PLINKY
+    if (IE->plinkyNav(interfaceButtonRight))
+        return;
+#endif
     if (IE->frameData.multiSelActiveNum != 0)
     {
         return;

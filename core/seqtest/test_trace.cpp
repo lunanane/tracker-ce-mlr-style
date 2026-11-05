@@ -278,6 +278,169 @@ static void test_follower_decimate_range()
     CHECK(strcmp(pitchtrace::noteName(-3, nb), "A-2") == 0);
 }
 
+static void checkPitchBounds(const Ctx& c);
+
+// ---- v0.3.6 (plan 014 A3): the REAL engine through ring -> follower -> range -> drawing, as the main loop runs it -------------------
+struct Sim
+{
+    Engine e;
+    pitchtrace::Follower f;
+    pitchtrace::Range rg;
+    double ms = 1000.0;
+    int blocksSinceSync = 0;
+    Sim() { sync(); } // the view opens: the follower starts at the engine's head
+    void sync()
+    {
+        const pitchtrace::Sample* rings[pitchtrace::kVoices];
+        for (int v = 0; v < pitchtrace::kVoices; v++) rings[v] = (const pitchtrace::Sample*)e.traceRing(v);
+        f.sync(rings, kTraceLen, e.traceHeadIndex(), (uint32_t)ms);
+        rg.follow(f);
+    }
+    // n blocks of audio, the main loop passes about every 14 blocks (40 ms)
+    void run(int n)
+    {
+        int16_t l[kBlock], r[kBlock];
+        for (int i = 0; i < n; i++)
+        {
+            e.render(l, r);
+            ms += kBlockSec * 1000.0;
+            if (++blocksSinceSync >= 14)
+            {
+                blocksSinceSync = 0;
+                sync();
+            }
+        }
+        sync();
+    }
+};
+struct Seen
+{
+    int strips[pitchtrace::kVoices];
+    int points[pitchtrace::kVoices];
+    int minY[pitchtrace::kVoices], maxY[pitchtrace::kVoices];
+    int total = 0;
+};
+static Seen drawSeen(Sim& s)
+{
+    Ctx c;
+    pitchtrace::draw(c, s.f, s.rg, "PolySynth pitch", "FX2: close");
+    CHECK(c.bytes <= 4096);
+    Seen o;
+    for (int v = 0; v < pitchtrace::kVoices; v++)
+    {
+        o.strips[v] = o.points[v] = 0;
+        o.minY[v] = 9999;
+        o.maxY[v] = -9999;
+    }
+    for (size_t i = 0; i < c.stripY.size(); i++)
+        for (int v = 0; v < pitchtrace::kVoices; v++)
+            if (c.stripColor[i] == pitchtrace::voiceColor(v))
+            {
+                o.strips[v]++;
+                o.points[v] += (int)c.stripY[i].size();
+                for (int y : c.stripY[i])
+                {
+                    if (y < o.minY[v]) o.minY[v] = y;
+                    if (y > o.maxY[v]) o.maxY[v] = y;
+                }
+                o.total++;
+            }
+    return o;
+}
+
+static void test_real_engine_chord_visible()
+{
+    // a sustained four note chord: four lines, each many points, at different heights
+    {
+        Sim s;
+        s.e.setParam(P_VOICES, 4);
+        const uint8_t chord[4] = { 60, 64, 67, 71 };
+        for (int i = 0; i < 4; i++) s.e.noteOn(chord[i], 100);
+        s.run(14 * 20);
+        const Seen o = drawSeen(s);
+        int dist = 0;
+        for (int v = 0; v < 4; v++)
+        {
+            CHECK(o.strips[v] >= 1);
+            CHECK(o.points[v] >= 8);
+            for (int w = v + 1; w < 4; w++) dist += o.maxY[v] != o.maxY[w];
+        }
+        CHECK(dist == 6); // four distinct heights
+    }
+    // a staccato stab (note-on + note-off a few blocks later, the engine idles right after): all four voices stay visible
+    {
+        Sim s;
+        s.e.setParam(P_VOICES, 4);
+        s.e.setParam(P_RELEASE, 5);
+        const uint8_t chord[4] = { 60, 64, 67, 71 };
+        for (int i = 0; i < 4; i++) s.e.noteOn(chord[i], 100);
+        s.run(3);
+        for (int i = 0; i < 4; i++) s.e.noteOff(chord[i]);
+        s.run(14 * 4); // engine idle by now, the clock runs
+        const Seen o = drawSeen(s);
+        for (int v = 0; v < 4; v++)
+        {
+            CHECK(o.strips[v] >= 1);
+            CHECK(o.points[v] >= 2);
+        }
+        // and a second stab 1.5 s later shows next to the first one
+        s.run(14 * 40);
+        for (int i = 0; i < 4; i++) s.e.noteOn(chord[i], 100);
+        s.run(2);
+        for (int i = 0; i < 4; i++) s.e.noteOff(chord[i]);
+        s.run(14 * 4);
+        const Seen o2 = drawSeen(s);
+        for (int v = 0; v < 4; v++) CHECK(o2.strips[v] >= 2);
+    }
+    // the very first note after the view opened on an idle engine (no earlier sample) and a one-block note
+    {
+        Sim s;
+        s.run(14 * 10);
+        s.e.noteOn(62, 100);
+        s.e.noteOff(62);
+        s.run(14 * 3);
+        const Seen o = drawSeen(s);
+        int any = 0;
+        for (int v = 0; v < 4; v++) any += o.strips[v];
+        CHECK(any >= 1);
+    }
+    // glide: the line moves between the two notes; LFO to pitch: it wiggles
+    {
+        Sim s;
+        s.e.setParam(P_VOICES, 1);
+        s.e.setParam(P_GLIDE, 60);
+        s.e.setParam(P_SUSTAIN, 100);
+        s.e.noteOn(60, 100);
+        s.run(14 * 10);
+        s.e.noteOn(72, 100);
+        s.run(14 * 30);
+        const Seen o = drawSeen(s);
+        CHECK(o.strips[0] >= 1 && o.points[0] >= 10);
+        CHECK(o.maxY[0] - o.minY[0] > 30); // a slope, not a flat line
+        Sim l;
+        l.e.setParam(P_VOICES, 1);
+        l.e.setParam(P_LFO_DEST, 0);
+        l.e.setParam(P_LFO_DEPTH, 100);
+        l.e.setParam(P_LFO_RATE, 70);
+        l.e.setParam(P_SUSTAIN, 100);
+        l.e.noteOn(60, 100);
+        l.run(14 * 40);
+        const Seen q = drawSeen(l);
+        CHECK(q.points[0] >= 20 && q.maxY[0] - q.minY[0] >= 6);
+    }
+    // the follower fed from the first pass after opening shows a note that is already sounding from then on, never beyond the panel
+    {
+        Sim s;
+        s.e.noteOn(48, 100);
+        s.e.noteOn(55, 100);
+        s.run(14 * 6);
+        Ctx c;
+        pitchtrace::draw(c, s.f, s.rg, "t", "h");
+        checkPitchBounds(c);
+        CHECK(c.strips >= 4);
+    }
+}
+
 static void checkPitchBounds(const Ctx& c)
 {
     CHECK(c.minX >= 0 && c.maxX <= 800);
@@ -517,10 +680,35 @@ static void test_launcher_budgets()
     CHECK(seqpal::kCellEmpty != seqpal::kCellNotes && seqpal::kCellNotes != seqpal::kCellPlaying && seqpal::kSceneNotes != seqpal::kSceneEmpty);
 }
 
+// ---- v0.3.6 (plan 014 A1): host model of the display frame budget (display.cpp step3 appends controls from the highest table index
+// down while the sum stays under 8172 bytes and then drops ALL remaining, i.e. the lowest-index ones: title bar, labels, our overlay).
+// The pattern control (tracker.cpp) is estimated from its code: per visible row and track about 12 characters as BITMAPS vertices
+// (VERTEX2II, 4 bytes each), plus the row / column rectangles, lines, cursor and playhead (about 1.2 KB). The other numbers are the
+// measured / limit values of the host tests (overlay 3600 limit, pitch view 4096 limit).
+static void test_frame_budget_model()
+{
+    const int kBudget = 8172;
+    const int rows = 15, tracks = 8, charsPerCell = 12;
+    const int patternWorst = rows * tracks * charsPerCell * 4 + 1200; // 6960
+    const int patternFour = rows * 4 * charsPerCell * 4 + 1200;       // 4 tracks view: 4080
+    const int stripLabels = 8 * 200 + 120;                           // eight two-line cells + background label
+    const int titleBar = 600;
+    const int overlay = 3600, pitch = 2800; // pitch: measured worst 2784 (limit in the layout test 4096); the overlay control is hidden while it shows
+    // the old overlay: pattern + overlay + strip + title do not fit (this is what pushed the overlay out)
+    CHECK(patternWorst + overlay + stripLabels + titleBar > kBudget);
+    CHECK(patternFour + overlay + stripLabels + titleBar > kBudget - 1500); // even the four track view has no real room left
+    // the view switch: without the pattern control the PolySynth page fits; the pitch view replaces it (both together would not fit)
+    CHECK(overlay + stripLabels + titleBar <= kBudget);
+    CHECK(4096 + stripLabels + titleBar <= kBudget);
+    CHECK(overlay + pitch + stripLabels + titleBar > kBudget);
+}
+
 int main()
 {
+    test_frame_budget_model();
     test_engine_ring();
     test_follower_decimate_range();
+    test_real_engine_chord_visible();
     test_pitch_layout_and_size();
     test_amp_view();
     test_launcher_budgets();

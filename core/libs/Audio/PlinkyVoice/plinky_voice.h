@@ -177,6 +177,9 @@ class Engine
         memset(trace, 0, sizeof(trace));
         traceHead = 0;
         traceDiv = 0;
+        tracePending = false;
+        traceOpen = false;
+        memset(trLatch, 0, sizeof(trLatch));
     }
 
     // ---- any context (the sequencer runs in an interrupt, pads and the UI on the main loop) ----
@@ -243,6 +246,16 @@ class Engine
         if (!any)
         {
             lvlPrev = 0;
+            // v0.3.6: a note that began and ended between two trace samples (a stab) still gets its sample, and the line ends with a
+            // closing sample (all off) where the engine went idle
+            if (tracePending)
+            {
+                tracePending = false;
+                traceDiv = 0;
+                writeTrace();
+            }
+            if (traceOpen)
+                writeTrace();
             return false;
         }
         Derived d;
@@ -260,6 +273,7 @@ class Engine
                 vo.gate = 0;
             }
             renderVoice(vo, d);
+            latchTrace(i, vo, d.vib);
             if (vo.relPend && !vo.fresh && vo.stage != ST_IDLE)
             {
                 vo.relPend = 0;
@@ -270,7 +284,8 @@ class Engine
         if (++traceDiv >= kTraceEvery)
         {
             traceDiv = 0;
-            writeTrace(d.vib);
+            tracePending = false;
+            writeTrace();
         }
         float lv = lvlPrev;
         const float dl = (d.level - lv) * (1.0f / kBlock);
@@ -317,22 +332,51 @@ class Engine
     uint16_t traceHead;
     uint8_t traceDiv;
 
-    void writeTrace(float vib)
+    // v0.3.6 (plan 014 A3): the trace is written every kTraceEvery rendered blocks (~35 ms); a voice that sounded in ANY block since
+    // the last sample is "on" (latched in latchTrace), with the pitch / envelope of its last rendered block. Before, only the state at
+    // the sample instant counted: a staccato chord stab (shorter than 35 ms of attack + release) or a note that ended before the next
+    // sample was never visible, and the engine going idle wrote no closing sample.
+    struct TraceLatch
+    {
+        float pitch;
+        float env;
+        uint8_t on;
+    };
+    TraceLatch trLatch[kMaxVoices];
+    bool tracePending;
+    bool traceOpen; // the last written sample had a sounding voice
+
+    void latchTrace(int i, const Voice& vo, float vib)
+    {
+        if (vo.stage == ST_IDLE)
+            return; // cleared in this block (its last block ramped down to zero): the line has ended
+        TraceLatch& t = trLatch[i];
+        t.pitch = vo.pitch + vib;
+        t.env = vo.env;
+        t.on = 1;
+        tracePending = true;
+    }
+
+    void writeTrace()
     {
         const uint16_t h = traceHead;
         const int k = h & (kTraceLen - 1);
+        bool open = false;
         for (int i = 0; i < kMaxVoices; i++)
         {
-            const Voice& vo = v[i];
-            float p = (vo.pitch + vib) * 32.0f;
+            TraceLatch& t = trLatch[i];
+            open |= t.on != 0;
+            float p = t.pitch * 32.0f;
             p = p > 32000.0f ? 32000.0f : (p < -32000.0f ? -32000.0f : p);
-            float e = vo.env * 255.0f;
+            float e = t.env * 255.0f;
             e = e > 255.0f ? 255.0f : (e < 0.0f ? 0.0f : e);
             TraceSample& s = trace[i][k];
             s.pitch = (int16_t)(p < 0 ? p - 0.5f : p + 0.5f);
             s.env = (uint8_t)e;
-            s.on = vo.stage != ST_IDLE ? 1 : 0;
+            s.on = t.on;
+            t.on = 0;
         }
+        traceOpen = open;
         __atomic_store_n(&traceHead, (uint16_t)(h + 1), __ATOMIC_RELEASE);
     }
 

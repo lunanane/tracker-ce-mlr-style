@@ -92,6 +92,18 @@ class cDisplay
     void synchronizeRefresh();
     void resetControlQueue();
     uint8_t isIdle();
+    // v0.3.6: bytes of display list the next frame appends (step3 drops the lowest-index controls above 8172); read only
+    uint32_t shownRamBytes() const
+    {
+        uint32_t sum = 0;
+        for (int i = 0; i < controlsCount; i++)
+        {
+            const cDisplayControl* p = controlsTable[i];
+            if (p != nullptr && (p->style & controlStyleShow) && p->refresh)
+                sum += p->ramSize;
+        }
+        return sum;
+    }
     void forceAppedStage();
     void processDisplayUpdateImmediate();
     bool isControlsRefreshProcessIdle();
