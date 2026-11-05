@@ -475,3 +475,42 @@ static void testRmsWatch()
     }
     CHECK(fabsf(m.read() - 10000.0f / 32767.0f) < 1e-4f); // the silent half was not counted
 }
+
+// ---- plan 010: a missing input block is silence for the limiter (it used to return without a word, leaving the stale lookahead samples)
+static void testLimiterMissingBlock()
+{
+    for (int pass = 0; pass < 2; pass++) // 0: main stream, 1: sidechain
+    {
+        AudioEffectLimiter& nl = *new (calloc(1, sizeof(AudioEffectLimiter))) AudioEffectLimiter();
+        mtProject.values.limiterAttack = 10;
+        mtProject.values.limiterRelease = 100;
+        mtProject.values.limiterThreshold = 20000;
+        mtProject.values.limiterMode = limiterModeSubtle;
+        nl.begin();
+        nl.setSidechainEnable(pass == 1);
+        std::vector<int16_t> loud(128 * 20);
+        for (size_t i = 0; i < loud.size(); i++)
+            loud[i] = (int16_t)((int)(rnd() % 20001) - 10000); // (runs last: the other tests are not affected)
+        runLimiter(nl, loud, nullptr, pass == 1);
+        // now no input at all for 4 blocks: an output block is still sent each time, and after the 5 sample lookahead it is silent
+        for (int b = 0; b < 4; b++)
+        {
+            stubIn[0] = stubIn[1] = nullptr;
+            if (stubOut[0])
+            {
+                free(stubOut[0]);
+                stubOut[0] = nullptr;
+            }
+            nl.update();
+            CHECK(stubOut[0] != nullptr);
+            if (stubOut[0])
+            {
+                bool silent = true;
+                for (int i = 5; i < 128; i++)
+                    silent = silent && stubOut[0]->data[i] == 0;
+                CHECK(silent);
+            }
+        }
+        free(&nl);
+    }
+}

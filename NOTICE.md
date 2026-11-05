@@ -46,11 +46,11 @@ Polyend Tracker Community Edition (CE) incorporates or links against the followi
 * **License**: Polyend Precompiled Synthesizer & DSP Library License (`synth/lib/LICENSE-PROPRIETARY.txt`)
 * **Copyright**: Copyright (c) 2023-2026 Polyend Sp. z o.o. All rights reserved.
 
-## 10. Reverb algorithm of the Plinky firmware (reverb type "Plinky")
+## 10. Reverb algorithm of the Plinky firmware (reverb type "ShimmerReverb", based on the Plinky reverb by mmalex, MIT)
 * **Location**: `core/libs/Audio/Polyverb/ring_reverb.h` (a port of `Reverb2` in `sw/Core/Src/plinky.c` of <https://github.com/plinkysynth/plinky_public>)
 * **License**: MIT License (the full notice is kept at the top of the ported file)
 * **Copyright**: Copyright (c) the authors of the Plinky firmware (the repository states: "The rest of the software of plinky is licensed under the MIT License")
-* **Note**: only the reverb algorithm is used. The Plinky name, logo and front panel design are not part of the MIT grant; this firmware is not a Plinky product. The name appears only as the label of the reverb type, to credit the algorithm.
+* **Note**: only the reverb algorithm is used. The Plinky name, logo and front panel design are not part of the MIT grant; this firmware is not a Plinky product. The reverb type is called "ShimmerReverb" in the UI; the Plinky name appears only here and in the source headers, to credit the algorithm (based on the Plinky reverb by mmalex, MIT).
 
 ## 11. Synth voice of the Plinky firmware (the "Plinky" synth voice, Original Tracker)
 * **Location**: `core/libs/Audio/PlinkyVoice/plinky_voice.h` (the oscillator model, integer phase polyBLEP saw, pulse from two saws, low pass gate recursion, envelope smoothing and per-block ramps follow `RunVoice` in `sw/Core/Src/plinky.c` of <https://github.com/plinkysynth/plinky_public>)

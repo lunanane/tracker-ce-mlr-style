@@ -55,6 +55,24 @@ void cSeqPerform::prepareFromElsewhere()
         performance.readPerfData(mtConfig.general.performanceSource);
 }
 
+// Plan 010 A5: the track selection is the user's last setting. It lives in seqFxTrackSel() (saved in seqfx.bin); the engine's track
+// states (cleared by every turn-off, and by the stock page when it starts fresh) are put back from it, never cleared by us.
+void cSeqPerform::saveSel()
+{
+    uint8_t s[16] = {};
+    for (uint8_t t = 0; t < kPerformanceTracks && t < 16; t++)
+        s[t] = performance.getTrackState(t);
+    seqFxSetTrackSel(seqfx::selFromStates(s, 16));
+}
+
+void cSeqPerform::restoreSel()
+{
+    uint8_t s[16];
+    seqfx::selToStates(seqFxTrackSel(), s, 16);
+    for (uint8_t t = 0; t < kPerformanceTracks && t < 16; t++)
+        performance.setTrackState(t, s[t]); // stores only: no FX is applied or reset here
+}
+
 void cSeqPerform::start(uint32_t options)
 {
     (void)options;
@@ -96,6 +114,10 @@ void cSeqPerform::start(uint32_t options)
 
     const bool handedOver = fromStock; // set by seqFaderShiftFromStock (Shift + Performance on the stock page)
     fromStock = false;
+    if (handedOver)
+        saveSel(); // the selection made on the stock page is the user's latest setting
+    else
+        restoreSel();
     flushSave();
     PM->dontClearPerformanceMode = 0; // set again only when we hand over to the stock page / Master / Params
     const bool entered = fromElsewhere;
@@ -138,10 +160,8 @@ void cSeqPerform::start(uint32_t options)
         }
         if (entered && !handedOver)
         {
-            // as the stock page does when it starts with nothing handed over: no rows selected, no track affected
+            // as the stock page does when it starts with nothing handed over: no rows selected (plan 010 A5: the track selection stays)
             performance.resetSelectedRows();
-            for (uint8_t t = 0; t < kPerformanceTracks; t++)
-                performance.setTrackState(t, 0);
         }
         performance.loadSelectedValuesToTempValues();
         // The stock page latches the pad row of a slot: FX already playing from it show up as lit faders
@@ -205,6 +225,7 @@ void cSeqPerform::stop()
             mtPadBoard.releaseAllInstruments();
         }
     }
+    restoreSel(); // plan 010 A5: a turn-off above cleared the engine's track states, the user's selection stays
     flushSave(); // only when the perform data changed, and never while playing (plan 005 M2)
     padsBacklight.clearGlobalPads(1, 1, 1);
 }
@@ -677,6 +698,7 @@ void cSeqPerform::panic()
         for (int i = 0; i < 48; i++)
             ledShown[i] = 0xFF;
         screenDirty = true;
+        restoreSel();
         return;
     }
     fxKept = false;
@@ -688,6 +710,7 @@ void cSeqPerform::panic()
         newFileManager.loadWorkspacePatternNow(mtProject.values.actualPattern);
         sequencer.switchRamPatternsNow();
     }
+    restoreSel(); // plan 010 A5: the turn-off cleared the engine's track states, the user's selection stays
 }
 
 // A project was loaded: whatever we held is gone with the old project. No pattern reload.
@@ -707,34 +730,7 @@ void cSeqPerform::projectLoaded()
     stockOn = 0;
     saveGate.dirty = false;
     screenDirty = true;
-}
-
-// Kept FX followed on from Pattern / Song to a page that does not keep them: the stock rule (at the pattern end while playing,
-// else now). interface.cpp switchModuleByButton asks for this.
-void cSeqPerform::endKeptStockRule()
-{
-    if (!fxKept)
-        return;
-    fxKept = false;
-    st.clear();
-    memset(fxVal, 0, sizeof(fxVal));
-    memset(stockVal, 0, sizeof(stockVal));
-    stockOn = 0;
-    if (!sequencer.isPerformanceMode())
-        return;
-    if (sequencer.isPlay())
-    {
-        PM->turnOffAtEndOfPattern();
-    }
-    else
-    {
-        const bool reload = sequencer.isPerformancePatternChanged();
-        if (performance.turnOff() && reload && newFileManager.isIdleForScratch())
-        {
-            newFileManager.loadWorkspacePatternNow(mtProject.values.actualPattern);
-            sequencer.switchRamPatternsNow();
-        }
-    }
+    restoreSel(); // plan 010 A5: a project load keeps the track selection (a performance preference, not a project property)
 }
 
 // The stock Performance page starts fresh: whatever we kept running ends before it resets its rows and track states.
@@ -819,6 +815,7 @@ void cSeqPerform::trackButton(uint8_t button)
     if (track >= kPerformanceTracks)
         return;
     performance.toggleTrackState(track);
+    saveSel();
     if (performance.getTrackState(track))
         reapplyActive();
     screenDirty = true;

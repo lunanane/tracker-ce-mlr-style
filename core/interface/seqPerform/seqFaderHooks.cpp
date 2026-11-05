@@ -40,12 +40,6 @@ void seqFaderProjectLoaded()
     seqPerform.projectLoaded();
 }
 
-// Kept FX followed on to a page that does not keep them (interface.cpp switchModuleByButton): the stock rule applies.
-void seqFaderEndKept()
-{
-    seqPerform.endKeptStockRule();
-}
-
 bool seqFaderKept()
 {
     return seqPerform.keptFx();

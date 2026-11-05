@@ -13,7 +13,11 @@ uint8_t seqFxHighpass();                  // reverb highpass index, 0 = off (seq
 void seqFxSetHighpass(uint8_t index);
 uint8_t seqFxReverbType();                // seqfx::RT_STOCK / RT_PLINKY
 void seqFxSetReverbType(uint8_t type);
-void seqFxApplyToEngine();                // all three values + the stock delay centre (after a project load)
+uint8_t seqFxShimmer();                   // plan 010 A3: Plinky reverb shimmer, 0 .. 127 (seqfx::shimmerPercent for the display)
+void seqFxSetShimmer(uint8_t raw);
+uint16_t seqFxTrackSel();                 // plan 010 A5: the fader page's track selection (bit = track), only the user changes it
+void seqFxSetTrackSel(uint16_t mask);
+void seqFxApplyToEngine();                // all values + the stock delay centre (after a project load)
 
 // ---- sidecar "seqfx.bin" ----
 void seqFxLoadWorkspace();                                      // Workspace/seqfx.bin -> values (missing / invalid: defaults)

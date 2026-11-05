@@ -34,6 +34,7 @@
 #define POLYVERB_REVERB_H_
 
 #include "fx_engine.h"
+#include "seqFxCaps.h"
 #include "util.h"
 
 class Reverb
@@ -132,13 +133,18 @@ class Reverb
             // c.Read2(del2 TAIL, krt);
             c.Lp(lp_1, klp);
             c.Read(dap1a TAIL, -kap);
+            c.Soft(); // plan 010 A2: the tank saturates softly (bit-identical below 5/8 of full scale), no hard clip at size 0.95
             c.WriteAllPass(dap1a, kap);
             c.Read(dap1b TAIL, kap);
+            c.Soft();
             c.WriteAllPass(dap1b, -kap);
+            c.Soft();
             c.Write(del1, 2.0f);
             c.Write(wet, 0.0f);
 
-            delta = (wet * 32768 - *left) * amount;
+            // plan 010 A2: the wet return (up to 2.0 of full scale) saturates softly; a mix of the input and a value inside the 16 bit range
+            // can no longer leave it (it used to wrap in the float -> int16 conversion). Bit-identical while |wet| <= 5/8.
+            delta = (seqfx::softSat16(wet * 32768) - *left) * amount;
             *left += delta;
             level_sum += __builtin_fabsf(wet); // plan 009 P#8: was libc abs(int) per sample (-fno-builtin)
 
@@ -147,13 +153,16 @@ class Reverb
             c.Read(del1 TAIL, krt);
             c.Lp(lp_2, klp);
             c.Read2(dap2a TAIL, kap);
+            c.Soft();
             c.WriteAllPass2(dap2a, -kap);
             c.Read2(dap2b TAIL, -kap);
+            c.Soft();
             c.WriteAllPass2(dap2b, kap);
+            c.Soft();
             c.Write2(del2, 2.0f);
             c.Write(wet, 0.0f);
 
-            delta = (wet * 32768 - *right) * amount;
+            delta = (seqfx::softSat16(wet * 32768) - *right) * amount;
             *right += delta;
             level_sum += __builtin_fabsf(wet);
 

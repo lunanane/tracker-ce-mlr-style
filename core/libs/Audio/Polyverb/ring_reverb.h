@@ -30,6 +30,7 @@
 //
 // No Polyend includes, host-testable (core/seqtest/test_fx.cpp). The caller owns the two buffers.
 #pragma once
+#include "seqFxDsp.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -55,6 +56,7 @@ static_assert(kLoopLength == 10027, "the loop of the ring");
 
 constexpr float kRateScale = 32000.0f / 44100.0f;
 constexpr int kShimmerFadeLen = 32768;
+constexpr int kShimmerMax = 127, kShimmerDefault = 32, kShimmerStepPerBlock = 2;
 
 inline int32_t ssat16(int32_t v)
 {
@@ -65,6 +67,14 @@ inline int32_t ssat16(int32_t v)
 #else
     return v < -32768 ? -32768 : (v > 32767 ? 32767 : v);
 #endif
+}
+
+// Write into the ring / the return (plan 010 A2): soft limit instead of the hard 16 bit clip. Identity up to 5/8 of full scale (the
+// sound below that is bit-identical to v0.2.x), a quarter of the slope above, ssat16 only guards the largest sums. A near-unity loop
+// (size 0.95 and loud input) compresses instead of crackling.
+inline int32_t satw(int32_t v)
+{
+    return (v > 20480 || v < -20480) ? ssat16(seqfx::softLimit(v)) : v;
 }
 
 // The ring memory. PlainRing: one block of kRingSize samples (original Tracker, host). SplitRing: two blocks of kRingSize / 2 (the
@@ -115,6 +125,10 @@ class BasicRingReverb
         apGain_ = apGain;
         predelayTarget_ = predelay < 0 ? 0 : (predelay > (int)(kPreSize - 1) ? (int)(kPreSize - 1) : predelay);
     }
+    // plan 010 A3: shimmer amount 0 .. 127 (the original's control 0 .. 255 halved; 32 = the fixed value of v0.2.x). The loop follows
+    // the target in small steps per block, so a moving control never clicks.
+    void setShimmer(int amount) { shimTarget_ = amount < 0 ? 0 : (amount > kShimmerMax ? kShimmerMax : amount); }
+    int shimmer() const { return shimCur_; }
     // input gain (Q16), dry share of the input that stays in the return (Q8), wet output gain (Q8)
     void setLevels(int32_t inGain, int32_t dry, int32_t wet)
     {
@@ -134,6 +148,7 @@ class BasicRingReverb
         lfoR2_ = 1.0f;
         lfoI2_ = 0.0f;
         shimFade_ = 0;
+        shimCur_ = shimTarget_;
         shimStep_ = 6;
         shimPos1_ = (int)(8192 / kRateScale);
         shimPos2_ = (int)(9000 / kRateScale);
@@ -177,6 +192,7 @@ class BasicRingReverb
     float lpf_ = 0, lpf2_ = 0, dc_ = 0;
     float lfoR1_ = 1, lfoI1_ = 0, lfoR2_ = 1, lfoI2_ = 0;
     int shimFade_ = 0, shimStep_ = 6;
+    int shimTarget_ = kShimmerDefault, shimCur_ = kShimmerDefault;
     int shimPos1_ = 0, shimPos2_ = 0;
     uint32_t rng_ = 1;
     uint32_t quiet_ = 0; // consecutive samples with (almost) no input and no wet output; >= kRingSize: the whole ring is silent
@@ -199,7 +215,7 @@ RINGVERB_INLINE int32_t apStage(const Ring& buf, uint32_t& i, int len, int32_t a
     uint32_t j = (i + (uint32_t)len) & kRingMask;
     int32_t d = buf[j];
     acc -= (int32_t)(((int64_t)d * g) >> 15);
-    buf[i] = (int16_t)ssat16(acc);
+    buf[i] = (int16_t)satw(acc);
     acc = (int32_t)(((int64_t)acc * g) >> 15) + d;
     i = j;
     return acc;
@@ -215,7 +231,7 @@ RINGVERB_INLINE int32_t apWobStage(const Ring& buf, uint32_t& i, int len, int wo
     int32_t a1 = buf[(base - 1) & kRingMask];
     int32_t d = (a0 * (0x1000 - frac) + a1 * frac) >> 12;
     acc -= (int32_t)(((int64_t)d * g) >> 15);
-    buf[i] = (int16_t)ssat16(acc);
+    buf[i] = (int16_t)satw(acc);
     acc = (int32_t)(((int64_t)acc * g) >> 15) + d;
     i = j;
     return acc;
@@ -224,7 +240,7 @@ template<typename Ring>
 RINGVERB_INLINE int32_t delayStage(const Ring& buf, uint32_t& i, int len, int32_t acc)
 {
     uint32_t j = (i + (uint32_t)len) & kRingMask;
-    buf[i] = (int16_t)ssat16(acc);
+    buf[i] = (int16_t)satw(acc);
     acc = buf[j];
     i = j;
     return acc;
@@ -243,7 +259,11 @@ RINGVERB_INLINE void BasicRingReverb<Ring>::process(int16_t* left, int16_t* righ
     const float kWobble = 0.3f;
     const float wobScale = 262144.0f / kRateScale; // (wob + 1) * 64 samples of the original, in 12 bit fractions
     const float dcA = 0.005f * kRateScale;
-    const int32_t shimAmt = 32; // 0 .. 127 of the original's shimmer control, fixed
+    const int32_t shimAmt = shimCur_; // 0 .. 127 (plan 010 A3: was fixed 32)
+    if (shimCur_ < shimTarget_)
+        shimCur_ = shimCur_ + kShimmerStepPerBlock > shimTarget_ ? shimTarget_ : shimCur_ + kShimmerStepPerBlock;
+    else if (shimCur_ > shimTarget_)
+        shimCur_ = shimCur_ - kShimmerStepPerBlock < shimTarget_ ? shimTarget_ : shimCur_ - kShimmerStepPerBlock;
     const int32_t inGain = inGain_;
     const int32_t dry = dry_, wet = wet_;
 
@@ -352,8 +372,8 @@ RINGVERB_INLINE void BasicRingReverb<Ring>::process(int16_t* left, int16_t* righ
 
         const int32_t wl = (outl * wet) >> 8, wr = (outr * wet) >> 8;
         outPeak |= (wl < 0 ? -wl : wl) | (wr < 0 ? -wr : wr);
-        left[s] = (int16_t)ssat16(((inL * dry) >> 8) + wl);
-        right[s] = (int16_t)ssat16(((inR * dry) >> 8) + wr);
+        left[s] = (int16_t)satw(((inL * dry) >> 8) + wl);
+        right[s] = (int16_t)satw(((inR * dry) >> 8) + wr);
     }
     if (inPeak <= 1 && outPeak <= 1)
         quiet_ = quiet_ + (uint32_t)n > kRingSize ? kRingSize : quiet_ + (uint32_t)n;
