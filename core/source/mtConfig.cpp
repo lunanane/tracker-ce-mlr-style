@@ -639,6 +639,11 @@ void firmwareVersionChangeMini()
 
 void eepromStructureChange()
 {
+    // Structure 11: the second built-in font ("New") was removed, so the font list is [Original, SD fonts...] instead of
+    // [Original, New, SD fonts...]. A stored index >= 1 moves down by one: former "New" (1) -> Original (0), an SD font keeps its
+    // meaning (it was 2 + position, now 1 + position). Runs once: the caller stores the new structure version afterwards.
+    if (mtConfig.firmware.eepromStructVer < 11 && mtConfig.general.font >= 1)
+        mtConfig.general.font--;
     // Serial.println("Eeprom structure changed!");
     // resetConfig();
 }

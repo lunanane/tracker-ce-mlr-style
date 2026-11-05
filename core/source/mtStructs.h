@@ -44,7 +44,7 @@ const uint8_t PROJECT_FILE_VERSION = 17;   // wersja struktury pliku projektu
 const uint8_t INSTRUMENT_FILE_VERSION = 9; // wersja struktury pliku instrumentu
 const uint8_t PATTERN_FILE_VERSION = 6;
 
-const uint8_t CONFIG_STRUCT_VER = 10;
+const uint8_t CONFIG_STRUCT_VER = 11; // 11 (seq-tracks mod): the built-in "New" font is gone, stored font indexes shift down by one (eepromStructureChange)
 
 static constexpr float DEFAULT_TEMPO = 130.0f;
 static constexpr float kMinExternalBPM = 10.0f;
