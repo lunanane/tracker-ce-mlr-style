@@ -236,7 +236,10 @@ inline uint32_t clearTotal(const uint32_t* lens, int n)
 
 // ---------------------------------------------------------------- sidecar seqfx.bin
 constexpr char kMagic[4] = { 'S', 'Q', 'F', 'X' };
-enum { kVersion = 2, kPayload = 8, kFileMax = kPayload + seqsidecar::kOverhead };
+// v0.3.1: files are WRITTEN as version 1 (layout compatible: v0.2.x still loads bandwidth / highpass / type instead of ignoring the file as
+// 'newer'); the fields added in v0.3 (shimmer, selection) are marked by kNewFieldsFlag in reserved byte 6. Version 2 files (v0.3) still load.
+enum { kVersion = 2 /* highest readable */, kWriteVersion = 1, kPayload = 8, kFileMax = kPayload + seqsidecar::kOverhead };
+enum { kNewFieldsFlag = 1 };
 
 struct Params
 {
@@ -267,14 +270,14 @@ struct Params
         p[3] = shim;
         p[4] = (uint8_t)(sel & 0xFF);
         p[5] = (uint8_t)(sel >> 8);
-        for (int i = 6; i < kPayload; i++)
-            p[i] = 0; // reserved
-        return seqsidecar::frameWrite(buf, cap, kMagic, kVersion, p, kPayload);
+        p[6] = kNewFieldsFlag; // shim (3) and sel (4, 5) are valid; v0.2.x ignores this byte
+        p[7] = 0;              // reserved
+        return seqsidecar::frameWrite(buf, cap, kMagic, kWriteVersion, p, kPayload);
     }
     // false: missing / bad frame / short payload (nothing changed). *newer: written by a newer mod version (leave the file alone).
     // A value outside its range falls back to its own default (a hand-edited or future file never produces a wild setting);
     // a longer payload of a later version is read as far as it is known. A version 1 file wrote zeros after the first three bytes: it
-    // has no shimmer (default) and no selection (hasSel stays false).
+    // has no shimmer (default) and no selection (hasSel stays false); a version 1 file of v0.3.1 or later carries kNewFieldsFlag in byte 6.
     bool load(const uint8_t* buf, size_t len, bool* newer = nullptr)
     {
         const uint8_t* p = nullptr;
@@ -291,7 +294,7 @@ struct Params
         shim = kShimmerDefaultRaw;
         sel = 0;
         hasSel = false;
-        if (v >= 2 && n >= 6)
+        if ((v >= 2 && n >= 6) || (v == 1 && n >= 7 && p[6] == kNewFieldsFlag))
         {
             shim = p[3] <= kShimmerMaxRaw ? p[3] : (uint8_t)kShimmerDefaultRaw;
             sel = (uint16_t)(p[4] | (p[5] << 8));

@@ -558,7 +558,7 @@ static void test_sidecar()
     CHECK(p.save(buf, 8) == 0); // too small
     size_t n = p.save(buf, sizeof(buf));
     CHECK(n == (size_t)kFileMax && n == 18);
-    CHECK(memcmp(buf, "SQFX", 4) == 0 && buf[4] == kVersion);
+    CHECK(memcmp(buf, "SQFX", 4) == 0 && buf[4] == kWriteVersion);
 
     Params q;
     q.bw = 30;
@@ -1301,9 +1301,30 @@ static void test_sidecar_v2()
     q.sel = 0x8005;
     uint8_t buf[64];
     size_t n = q.save(buf, sizeof(buf));
-    CHECK(n == (size_t)kFileMax && buf[4] == 2);
+    // v0.3.1: written as version 1 with the flag in reserved byte 6, so v0.2.x still loads bandwidth / highpass / type
+    CHECK(n == (size_t)kFileMax && buf[4] == 1 && kWriteVersion == 1 && buf[seqsidecar::kHeader + 6] == kNewFieldsFlag);
     Params r;
     CHECK(r.load(buf, n) && r == q && r.hasSel && r.hp == 88 && r.shim == q.shim && r.sel == 0x8005);
+    {
+        // a v0.2.x style reader: version 1, the first three bytes only
+        const uint8_t* pp = nullptr;
+        size_t pn = 0;
+        uint8_t pv = 0;
+        CHECK(seqsidecar::frameRead(buf, n, kMagic, 1, &pp, &pn, &pv) == seqsidecar::FRAME_OK && pv == 1 && pp[0] == 20 && pp[2] == RT_PLINKY);
+        // a version 1 file without the flag (v0.2.x) has garbage-free zeros: no selection read even if bytes 3..5 hold something
+        uint8_t fl[8] = { 20, 10, RT_PLINKY, 100, 5, 0, 0, 0 };
+        uint8_t fb[64];
+        size_t fn = seqsidecar::frameWrite(fb, sizeof(fb), kMagic, 1, fl, 8);
+        Params u;
+        CHECK(u.load(fb, fn) && !u.hasSel && u.shim == kShimmerDefaultRaw && u.sel == 0);
+        fl[6] = kNewFieldsFlag;
+        fn = seqsidecar::frameWrite(fb, sizeof(fb), kMagic, 1, fl, 8);
+        CHECK(u.load(fb, fn) && u.hasSel && u.shim == 100 && u.sel == 5);
+        // and a v0.3 version 2 file still loads
+        fl[6] = 0;
+        fn = seqsidecar::frameWrite(fb, sizeof(fb), kMagic, 2, fl, 8);
+        CHECK(u.load(fb, fn) && u.hasSel && u.shim == 100 && u.sel == 5);
+    }
     CHECK(q.hash() != Params().hash());
     Params s = q;
     s.sel = 0x0005;
