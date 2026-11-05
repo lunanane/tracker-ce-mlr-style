@@ -151,6 +151,19 @@ make hr-compare PYTHON=<python with lupa> [HR_SCRIPTS=<HYPER_RASP scripts dir>] 
   (`s = s * 1664525 + 1013904223`, `(s >> 16) % n + 1`). For `bassline_seq`, `euclid_trigger`, `grid_seq` and `step_follower` the Lua side repaints
   (`render()`) after a `param` command, because those scripts only repaint on their next event.
   Results at hand-over: 8 scripts, 323 random scripts (40 each, plus exhaustive sweeps for arp_lines / chord_stabs / chord_arp), 0 mismatches.
+  **Limits of this harness** (what a green `hr-compare` does and does not prove):
+  - The Lua side is not the HYPER_RASP host: the `PRELUDE` in `hr_compare.py` is a hand-written stub of `PadScript` and the host API
+    (`grid_led*`, `midi_note_*`, scale / root bus, `euclidean`, `metro`, `math.random`), not the real `pad_script.py` runtime.
+  - `ViewSwitcher` (the function column: view = single tap, page = 3 + 4, tracker play / stop = 1 + 2) is re-implemented in `hr_compare.py`
+    (`switch()` / `stage_switcher()`), as is the dropping of notes outside 0..127 (`midi_note_on` / `_off` stubs); a bug in either copy is
+    invisible to the comparison.
+  - There is no transport model: `start` / `stop` commands call `start_playback` / `stop_playback` directly. Which scripts the host starts
+    (`FOLLOWS_TRANSPORT`), that it stops all of them, and when `pulse()` is delivered are decided by the firmware glue
+    (`core/source/seqTracksCore.cpp`, tested in `core/seqtest/test_hr.inc`), not by this harness.
+  - `RENDER_AFTER_PARAM`: for the scripts that repaint only on their next event the Lua side calls `render()` after a `param` command so
+    that the LED comparison is meaningful; the real host would show the stale image until the next event.
+  - Not compared: `live()` (takeover rule), `serialize()` / `deserialize()`, `title()` / `help()` / `legend()`, the pad columns 8..11 (extras),
+    the 12 x 4 pad layout and anything on the Tracker side (takeover, recording, sidecar).
 
 ## Tests
 
