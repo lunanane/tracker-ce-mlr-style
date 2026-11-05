@@ -197,6 +197,177 @@ static void test_shift_mute_blocks_legend()
     CHECK(g.visible(2300)); // a fresh Shift hold without a button shows it again
 }
 
+// v0.3.2: the router's rules for the stock editing keys (Note / Instr / FX1 / FX2 / Copy / Insert / Delete) in Play mode
+static void test_edit_keys()
+{
+    using K = EditKeys;
+    for (uint8_t k = 0; k < K::K_COUNT; k++)
+    {
+        K e;
+        if (k == K::K_INSTR)
+        {
+            // plain Instrument = the stock key (the owner change of v0.3.2); the edit mode is on while it is down
+            CHECK(e.event(k, K::PRESS, true, false, false) == K::PASS_EDIT && e.editWanted());
+            CHECK(e.event(k, K::HOLD, true, false, false) == K::PASS && e.editWanted());
+            CHECK(e.event(k, K::RELEASE, true, false, false) == K::PASS && !e.editWanted());
+            // a screen button held: the PolySynth overlay; the hold and release of that press are the overlay's too
+            CHECK(e.event(k, K::PRESS, true, false, true) == K::TAKE_SYNTH && !e.editWanted());
+            CHECK(e.event(k, K::HOLD, true, false, true) == K::TAKE);
+            CHECK(e.event(k, K::RELEASE, true, false, false) == K::TAKE && e.taken == 0);
+            // the synth overlay open: Instr closes it, with or without a screen button
+            CHECK(e.event(k, K::PRESS, true, true, false) == K::TAKE_SYNTH);
+            CHECK(e.event(k, K::RELEASE, true, false, false) == K::TAKE);
+        }
+        else
+        {
+            // a screen button held does not change the other keys
+            CHECK(e.event(k, K::PRESS, true, false, true) == K::PASS_EDIT && e.editWanted());
+            CHECK(e.event(k, K::RELEASE, true, false, false) == K::PASS && !e.editWanted());
+            // under the synth overlay these keys belong to it (no stock edit under the covered pattern)
+            CHECK(e.event(k, K::PRESS, true, true, false) == K::TAKE && !e.editWanted());
+            CHECK(e.event(k, K::HOLD, true, true, false) == K::TAKE);
+            CHECK(e.event(k, K::RELEASE, true, false, false) == K::TAKE && e.taken == 0);
+        }
+        // a popup of the editor owns the inputs: the stock handler gets everything, no edit mode is borrowed
+        CHECK(e.event(k, K::PRESS, false, false, false) == K::PASS && !e.editWanted());
+        CHECK(e.event(k, K::RELEASE, false, false, false) == K::PASS);
+        // the press went to the stock handler, a popup opens, the release still clears the held key
+        CHECK(e.event(k, K::PRESS, true, false, false) == K::PASS_EDIT && e.editWanted());
+        CHECK(e.event(k, K::RELEASE, false, false, false) == K::PASS && !e.editWanted());
+    }
+    // the edit mode lasts until the last of several editing keys is up
+    K e;
+    CHECK(e.event(K::K_DELETE, K::PRESS, true, false, false) == K::PASS_EDIT);
+    CHECK(e.event(K::K_FX1, K::PRESS, true, false, false) == K::PASS_EDIT);
+    CHECK(e.event(K::K_DELETE, K::RELEASE, true, false, false) == K::PASS && e.editWanted());
+    CHECK(e.event(K::K_FX1, K::RELEASE, true, false, false) == K::PASS && !e.editWanted());
+    // not an editing key
+    CHECK(e.event(K::K_COUNT, K::PRESS, true, false, false) == K::PASS && !e.editWanted());
+    e.event(K::K_COPY, K::PRESS, true, false, false);
+    e.clear();
+    CHECK(!e.editWanted() && e.taken == 0);
+}
+
+// v0.3.2: the Shift legend on the key / tick flow of the hardware: Shift down, ticks of the main loop (update() every ~5 ms), screen
+// buttons (the stock mute buttons while Shift is down) and the view the overlay control gets.
+struct ShiftFlow
+{
+    LegendGate gate;
+    ScreenHold hold;
+    bool shift = false;
+    bool listOpen = false;
+    bool synthOpen = false;
+    uint8_t type = seqlogic::TYPE_MONO;
+    uint32_t now = 0;
+    uint8_t view = 0;
+    void tick(uint32_t ms)
+    {
+        for (uint32_t i = 0; i < ms; i += 5)
+        {
+            now += 5;
+            gate.shiftChanged(shift, now); // update(): sampled from the key state
+            view = viewKind(synthOpen, true, listOpen, gate.visible(now), type == seqlogic::TYPE_OFF);
+        }
+    }
+    void shiftKey(bool down) { shift = down; }
+    void screenButton(uint8_t b, ScreenHold::Kind kind)
+    {
+        // the overlay's button(): a press with Shift down that the overlay does not take is a stock mute press: no legend
+        if (kind == ScreenHold::PRESS && shift) gate.screenButton();
+        hold.event(b, kind, true, shift);
+    }
+};
+
+static void test_shift_legend_flow()
+{
+    // hold Shift 400 ms with a sequencer track selected, no screen button: the legend is there after 250 ms and not before
+    ShiftFlow f;
+    f.tick(1000);
+    f.shiftKey(true);
+    f.tick(240);
+    CHECK(f.view == 0);
+    f.tick(20);
+    CHECK(f.view == 2);
+    f.tick(500);
+    CHECK(f.view == 2);
+    f.shiftKey(false);
+    f.tick(10);
+    CHECK(f.view == 0);
+    // a quick tap (the stock mute gesture) never shows it
+    f.shiftKey(true);
+    f.tick(150);
+    f.shiftKey(false);
+    f.tick(400);
+    CHECK(f.view == 0);
+    // Shift + screen button (mute) hides it until Shift is released; the next hold shows it again
+    f.shiftKey(true);
+    f.tick(300);
+    CHECK(f.view == 2);
+    f.screenButton(3, ScreenHold::PRESS);
+    f.tick(10);
+    CHECK(f.view == 0);
+    f.screenButton(3, ScreenHold::RELEASE);
+    f.tick(400);
+    CHECK(f.view == 0);
+    f.shiftKey(false);
+    f.tick(10);
+    f.shiftKey(true);
+    f.tick(300);
+    CHECK(f.view == 2);
+    CHECK(f.hold.mask == 0); // the mute presses were not the overlay's
+    // an Off track has no legend; the type list and the synth overlay win over it
+    f.type = seqlogic::TYPE_OFF;
+    f.tick(10);
+    CHECK(f.view == 0);
+    f.type = seqlogic::TYPE_CHORDARP;
+    f.listOpen = true;
+    f.tick(10);
+    CHECK(f.view == 1);
+    f.listOpen = false;
+    f.synthOpen = true;
+    f.tick(10);
+    CHECK(f.view == 3);
+    // the legend panel is above the bottom label row (stock mute labels start at y 424; the panel ends at 424)
+    CHECK(334 - 38 + 4 * 22 + 40 <= 424);
+}
+
+// v0.3.2: the strip hint line
+static void test_strip_shift_hint()
+{
+    char b[16];
+    StripCell c;
+    c.type = seqlogic::TYPE_MONO;
+    c.selected = true;
+    c.shiftHint = true;
+    stripLine2(b, sizeof b, c);
+    CHECK(strcmp(b, "Shift: pads") == 0 && strlen(b) <= 11);
+    c.type = seqlogic::TYPE_PLINKY;
+    stripLine2(b, sizeof b, c);
+    CHECK(strcmp(b, "Shift: pads") == 0);
+    // state and messages win over the hint; an Off track has none
+    c.takenOver = true;
+    stripLine2(b, sizeof b, c);
+    CHECK(strcmp(b, "live") == 0);
+    c.takenOver = false;
+    c.rec = true;
+    stripLine2(b, sizeof b, c);
+    CHECK(strcmp(b, "REC") == 0);
+    c.rec = false;
+    c.msg = "pick a type";
+    stripLine2(b, sizeof b, c);
+    CHECK(strcmp(b, "pick a type") == 0);
+    c.msg = nullptr;
+    c.type = seqlogic::TYPE_OFF;
+    stripLine2(b, sizeof b, c);
+    CHECK(strcmp(b, "pattern") == 0);
+    // the PolySynth legend names the synth overlay key
+    LegendState st;
+    st.type = seqlogic::TYPE_PLINKY;
+    CHECK(strstr(legendHelp(st), "Hold track + Instr") != nullptr && strlen(legendHelp(st)) <= 88);
+    st.plMenu = 1;
+    CHECK(strstr(legendHelp(st), "Hold track + Instr") != nullptr && strlen(legendHelp(st)) <= 88);
+}
+
 static void test_rec_hints_and_priority()
 {
     char b[16];
@@ -534,6 +705,9 @@ int main()
     test_legend_gate();
     test_screen_hold();
     test_shift_mute_blocks_legend();
+    test_edit_keys();
+    test_shift_legend_flow();
+    test_strip_shift_hint();
     test_rec_hints_and_priority();
     test_legend_state();
     test_edge_side();

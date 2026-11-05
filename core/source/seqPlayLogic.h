@@ -122,6 +122,65 @@ struct LegendGate
     bool visible(uint32_t nowMs) const { return shift && !blocked && (uint32_t)(nowMs - since) >= (uint32_t)kDelayMs; }
 };
 
+// ---- v0.3.2: stock keys in Play mode. Note / Instr / FX1 / FX2 / Copy / Insert / Delete belong to the stock pattern editor; the router
+// only keeps what the sequencer features need. The stock edit actions (jog edit of the cursor step, copy / paste, insert, delete) need the
+// stock edit mode, and Rec (which toggles it in stock) is the take key here, so the edit mode is borrowed for as long as one of these keys
+// is down (EditKeys.held != 0): the overlay sets it on the press and gives it back on the first pass after the last release.
+// Instr with a screen button held (or with the synth overlay open) is the PolySynth overlay's key, never the stock one.
+struct EditKeys
+{
+    enum Key : uint8_t { K_NOTE = 0, K_INSTR = 1, K_FX1 = 2, K_FX2 = 3, K_COPY = 4, K_INSERT = 5, K_DELETE = 6, K_COUNT = 7 };
+    enum Kind : uint8_t { PRESS = 0, HOLD = 1, RELEASE = 2 };
+    enum Result : uint8_t
+    {
+        PASS = 0,        // the stock handler runs (hold / release of a key it got the press of, or a popup owns the inputs)
+        PASS_EDIT = 1,   // the stock handler runs and the stock edit mode is on
+        TAKE = 2,        // the overlay keeps the event
+        TAKE_SYNTH = 3   // the overlay keeps it and opens / closes the PolySynth overlay
+    };
+    uint8_t taken = 0; // keys whose press the overlay took: their hold / release are taken too
+    uint8_t held = 0;  // keys whose press went to the stock handler with the edit mode on and that are still down
+    Result event(uint8_t key, Kind kind, bool routable, bool synthOpen, bool screenHeld)
+    {
+        if (key >= K_COUNT) return PASS;
+        const uint8_t bit = (uint8_t)(1u << key);
+        if (taken & bit)
+        {
+            if (kind == RELEASE) taken &= (uint8_t)~bit;
+            return TAKE;
+        }
+        if (kind != PRESS)
+        {
+            if (kind == RELEASE) held &= (uint8_t)~bit;
+            return PASS;
+        }
+        if (!routable) return PASS;
+        if (key == K_INSTR && (synthOpen || screenHeld))
+        {
+            taken |= bit;
+            return TAKE_SYNTH;
+        }
+        if (synthOpen)
+        {
+            taken |= bit; // the parameter overlay covers the pattern: no stock edits under it
+            return TAKE;
+        }
+        held |= bit;
+        return PASS_EDIT;
+    }
+    bool editWanted() const { return held != 0; }
+    void clear() { taken = 0; held = 0; }
+};
+
+// What the overlay control shows (numbers = SeqPlayViewData::Mode)
+inline uint8_t viewKind(bool synthOpen, bool active, bool listOpen, bool legendVisible, bool typeOff)
+{
+    if (synthOpen) return 3;
+    if (active && listOpen) return 1;
+    if (active && legendVisible && !typeOff) return 2;
+    return 0;
+}
+
 // ---- strip texts (two lines per cell, <= 11 characters each: a cell is 98 px wide in the 14 px bold font) ----
 enum Tone : uint8_t { TONE_OFF = 0, TONE_ON = 1, TONE_SELECTED = 2, TONE_REC = 3 };
 
@@ -137,6 +196,7 @@ struct StripCell
     bool cut = false;      // plays an MLR (CUT) jam
     const char* hint = nullptr; // hint of the last recording on this track (<= 11 characters), see recHintText
     const char* msg = nullptr;  // transient message (<= 11 characters)
+    bool shiftHint = false;     // v0.3.2: the selected sequencer cell tells how to see the pad map (set by the overlay)
 };
 
 // v0.1 recording hints on line 2 of the recorded track's cell (overflow beats MIDI-only beats reduced)
@@ -181,6 +241,7 @@ inline void stripLine2(char* out, size_t n, const StripCell& c)
     else if (c.cut) snprintf(out, n, "cut");
     else if (type == seqlogic::TYPE_OFF) snprintf(out, n, "pattern");
     else if (c.takenOver) snprintf(out, n, "live");
+    else if (c.shiftHint && type != seqlogic::TYPE_OFF) snprintf(out, n, "Shift: pads");
     else if (type == seqlogic::TYPE_PLINKY) snprintf(out, n, "voice");
     else snprintf(out, n, "ready");
 }
@@ -554,8 +615,8 @@ inline const char* legendHelp(const LegendState& st)
         return "Tap a cell: note on/off. Hold Loop + tap first and last step = loop. Half: steps 9-16.";
     }
     if (st.type == seqlogic::TYPE_PLINKY)
-        return st.plMenu ? "Pick root, scale, octave, string step (Str). Notes pad: back. Instr key: sound." :
-                           "Columns = strings, each a few scale steps higher. Rows climb a string. Setup pad: key.";
+        return st.plMenu ? "Pick root, scale, octave, string (Str). Notes pad: back. Hold track + Instr: sound." :
+                           "Columns = strings, rows climb a string. Setup pad: key. Hold track + Instr: sound.";
     if (seqlogic::isHrType(st.type) && st.hr && st.hr->help) return st.hr->help;
     return "";
 }
