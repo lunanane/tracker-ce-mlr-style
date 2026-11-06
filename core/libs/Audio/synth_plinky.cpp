@@ -46,6 +46,15 @@ AUDIO_CORE_RAM void AudioSynthPlinky::update(void)
             if (b[i])
                 release(b[i]);
         pct = (float)(cycleCounter() - start) * (100.0f / kBlockCycles);
+        // plan 022 P2: the cost of one sounding voice for the governor's restore decision (permille of the block; the average of the
+        // whole synth over the voices that sounded, clamped to a sane range)
+        const int n = eng.activeVoices();
+        if (n > 0)
+        {
+            float vc = (cpuAvg > pct ? cpuAvg : pct) * 10.0f / (float)n;
+            vc = vc < 15.0f ? 15.0f : (vc > 120.0f ? 120.0f : vc);
+            eng.setVoiceCost((uint32_t)vc);
+        }
     }
     cpuAvg += (pct - cpuAvg) * (1.0f / 32.0f);
     cpuPeak = pct > cpuPeak ? pct : cpuPeak * 0.999f;
