@@ -17,7 +17,7 @@ AmpView ampView;
 
 namespace
 {
-// v0.3.7: the history of the 9 lanes (about 1.9 KB each) and the per block peak rings (64 values for every track channel and the two master
+// v0.3.7: the history of the 9 lanes (v0.4.1: about 4.1 KB each) and the per block peak rings (64 values for every track channel and the two master
 // channels, 2.3 KB) live in EXTERNAL_RAM. Raw storage only: an object with a constructor in EXTERNAL_RAM would get a static constructor that
 // runs before the SDRAM is up (boot hang of v0.3.4); the follower is built by placement new on the first open.
 __NOINIT(EXTERNAL_RAM) alignas(ampview::Follower) uint8_t s_followerMem[sizeof(ampview::Follower)];
@@ -51,10 +51,34 @@ void AmpView::detach()
     engine.setMasterPeakRing(1, nullptr);
 }
 
+// the Master module is entered: the history starts (once; entering another page of the module keeps it)
+void AmpView::begin()
+{
+    if (running_)
+        return;
+    if (follower_ == nullptr)
+        follower_ = new (s_followerMem) ampview::Follower(); // the SDRAM is up long before the module is first entered
+    follower_->reset();
+    memset(s_rings, 0, sizeof(s_rings));
+    for (int i = 0; i < kRings; i++)
+        last_[i] = 0;
+    data_.amp = follower_;
+    // attach the rings: from here the audio side writes one peak per block
+    for (int t = 0; t < ampview::kTracks; t++)
+        for (int ch = 0; ch < 2 && ch < instrumentPlayer[t].peakTapChannels(); ch++)
+            instrumentPlayer[t].setPeakTap(ch, s_rings[t * 2 + ch]);
+    engine.setMasterPeakRing(0, s_rings[kRingMaster]);
+    engine.setMasterPeakRing(1, s_rings[kRingMaster + 1]);
+    lastMs_ = seqNowMs();
+    running_ = true;
+}
+
+// the Master module is left
 void AmpView::forget()
 {
-    if (data_.kind != TraceViewData::NONE)
+    if (running_)
         detach();
+    running_ = false;
     data_.kind = TraceViewData::NONE;
     control_ = -1;
 }
@@ -64,7 +88,6 @@ void AmpView::close()
     if (data_.kind == TraceViewData::NONE)
         return;
     data_.kind = TraceViewData::NONE;
-    detach();
     if (control_ >= 0)
     {
         display.setControlHide(control_);
@@ -82,25 +105,13 @@ void AmpView::toggle()
         close();
         return;
     }
-    if (follower_ == nullptr)
-        follower_ = new (s_followerMem) ampview::Follower(); // the SDRAM is up long before the first open
-    follower_->reset();
-    memset(s_rings, 0, sizeof(s_rings));
-    for (int i = 0; i < kRings; i++)
-        last_[i] = 0;
+    begin(); // normally running already (cMasterParams::start); a no-op then
     data_.kind = TraceViewData::AMP;
     data_.amp = follower_;
     strncpy(data_.title, "Track levels, dB", sizeof(data_.title) - 1);
     data_.title[sizeof(data_.title) - 1] = 0;
     strncpy(data_.hint, "Amp: Close", sizeof(data_.hint) - 1);
     data_.hint[sizeof(data_.hint) - 1] = 0;
-    // attach the rings: from here the audio side writes one peak per block
-    for (int t = 0; t < ampview::kTracks; t++)
-        for (int ch = 0; ch < 2 && ch < instrumentPlayer[t].peakTapChannels(); ch++)
-            instrumentPlayer[t].setPeakTap(ch, s_rings[t * 2 + ch]);
-    engine.setMasterPeakRing(0, s_rings[kRingMaster]);
-    engine.setMasterPeakRing(1, s_rings[kRingMaster + 1]);
-    lastMs_ = seqNowMs();
     display.setControlShow(control_);
     display.refreshControl(control_);
     display.synchronizeRefresh();
@@ -108,7 +119,7 @@ void AmpView::toggle()
 
 void AmpView::jog(int16_t delta)
 {
-    if (data_.kind != TraceViewData::AMP || follower_ == nullptr || delta == 0)
+    if (data_.kind != TraceViewData::AMP || !running_ || delta == 0)
         return;
     follower_->jog(delta);
     display.refreshControl(control_);
@@ -117,17 +128,15 @@ void AmpView::jog(int16_t delta)
 
 void AmpView::update(bool pageOk)
 {
-    if (data_.kind != TraceViewData::AMP)
+    if (!running_)
         return;
-    if (!pageOk)
-    {
+    const bool shown = data_.kind == TraceViewData::AMP;
+    if (shown && !pageOk)
         close();
-        return;
-    }
     const uint32_t now = seqNowMs();
     if ((uint32_t)(now - lastMs_) < kRefreshMs)
         return;
-    if (data_.busyMs != 0 && (uint32_t)(now - data_.busyMs) < 200u)
+    if (shown && data_.busyMs != 0 && (uint32_t)(now - data_.busyMs) < 200u)
         return; // v0.3.9: the control is between its two display stages, both must draw the same history (seqTraceStages.h)
     lastMs_ = now;
 
@@ -191,6 +200,8 @@ void AmpView::update(bool pageOk)
         last_[i] = (uint16_t)(last_[i] + (avail[i] < n ? avail[i] : n));
     last_[kRingMaster] = headM; // the clock ring is consumed completely (blocks beyond kMaxCatchUp are dropped)
 
+    if (data_.kind != TraceViewData::AMP)
+        return; // history only: nothing to draw while the view is closed
     ampview::Info& in = follower_->info;
     in.playing = sequencer.isPlay() ? 1 : 0;
     in.pattern = (uint8_t)mtProject.values.actualPattern;

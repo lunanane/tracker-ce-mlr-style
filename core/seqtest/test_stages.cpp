@@ -4,7 +4,7 @@
 // wrap-around) and drawn the way cSeqTraceControl does it on the FT81x: two display stages, each one SPI burst into the 4096 byte
 // command FIFO. Checked: every burst the co-processor gets is complete (an FT81x FIFO model), the two stages together are exactly the
 // single stage drawing (nothing lost, nothing twice, the data frozen between the stages), and what is drawn: the pitch lines of all
-// voices, the amp lines reaching the left axis once the 2 minute history exists (and only the real history before that).
+// voices, the amp lines reaching the left axis once the 30 s history exists (v0.4.1: and staying aligned there; only the real history before that).
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -239,6 +239,7 @@ static int minStripX(const DevCtx& d)
 
 static void test_amp_device_path()
 {
+    const int kXLow = ampview::kX0;
     // the Global Mixer 3/3 page under the view uses little of the frame: the budget clamps at its maximum (the worst case for the FIFO)
     const int scenarios[3][2] = { { 3, 5800 }, { 8, 5800 }, { 2, 4400 } };
     for (auto& sc : scenarios)
@@ -250,7 +251,8 @@ static void test_amp_device_path()
         double now = 1000.0; // ms of the main loop
         dev.audMs = now;
         bool fifoOk = true, same = true, inHistory = true, frozen = true;
-        int maxOld = 0, maxStage = 0, dropped = 0, x5 = 99999, x10 = 99999, x30 = 99999, xEnd = 99999;
+        int maxOld = 0, maxStage = 0, dropped = 0, x5 = 99999, x10 = 99999, x20 = 99999, x29 = 99999, xEnd = 99999;
+        int framesAfter = 0, misaligned = 0, notRight = 0, leftOfAxis = 0, framesRight = 0;
         const double t0 = now;
         while (now - t0 < 130000.0)
         {
@@ -289,21 +291,42 @@ static void test_amp_device_path()
             const double el = now - t0;
             if (el < 5200 && el > 4800) x5 = mx < x5 ? mx : x5;
             if (el < 10200 && el > 9800) x10 = mx < x10 ? mx : x10;
-            if (el < 30200 && el > 29800) x30 = mx < x30 ? mx : x30;
+            if (el < 20200 && el > 19800) x20 = mx < x20 ? mx : x20;
+            if (el < 29000 && el > 28800) x29 = mx < x29 ? mx : x29;
             if (el > 125000) xEnd = mx < xEnd ? mx : xEnd;
+            // v0.4.1: once the max age (30 s) has passed the lines start exactly on the y axis and stay there; nothing is ever left of it,
+            // and the newest value is always at the right edge
+            if (mx < kXLow) leftOfAxis++;
+            if (el > 31000)
+            {
+                framesAfter++;
+                if (mx != ampview::kX0) misaligned++;
+            }
+            if (el > 1000)
+            {
+                framesRight++;
+                int rx = 0;
+                for (auto& s : fr.all.strips)
+                    for (int x : s.x) rx = x > rx ? x : rx;
+                if (rx != ampview::kX1) notRight++;
+            }
         }
         printf("  amp device path, %d tracks, budget %d: single stage up to %d FIFO bytes (FIFO %d), now stages <= %d; left end of the "
-               "lines after 5 s x=%d, 10 s x=%d, 30 s x=%d, 125 s x=%d (axis %d)\n",
-               sc[0], sc[1], maxOld, (int)tracestage::kFifoBytes, maxStage, x5, x10, x30, xEnd, (int)ampview::kX0);
+               "lines after 5 s x=%d, 10 s x=%d, 20 s x=%d, 29 s x=%d, 125 s x=%d (axis %d); %d frames after 31 s, %d misaligned\n",
+               sc[0], sc[1], maxOld, (int)tracestage::kFifoBytes, maxStage, x5, x10, x20, x29, xEnd, (int)ampview::kX0, framesAfter, misaligned);
         if (sc[1] == 5800) CHECK(maxOld > tracestage::kFifoBytes - 4); // what broke on the device: the single stage overran the FIFO
         CHECK(fifoOk);           // every burst is executed completely
         CHECK(dropped == 0);     // nothing had to be dropped
         CHECK(same);             // stage 0 + stage 1 == the single stage drawing
         CHECK(frozen);           // no history pushed while a frame was half built
         CHECK(inHistory);        // no fake fill: the lines span the real history only
-        CHECK(x5 < (ampview::kX0 + ampview::kX1) / 2 + 20 && x5 > ampview::kX0 + 200); // ~4.4 s of ring: about the centre
-        CHECK(x10 < x5 && x30 < x10 && x30 < ampview::kX0 + 200);                         // the line moves on to the left
-        CHECK(xEnd == ampview::kX0);                                                      // 2 minutes: the left axis
+        // the left end of the lines is the time axis at the age of the history (linear: 16.16 ms per px for the first 8 s), within a column
+        CHECK(abs(x5 - (int)ampview::xOfAge(5200)) <= 14 && abs(x10 - (int)ampview::xOfAge(10200)) <= 14 && abs(x20 - (int)ampview::xOfAge(20200)) <= 14); // windows end at 5.2 / 10.2 / 20.2 s; a column is up to 12 px in the tail
+        CHECK(x10 < x5 && x20 < x10 && x29 < x20 && x29 <= ampview::kX0 + 12); // the line moves on to the left, nearly at the axis after 29 s
+        CHECK(xEnd == ampview::kX0);                                           // the left axis
+        CHECK(framesAfter > 100 && misaligned == 0);                           // after the max age (30 s): aligned at the y axis in EVERY frame
+        CHECK(leftOfAxis == 0);                                                // the cut: nothing is drawn left of the axis
+        CHECK(notRight == 0 && framesRight > 100);                             // the newest value sits at the right edge in every frame
     }
 }
 

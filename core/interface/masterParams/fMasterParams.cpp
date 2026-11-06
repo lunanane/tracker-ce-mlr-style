@@ -265,6 +265,7 @@ void cMasterParams::update()
 void cMasterParams::start(uint32_t options)
 {
     moduleRefresh = 1;
+    ampView.begin(); // v0.4.1: the amplitude history runs while the Master module is open (a no-op when it already does)
 
     //	displayType = display_t::masterValues;
 
