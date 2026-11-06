@@ -2217,3 +2217,115 @@ static void test_mlr_screen_budget_and_bounds()
         }
     }
 }
+
+// ---- MLR section mapping (owner device report: the screen scrolled to the next section, the pads still hit the first one).
+// Sweep 1: first gesture of a track, all quantise modes, both grids, 128 / 192 steps, any playhead position: the jump lands on the pad of the
+// section the screen (view().sec) showed at the press. Sweep 2: a track played before, SYNC ALL / RSYNC in between. Sweep 3: the press right
+// after SYNC ALL / RSYNC, before the next step boundary (the screen shows the stock position; the playhead used to be aligned only at the
+// boundary: stale section, the press was dropped). A STOPped track keeps its playhead frozen on purpose and is not swept.
+static void test_mlr_section_sweep()
+{
+    using namespace seqcut;
+    int bad = 0, total = 0;
+    for (uint8_t q = Q_OFF; q < Q_COUNT; q++)
+    for (uint8_t g = 0; g < GRID_COUNT; g++)
+    for (int steps : { 128, 192 })
+    for (int startPos = 0; startPos < steps; startPos += 7)
+    for (int k = 0; k < 16; k += 5)
+    {
+        const int spp = gridSteps(g), ss = sectionSteps(spp);
+        Cut c;
+        FakePattern f;
+        f.steps = steps;
+        f.map[0] = 1;
+        install(c, f);
+        c.setSectionMode(true);
+        c.apply(0, packQuant(q));
+        c.apply(0, packGrid(g));
+        int gl = 0;
+        for (int i = 0; i < startPos; i++) stepOnce(c, f, gl);
+        const View v = c.view(0);
+        if (k >= v.pads) continue;
+        c.apply(0, packArg(SUB_PAD, true, (uint8_t)k));
+        c.apply(0, packArg(SUB_PAD, false, (uint8_t)k));
+        int landed = -1;
+        for (int i = 0; i < 40 && landed < 0; i++)
+        {
+            StepPlan p = stepOnce(c, f, gl);
+            if (p.override && p.pos / ss == v.sec && p.pos % ss == k * spp) landed = p.pos;
+            if (p.override && p.pos / ss != v.sec) landed = -2;
+        }
+        total++;
+        if (landed < 0) { bad++; if (bad < 6) printf("sweep: q %d grid %d steps %d pos %d pad %d: shown sec %d, landed %d\n", q, g, steps, startPos, k, v.sec, landed); }
+    }
+    CHECK(total > 1000 && bad == 0);
+}
+
+static void test_mlr_section_sweep2()
+{
+    using namespace seqcut;
+    int bad = 0, total = 0;
+    for (int scen = 0; scen < 3; scen++)
+    for (uint8_t q = Q_STEP; q < Q_COUNT; q++)
+    for (uint8_t g = 0; g < GRID_COUNT; g++)
+    for (int startPos = 70; startPos < 190; startPos += 11)
+    for (int k = 0; k < 16; k += 5)
+    {
+        const int spp = gridSteps(g), ss = sectionSteps(spp);
+        Cut c; FakePattern f; f.steps = 192; f.map[0] = 1;
+        install(c, f); c.setSectionMode(true);
+        c.apply(0, packQuant(q)); c.apply(0, packGrid(g));
+        int gl = 0;
+        // first gesture early in the pattern: the track goes off the grid in section 0
+        c.apply(0, packArg(SUB_PAD, true, 2)); c.apply(0, packArg(SUB_PAD, false, 2));
+        for (int i = 0; i < 12; i++) stepOnce(c, f, gl);
+        if (scen == 1) c.apply(0, packSyncAll());
+        if (scen == 2) c.apply(0, packArg(SUB_RESYNC, true, 0));
+        for (int i = 12; i < startPos; i++) stepOnce(c, f, gl);
+        const View v = c.view(0);
+        if (k >= v.pads) continue;
+        c.apply(0, packArg(SUB_PAD, true, (uint8_t)k)); c.apply(0, packArg(SUB_PAD, false, (uint8_t)k));
+        int landed = -1;
+        for (int i = 0; i < 40 && landed < 0; i++)
+        {
+            StepPlan p = stepOnce(c, f, gl);
+            if (p.override && p.pos / ss == v.sec && p.pos % ss == k * spp) landed = p.pos;
+        }
+        total++;
+        if (landed < 0) { bad++; if (bad < 8) printf("sweep2: scen %d q %d grid %d pos %d pad %d: shown sec %d, landed %d now sec %d\n", scen, q, g, startPos, k, v.sec, landed, c.view(0).sec); }
+    }
+    CHECK(total > 500 && bad == 0);
+}
+
+static void test_mlr_section_sweep3()
+{
+    using namespace seqcut;
+    int bad = 0, total = 0;
+    for (int scen = 0; scen < 2; scen++)
+    for (uint8_t g = 0; g < GRID_COUNT; g++)
+    for (int startPos = 70; startPos < 190; startPos += 11)
+    for (int k = 0; k < 16; k += 5)
+    {
+        const int spp = gridSteps(g), ss = sectionSteps(spp);
+        Cut c; FakePattern f; f.steps = 192; f.map[0] = 1;
+        install(c, f); c.setSectionMode(true);
+        c.apply(0, packQuant(Q_STEP)); c.apply(0, packGrid(g));
+        int gl = 0;
+        c.apply(0, packArg(SUB_PAD, true, 2)); c.apply(0, packArg(SUB_PAD, false, 2));
+        for (int i = 0; i < startPos; i++) stepOnce(c, f, gl);
+        if (scen == 0) c.apply(0, packSyncAll());
+        else c.apply(0, packArg(SUB_RESYNC, true, 0));
+        const View v = c.view(0);   // right after: before the next boundary
+        if (k >= v.pads) continue;
+        c.apply(0, packArg(SUB_PAD, true, (uint8_t)k)); c.apply(0, packArg(SUB_PAD, false, (uint8_t)k));
+        int landed = -1;
+        for (int i = 0; i < 40 && landed < 0; i++)
+        {
+            StepPlan p = stepOnce(c, f, gl);
+            if (p.override && p.pos / ss == v.sec && p.pos % ss == k * spp) landed = p.pos;
+        }
+        total++;
+        if (landed < 0) { bad++; if (bad < 8) printf("sweep3: scen %d grid %d pos %d pad %d: shown sec %d, landed %d\n", scen, g, startPos, k, v.sec, landed); }
+    }
+    CHECK(total > 100 && bad == 0);
+}
