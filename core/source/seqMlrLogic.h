@@ -7,6 +7,7 @@
 //   Steps behind the end of the pattern are dark and inactive.
 //   cols 9-12: first row  STOP  REV   RATE  RSYNC      second row  GRID  SECT  REC  MUTE
 #pragma once
+#include "seqBeatRepeatLogic.h"
 #include "seqCutLogic.h"
 #include <stdio.h>
 #include <string.h>
@@ -225,6 +226,8 @@ struct MlrModel
     uint8_t legendPad[kSlots]; // legend only: the pad each playhead is on (0xFF none), so the legend follows the playhead
     uint8_t pad2_[2];
     SlotInfo slot[kSlots];
+    uint8_t brMode, brPad_[3]; // plan 021: the pads / screen are the beat repeat layer (BeatRpt screen button): br is drawn instead of the lanes
+    seqbr::BrModel br;
 };
 struct MlrHead
 {
@@ -237,6 +240,8 @@ struct MlrHeadModel
 {
     MlrHead h[kSlots];
     uint8_t bar, beat, recHeld, legend;
+    uint8_t brMode, brPad_[3];
+    seqbr::BrHead br;
 };
 
 // x offset (0..kMlrLaneW-1) of position `pos` + frac48/48 of a step inside the section `sec`, -1 when the position is elsewhere.

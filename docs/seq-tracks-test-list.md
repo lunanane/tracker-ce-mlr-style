@@ -845,6 +845,27 @@ Bars guess, the sidecar `seqwarp.bin` (old / short / newer / corrupt files). **N
 | Copy the project folder to another name (Save As) | The Effects page of the copy | Warp settings are in the copy. |
 | Edit the sample in the Sample Editor (trim, effect), go back and play | The sound | Still works; the Bars guess follows the new length (Auto). |
 
+## 11m. v0.4: Beat repeat (plan 021, Original Tracker only)
+Host-checked (`make test`, `test_beatrepeat.cpp` and `test_br.inc`): exact bypass; the slice start lands on the frame of the sequencer clock tick (to the sample, at 97 / 120 / 212 BPM); momentary press / release, jam between pads, latch, OFF, panic; MIX / INSERT / GATE output; decay -6 dB and pitch -3 semitones per repeat (floor -24); no click at slice boundaries, mode changes, pad jams, release; a tempo drop holds the (faded, silent) last frame, a tempo rise cuts with a fade; seeded CHANCE / INTERVAL / VARIATION replicated from the generator; the ring never overruns, the grid steps down at slow tempos; the pad map, LEDs, legend words, the sidecar `seqbrpt.bin` (short / long / out of range / newer / corrupt) and the display budgets (every stage <= 3840 FIFO bytes). **Nothing below is device-tested yet.** Write the CPU number of the BeatRpt screen down (estimate: capture about 1.5 %, repeating 3 .. 5 %, idle 0).
+
+| Do | Look at / listen to | Expected |
+|---|---|---|
+| Session view, CUT / MLR page; screen button 4 | The label, the pads, the screen | The label reads **BeatRpt**; pressed: **[BeatRpt]**, the pads show 4 faders (row 1 grid names 1/4 .. 1/32T), the screen shows BEAT REPEAT with the four bands. Press again: back to the MLR pads and lanes, MLR never stopped playing. |
+| Play a drum loop (MLR or a pattern), BeatRpt on, **hold pad 3 of row 1 (1/16)** | The sound, the pad | At the next 1/16 boundary the slice is captured (the music goes on), then it repeats on every 1/16, on top of the running music (MIX). Release: the music alone, no click. |
+| Hold pad 1 (1/4), pad 4 (1/32), pad 5 (1/4T) one after the other while holding | The sound | Jamming: each new pad starts its own repeat at its next boundary; letting go of the newest falls back to the pad still held; letting go of the last one ends it. |
+| Mode pads (column 10): REPL, GATE, MIX | The sound | **REPL**: the music is muted while the repeats sound. **GATE**: the music is muted from the press on (also while the slice is captured), only repeats pass. **MIX**: repeats added on top. No clicks when switching while repeating. |
+| Row 3 DECAY to 100 (pad 8), hold a pad | The sound | Each repeat is 6 dB quieter than the last (about 7 repeats to silence). The block row on the screen shows the curve. |
+| Row 4 PITCH DECAY to 100, hold a pad | The sound | Each repeat is 3 semitones lower (tape-like), the rhythm stays on the grid; stops at 2 octaves down. |
+| Row 2 GATE, page AUTO: CHANCE 100, INTERVAL 1 bar, GATE 4/16, AUTO GRID 1/16, nothing held | The sound | At every bar line a short stutter. CHANCE lower: some bars skip. VARIATION up: the grid changes at random (the same sequence every time after a power on). |
+| LATCH pad (column 11, row 1), hold a pad, release | The sound | The repeat goes on after the release. The same grid pad again ends it; another grid pad re-grids it; OFF (column 12) ends it; pressing LATCH again also ends it. |
+| A repeat running (latched or held), press Stop | The sound, the LEDs | The repeat ends at once, the latch is off. |
+| Tempo 70 BPM, hold pad 1 (1/4) | The screen | A note "grid shortened for this tempo" (1/4T used); at 30 BPM 1/8T. No dropouts, no click. |
+| Change the tempo while a repeat runs (tempo knob / FX) | The sound | No clicks; a big drop leaves a short silence at the end of each slice, a rise cuts the slices. |
+| Press **Help** with BeatRpt on | The screen | The pad legend of the beat repeat layer (12 x 4 cells with their words, the lit ones highlighted). |
+| Set DECAY, CHANCE, mode REPLACE, Save the project, power off, load it | The BeatRpt screen | The values and the mode come back; latch and a running repeat do not. No `seqbrpt.bin` appears for a project that never changed a value. |
+| Export (Song / Pattern) while a repeat is latched | The file | The repeat is part of the master (the export runs the same stage); end it first for a clean export. |
+| Play a dense project, repeat running, look at the BeatRpt screen CPU and Config avg / max | The numbers | Write them down: stage CPU on the screen (about 0 while idle), no new dropouts. |
+
 ## 11f. CPU savings (plan 009 P, v0.2.7): compare with the previous build (v0.2.6) on the same project
 Use one project with 8 sample voices (some with the filter on), the delay and the stock reverb used, the limiter on, and play it. Open Master > Reverb (it resets the average when it opens) and write down "Rev / All CPU" after 30 s of the busiest part; also read Config > audio usage (min / max / avg / last) and "free heap" / "stack ... free ..." (bottom right of the Config page). Do it on v0.2.6 and on this build; the second number of the Master > Reverb item and the Config numbers are the comparison.
 | Press | Expected |

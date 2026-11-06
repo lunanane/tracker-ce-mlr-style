@@ -15,6 +15,7 @@
 #include "seqClips.h"
 #include "seqFx.h"
 #include "seqWarp.h"
+#include "seqBeatRepeat.h"
 #include "seqPlinky.h"
 #include "seqHooks.h"
 #include <math.h>
@@ -654,6 +655,7 @@ void seqTracksUpdate()
     seqClipsUpdate();
     seqFxUpdate();
     seqWarpUpdate();
+    seqBrUpdate();
 #ifdef FEATURE_PLINKY
     seqPlinkyUpdate();
 #endif

@@ -11,6 +11,7 @@
 #include "seqMlr.h"
 #include "mtSequencer.h"
 #include "seqSession/seqSession.h"
+#include "seqBeatRepeat.h"
 #include "seqTraceStages.h"
 #include "seqTracks.h"
 #include "FT812.h" // last: its CMD_* macros clash with enumerators of the session headers
@@ -252,6 +253,11 @@ bool laneViewRefresh(bool force)
         m.recHeld = cutRecHeld() ? 1 : 0;
         m.legend = cutLegendShown() ? 1 : 0;
         m.pickSlot = (uint8_t)cutPickSlot();
+        if (cutBrActive())
+        {
+            m.brMode = 1; // plan 021: the beat repeat screen replaces the lanes (the MLR state underneath keeps running)
+            seqBrFillModel(&m.br);
+        }
         const uint16_t has = cutPickSlot() >= 0 ? seqCutTracksWithNotes() : 0;
         for (uint8_t k = 0; k < kSlots; k++)
         {
@@ -317,6 +323,11 @@ bool laneViewRefresh(bool force)
     barBeat(sequencer.seqCutStockPos(cutSlotTrack(0)), h.bar, h.beat);
     h.recHeld = s_lanes.recHeld;
     h.legend = s_lanes.legend;
+    if (cutBrActive())
+    {
+        h.brMode = 1;
+        seqBrFillHead(&h.br);
+    }
     const bool moved = !s_have || memcmp(&h, &s_heads, sizeof(h)) != 0;
     if (force || redrawDue(moved, now, s_lastHead))
     {

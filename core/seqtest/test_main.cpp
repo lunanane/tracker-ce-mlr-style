@@ -1376,6 +1376,7 @@ static void test_save_uses_critical_sections()
 int sessionTests(int& checks);
 #include "seqTraceStages.h"
 #include "test_cut.inc"
+#include "test_br.inc"
 #include "test_rec.inc"
 #include "test_plinkyseq.inc"
 
@@ -1459,6 +1460,7 @@ int main()
     test_cue_latency_model();
     test_mlr_slots_layer();
     test_mlr_screen_budget_and_bounds();
+    test_br_all();
     test_r4_handback_retrigger_and_stock_phase();
     test_rec_toggle_logic();
     test_keys_driver_model();

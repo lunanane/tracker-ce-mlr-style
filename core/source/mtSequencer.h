@@ -639,6 +639,9 @@ class Sequencer
     uint8_t isRenderMode(void);
 
     float getCurrentTempo();
+    // plan 021 (beat repeat): the transport position in 1/192 beat ticks (= uSteps: 48 per step) of the end of the last tick() call, with the
+    // fraction of the next tick; false = the transport does not play. Audio context.
+    bool getBeatClock(int32_t* tick, float* frac);
     float getExternalTempo() { return externalTempo; }
     uint32_t getSeqTimer();
 

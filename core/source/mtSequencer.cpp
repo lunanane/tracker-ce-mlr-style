@@ -2301,6 +2301,27 @@ uint32_t Sequencer::getSeqTimer()
     return timerTicks;
 }
 
+AUDIO_CORE_RAM bool Sequencer::getBeatClock(int32_t* tick, float* frac)
+{
+    if (!player.isPlay)
+        return false;
+    const int32_t u = player.uStep > 0 ? (int32_t)player.uStep - 1 : 0; // uStep counts 1 .. 48
+    *tick = (int32_t)player.globalPos * 48 + u;
+    float f = 0.0f;
+    if (isSetInternalClock() || player.selectionMode)
+    {
+        const double period = static_cast<double>(getTimerPeriod_us());
+        if (period > 0.0)
+            f = (float)(internalTickAccumulatorUs / period);
+        if (f < 0.0f)
+            f = 0.0f;
+        if (f > 0.999f)
+            f = 0.999f;
+    }
+    *frac = f;
+    return true;
+}
+
 void Sequencer::detachFromTimer(void) // make time abstract
 {
     renderMode = 1;

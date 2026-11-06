@@ -5,6 +5,7 @@
 // Colours are the tracker key colours (seqPalette.h): slot A = Note teal, slot B = FX1 purple, loop = Instrument yellow,
 // ghost = FX2 blue, on a plain dark background.
 #pragma once
+#include "brDraw.h"
 #include "laneDraw.h"
 #include "seqMlrLogic.h"
 #include "seqPalette.h"
@@ -228,6 +229,14 @@ template <class C> void drawMlr(C& c, const MlrModel& m)
         c.rect(0, kHeaderY0, 800, kHeaderY1);
     }
     char buf[64];
+    if (m.brMode)
+    {
+        if (m.legend)
+            seqbr::drawBrLegend(c, m.br);
+        else
+            seqbr::drawBeatRepeat(c, m.br);
+        return;
+    }
     c.color(m.recHeld ? 0xFFFFFF : seqpal::kTitle);
     c.text(12, mid, 4, TX_CENTERY, m.legend ? "MLR  pad legend" : "MLR");
     if (m.recHeld)
@@ -255,6 +264,16 @@ template <class C> void drawMlr(C& c, const MlrModel& m)
 // The moving part: playhead pad, grid ghost, playhead line, bar.beat. Redrawn every kRedrawGapMs while something moves.
 template <class C> void drawMlrHeads(C& c, const MlrHeadModel& m)
 {
+    if (m.brMode)
+    {
+        if (!m.legend)
+            seqbr::drawBrHeads(c, m.br);
+        char bb[24];
+        snprintf(bb, sizeof(bb), "bar %d.%d", m.bar, m.beat);
+        c.color(seqpal::kTitle);
+        c.text(788, (kHeaderY0 + kHeaderY1) / 2, 4, TX_RIGHT | TX_CENTERY, bb);
+        return;
+    }
     for (int k = 0; k < kSlots && !m.legend; k++)
     {
         const MlrHead& h = m.h[k];
