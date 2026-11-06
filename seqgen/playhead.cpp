@@ -8,7 +8,7 @@ template <typename T> static inline T clampv(T v, T lo, T hi) { return v < lo ? 
 
 void Playhead::reset() {
   length_ = 16; recLen_ = 0; recIdx_ = 0; recCount_ = 0;
-  columns_ = 8; quant_ = 1; rate_ = RATE_NORMAL; rev_ = false;
+  columns_ = 8; spc_ = 0; holdSec_ = -1; heldBase_ = pendBase_ = loBase_ = 0; quant_ = 1; rate_ = RATE_NORMAL; rev_ = false;
   held_ = 0; pos_ = 15; pendJump_ = -1; pendLoop_ = false; pendStart_ = false; pendA_ = pendB_ = 0;
   loopActive_ = false; loA_ = loB_ = 0; ovr_ = false; holdLeft_ = 0; forceJump_ = false;
   recording_ = false; recActive_ = false; gstep_ = 0;
@@ -23,8 +23,24 @@ void Playhead::setLength(int steps) {
   if (pendJump_ >= length_) pendJump_ = (int16_t)(length_ - 1);
 }
 void Playhead::setColumns(int n) {
-  columns_ = (uint8_t)(n == 12 ? 12 : 8);
+  columns_ = (uint8_t)(n == 12 ? 12 : (n == 16 ? 16 : 8)); spc_ = 0; holdSec_ = -1;
   held_ = 0; loopActive_ = false; pendLoop_ = false; pendStart_ = false; pendJump_ = -1; ovr_ = false;
+}
+void Playhead::setGrid(int steps) {
+  if (steps < 1) { setColumns(columns_); return; }
+  columns_ = 16; spc_ = (uint8_t)clampv(steps, 1, 16);
+  held_ = 0; loopActive_ = false; pendLoop_ = false; pendStart_ = false; pendJump_ = -1; ovr_ = false;
+}
+void Playhead::setHoldSection(int sec) { holdSec_ = (int8_t)clampv(sec, -1, 127); }
+int Playhead::shownBase() const {
+  if (!spc_) return 0;
+  const int ss = spc_ * 16;
+  return holdSec_ >= 0 ? holdSec_ * ss : (pos_ < 0 ? 0 : (pos_ / ss) * ss);
+}
+int Playhead::activePads() const {
+  if (!spc_) return columns_;
+  const int left = (int)length_ - shownBase();
+  return left <= 0 ? 0 : (left >= 16 * spc_ ? 16 : (left + spc_ - 1) / spc_);
 }
 void Playhead::setQuantise(int steps) { quant_ = (uint8_t)clampv(steps, 1, 64); }
 void Playhead::setRate(Rate r) { rate_ = (uint8_t)(r > RATE_DOUBLE ? RATE_NORMAL : r); holdLeft_ = 0; }
@@ -41,6 +57,12 @@ void Playhead::heldRange(int& a, int& b) const {
 
 // Inclusive position range of columns a..b (the last column runs to the end of its share).
 void Playhead::rangeOf(int a, int b, int& lo, int& hi) const {
+  if (spc_) {  // grid: relative to the section the loop was set in
+    lo = loBase_ + a * spc_; hi = loBase_ + (b + 1) * spc_ - 1;
+    if (hi > (int)length_ - 1) hi = (int)length_ - 1;
+    if (lo > hi) lo = hi;
+    return;
+  }
   lo = columnPosition(a); hi = columnPosition(b + 1) - 1;
   if (hi < lo) hi = lo;  // fewer steps than columns
 }
@@ -50,17 +72,22 @@ int Playhead::succ(int p, int lo, int hi) const {
   p -= 1; return (p < lo || p > hi) ? hi : p;
 }
 
-void Playhead::press(int col) {
-  if (col < 0 || col >= columns_ || ((held_ >> col) & 1)) return;
+bool Playhead::press(int col) {
+  if (col < 0 || col >= columns_) return false;
+  if ((held_ >> col) & 1) return true;
+  const int base = (spc_ && held_ == 0) ? shownBase() : (spc_ ? heldBase_ : 0);
+  if (spc_ && base + col * spc_ >= (int)length_) return false;  // an inactive pad: behind the end of the pattern
+  if (held_ == 0) heldBase_ = (uint16_t)base;
   held_ |= (uint16_t)(1u << col);
   if (heldCount() == 1) {
     // a single pad: jump there, and the jump ends a loop that is still latched
-    pendJump_ = (int16_t)columnPosition(col); pendLoop_ = false; pendStart_ = false; pendClr_ = true;
+    pendJump_ = (int16_t)(spc_ ? base + col * spc_ : columnPosition(col)); pendLoop_ = false; pendStart_ = false; pendClr_ = true;
   } else {
     int a, b; heldRange(a, b);
-    pendLoop_ = true; pendA_ = (uint8_t)a; pendB_ = (uint8_t)b; pendClr_ = false;
+    pendLoop_ = true; pendA_ = (uint8_t)a; pendB_ = (uint8_t)b; pendClr_ = false; pendBase_ = heldBase_;
     if (!loopActive_ || heldCount() == 2) pendStart_ = true;  // loop starts at its first (or, reversed, last) step
   }
+  return true;
 }
 
 void Playhead::release(int col) {
@@ -68,7 +95,7 @@ void Playhead::release(int col) {
   held_ &= (uint16_t)~(1u << col);
   if (heldCount() >= 2) {
     int a, b; heldRange(a, b);
-    pendLoop_ = true; pendA_ = (uint8_t)a; pendB_ = (uint8_t)b;
+    pendLoop_ = true; pendA_ = (uint8_t)a; pendB_ = (uint8_t)b; pendBase_ = heldBase_;
   }
   // fewer than two pads left: the loop stays (latched, MLR style) and so does a loop that waits for its grid; a single pad in the
   // row jumps and ends it, RESYNC / SYNC ALL end it too
@@ -126,7 +153,7 @@ Playhead::StepOut Playhead::step() {
   const uint32_t gq = gridSet_ ? gridG_ : g;  // grid position: the pattern step when the owner supplies it, else the step counter
   if (gq % quant_ == 0) {
     if (pendLoop_) {
-      loopActive_ = true; loA_ = pendA_; loB_ = pendB_;
+      loopActive_ = true; loA_ = pendA_; loB_ = pendB_; loBase_ = pendBase_;
       int lo, hi; rangeOf(loA_, loB_, lo, hi);
       if (pendStart_ || pos_ < lo || pos_ > hi) { applied = true; target = rev_ ? hi : lo; }
     }
@@ -197,7 +224,7 @@ bool Playhead::applyNow(StepOut& o) {
   const int len = length_;
   int target = -1;
   if (pendLoop_) {
-    loopActive_ = true; loA_ = pendA_; loB_ = pendB_;
+    loopActive_ = true; loA_ = pendA_; loB_ = pendB_; loBase_ = pendBase_;
     int lo, hi; rangeOf(loA_, loB_, lo, hi);
     if (pendStart_ || pos_ < lo || pos_ > hi) target = rev_ ? hi : lo;
   }
@@ -242,7 +269,7 @@ bool Playhead::deserialize(const uint8_t* buf, size_t len) {
   if (!buf || len < (size_t)kSerialSize || buf[0] != kSerialVersion) return false;
   const int l = buf[1] | (buf[2] << 8), rl = buf[6] | (buf[7] << 8);
   const int rate = buf[5] & 0x7F;
-  if (l < 1 || l > kMaxLength || (buf[3] != 8 && buf[3] != 12) || buf[4] < 1 || buf[4] > 64 || rate > RATE_DOUBLE ||
+  if (l < 1 || l > kMaxLength || (buf[3] != 8 && buf[3] != 12 && buf[3] != 16) || buf[4] < 1 || buf[4] > 64 || rate > RATE_DOUBLE ||
       rl > kMaxRec) return false;
   reset();
   length_ = (uint16_t)l; pos_ = (int16_t)(l - 1); columns_ = buf[3]; quant_ = buf[4]; rate_ = (uint8_t)rate;

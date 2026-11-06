@@ -438,3 +438,77 @@ TEST(playhead_grid_position_decides_the_quantise_boundary) {
   p.setGridPos(6); o = stp(p); CHECK_EQ(o.pos, 1);
   p.setGridPos(0); o = stp(p); CHECK_EQ(o.pos, 4); CHECK(o.jumped);       // the pattern start is the grid
 }
+
+// ---- plan 016 A: grid mode (16 pads of `stepsPerPad` steps address one section, the one the playhead is in) ----
+TEST(playhead_grid_pads_address_the_current_section) {
+  for (int spp = 2; spp <= 4; spp += 2) {
+    const int ss = 16 * spp;
+    Playhead p; p.setLength(4 * ss); p.setGrid(spp);
+    CHECK_EQ(p.columns(), 16); CHECK_EQ(p.gridSteps(), spp); CHECK_EQ(p.activePads(), 16);
+    for (int sec = 0; sec < 4; ++sec) {
+      Playhead q; q.setLength(4 * ss); q.setGrid(spp); q.restart((uint32_t)(sec * ss + 3));
+      CHECK_EQ(q.shownBase(), sec * ss);
+      for (int c = 0; c < 16; c += 5) {
+        Playhead r = q; CHECK(r.press(c));
+        Playhead::StepOut o = r.step(); CHECK_EQ(o.pos, sec * ss + c * spp);
+        CHECK(o.pos == sec * ss + c * spp);
+      }
+    }
+  }
+}
+
+TEST(playhead_grid_inactive_pads_behind_the_pattern_end) {
+  Playhead p; p.setLength(70); p.setGrid(4);   // section 0: steps 0..63, section 1: 64..69 = pads 0, 1 (the 2nd partial)
+  p.restart(66);
+  CHECK_EQ(p.shownBase(), 64); CHECK_EQ(p.activePads(), 2);
+  CHECK(p.press(1)); CHECK(!p.press(2)); CHECK(!p.press(15));
+  CHECK_EQ(p.heldCount(), 1);
+  Playhead::StepOut o = p.step(); CHECK_EQ(o.pos, 68);
+  p.release(1);
+  Playhead q; q.setLength(64); q.setGrid(4); q.restart(5);   // a pattern of exactly one section: all 16 pads
+  CHECK_EQ(q.activePads(), 16);
+  Playhead s; s.setLength(5); s.setGrid(2); CHECK_EQ(s.activePads(), 3);  // 5 steps, 2 per pad: 3 pads
+}
+
+TEST(playhead_grid_loop_across_pads_stays_in_its_section_and_clips_to_the_end) {
+  Playhead p; p.setLength(70); p.setGrid(4); p.setQuantise(1); p.restart(64); p.step();
+  p.press(0); p.press(1);   // pads 0..1 of section 1 = steps 64..71 -> clipped to 64..69
+  Playhead::StepOut o = p.step();
+  CHECK(p.looping()); CHECK_EQ(p.loopBase(), 64); CHECK_EQ(o.pos, 64);
+  p.release(0); p.release(1);
+  const int exp[7] = {65, 66, 67, 68, 69, 64, 65};
+  for (int i = 0; i < 7; ++i) CHECK_EQ(p.step().pos, exp[i]);
+}
+
+TEST(playhead_grid_section_advances_with_the_playhead_unless_held) {
+  Playhead p; p.setLength(128); p.setGrid(2); p.setQuantise(1);   // sections of 32 steps
+  p.restart(0);
+  for (int i = 0; i < 32; ++i) p.step();   // steps 0..31 played
+  CHECK_EQ(p.shownBase(), 0);
+  p.step();                         // step 32: section 1
+  CHECK_EQ(p.shownBase(), 32);
+  p.setHoldSection(1);
+  for (int i = 0; i < 40; ++i) p.step();   // the playhead is in section 2 now
+  CHECK_EQ(p.shownBase(), 32);
+  CHECK(p.press(3)); Playhead::StepOut o = p.step(); CHECK_EQ(o.pos, 32 + 6); CHECK(o.jumped);   // the held section is addressed
+  p.release(3); p.setHoldSection(-1);
+  CHECK_EQ(p.shownBase(), 32);
+}
+
+TEST(playhead_grid_loop_set_in_a_section_survives_the_playhead_leaving_via_a_jump) {
+  Playhead p; p.setLength(128); p.setGrid(4); p.setQuantise(1); p.restart(0); p.step();
+  p.press(2); p.press(3); p.step(); p.release(2); p.release(3);   // loop steps 8..15 of section 0
+  for (int i = 0; i < 20; ++i) { int pos = p.step().pos; CHECK(pos >= 8 && pos <= 15); }
+  CHECK_EQ(p.shownBase(), 0);       // a loop keeps the section from advancing
+  p.setHoldSection(1);
+  p.press(0); Playhead::StepOut o = p.step(); CHECK_EQ(o.pos, 64); CHECK(!p.looping());   // a single pad ends the loop
+}
+
+TEST(playhead_grid_back_to_even_split_and_serialize_16) {
+  Playhead p; p.setLength(100); p.setGrid(4); p.setGrid(0);
+  CHECK_EQ(p.gridSteps(), 0); CHECK_EQ(p.columns(), 16);
+  CHECK_EQ(p.columnPosition(5), 5 * 100 / 16);
+  p.setColumns(16); CHECK_EQ(p.columns(), 16);
+  uint8_t buf[Playhead::kSerialSize]; CHECK_EQ(p.serialize(buf, sizeof(buf)), (size_t)Playhead::kSerialSize);
+  Playhead q; CHECK(q.deserialize(buf, sizeof(buf))); CHECK_EQ(q.columns(), 16);
+}

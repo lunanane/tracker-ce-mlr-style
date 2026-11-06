@@ -1,8 +1,10 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 // CUT (MLR) page as a Session layer: adapts the free functions of cutLayer.h to seqsession::SessionLayer
-// and owns the lane screen (laneView.*, plan 005 R4). Group of 4 tracks (screen buttons 1-4 = tracks 1-4 / 5-8 / 9-12 / 13-16,
-// Left / Right page the groups), all 12 pad columns belong to the layer. Screen button 5 = jump quantise (Q off / step / beat / bar), 6 = SYNC ALL (the layer's own button
-// kButtonLayer); 7 shows [REC] while a take is armed (otherwise an empty gap) and 8 switches back to CLIPS (the host's, this layer returns false for it). The layer draws its own screen: the host hides its title and info lines.
+// and owns the lane screen (laneView.*, plan 005 R4, plan 016 A). Two SLOTS (A = pad rows 1-2, B = rows 3-4) each hold one track.
+// Screen buttons: 1 / 2 = Assign slot 1 / 2 (the slot's rows become a track picker), 3 = Help (pad legend on the screen), 5 = jump
+// quantise (Q off / step / beat / bar), 6 = SYNC ALL (the layer's own button kButtonLayer); 7 shows [REC] while a take is armed and
+// 8 switches back to CLIPS (the host's, this layer returns false for it). The layer draws its own screen: the host hides its title and
+// info lines. The host's group buttons are not used here (the layer takes the buttons 1-4 first), Left / Right do nothing.
 #pragma once
 #include "cutLayer.h"
 #include "laneView.h"
@@ -22,13 +24,14 @@ class CutSessionLayer : public SessionLayer
     uint8_t groupSize() const override { return 4; }
     void enter(uint8_t firstTrack) override
     {
-        setGroup(firstTrack);
+        (void)firstTrack;
+        cutInit();
         laneViewShow(true); // the controls exist since the module start (createControls); only shown here (plan 007 B1)
     }
     void setGroup(uint8_t firstTrack) override
     {
-        first_ = (uint8_t)(firstTrack & 0x0C); // 0, 4, 8, 12 (an 8-track group start rounds down)
-        cutSetGroup(first_);
+        (void)firstTrack; // the slots hold the tracks, not a group of the host
+        cutInit();
     }
     // Hidden (CLIPS) or Session left: only the pads in the hand are let go and an open take is closed (plan 005 M5). Jams, loops,
     // recorded playhead loops, reverse, rate and STOP of the tracks keep running; only SYNC ALL or transport Stop end them.
@@ -46,19 +49,33 @@ class CutSessionLayer : public SessionLayer
     }
     void info(char lines[4][48]) override
     {
-        snprintf(lines[0], 48, "Rows = tracks %d-%d", first_ + 1, first_ + 4);
-        snprintf(lines[1], 48, "Pads 1-8: jump, two = latched loop");
-        snprintf(lines[2], 48, "9 STOP  10 REV  11 RATE  12 SYNC");
-        snprintf(lines[3], 48, "Rec on, jam, Rec off = record a loop");
+        snprintf(lines[0], 48, "A: track %d   B: track %d", cutSlotTrack(0) + 1, cutSlotTrack(1) + 1);
+        snprintf(lines[1], 48, "Pads 1-16: jump, two = latched loop");
+        snprintf(lines[2], 48, "STOP REV RATE RSYNC / GRID SECT REC MUTE");
+        snprintf(lines[3], 48, "Help = pad legend");
     }
 
     // ---- own screen ----
     void createControls() override { laneViewCreate(); } // hidden until enter()
     void destroyControls() override { laneViewForget(); } // the framework does not call this today (the display frees the controls); laneViewCreate resets the handles anyway
-    bool refresh(bool force) override { return laneViewRefresh(force, first_); }
+    bool refresh(bool force) override { return laneViewRefresh(force); }
     bool drawsOwnScreen() const override { return true; }
     bool button(uint8_t i, bool down) override
     {
+        if (i == seqcut::kButtonAssign1 || i == seqcut::kButtonAssign2)
+        {
+            if (down)
+                cutPickToggle((uint8_t)(i - seqcut::kButtonAssign1)); // the slot's rows become the track picker; again = cancel
+            return true;
+        }
+        if (i == seqcut::kButtonHelp)
+        {
+            if (down)
+                cutLegendToggle();
+            return true;
+        }
+        if (i == 3)
+            return true; // empty
         if (i == seqcut::kScreenButtonQuant)
         {
             if (down)
@@ -73,6 +90,22 @@ class CutSessionLayer : public SessionLayer
     }
     bool buttonLabel(uint8_t i, char out[12]) override
     {
+        if (i == seqcut::kButtonAssign1 || i == seqcut::kButtonAssign2)
+        {
+            const bool open = cutPickSlot() == (int8_t)(i - seqcut::kButtonAssign1);
+            snprintf(out, 12, open ? "[Assign %d]" : "Assign %d", i - seqcut::kButtonAssign1 + 1);
+            return true;
+        }
+        if (i == seqcut::kButtonHelp)
+        {
+            snprintf(out, 12, "%s", cutLegendShown() ? "[Help]" : "Help");
+            return true;
+        }
+        if (i == 3)
+        {
+            out[0] = 0;
+            return true;
+        }
         if (i == seqcut::kScreenButtonQuant)
         {
             snprintf(out, 12, "Q %s", seqcut::quantName(cutQuantMode())); // the value is the label
@@ -91,23 +124,8 @@ class CutSessionLayer : public SessionLayer
     bool arrow(ArrowDir dir, bool shift) override
     {
         (void)shift;
-        if (dir == ARROW_LEFT)
-        {
-            if (first_ >= 4)
-                laneViewRequestGroup((uint8_t)(first_ - 4));
-            return true;
-        }
-        if (dir == ARROW_RIGHT)
-        {
-            if (first_ + 4 < seqcut::kCutTracks)
-                laneViewRequestGroup((uint8_t)(first_ + 4));
-            return true;
-        }
-        return false;
+        return dir == ARROW_LEFT || dir == ARROW_RIGHT; // no groups of tracks here: the slots pick their tracks
     }
-
-  private:
-    uint8_t first_ = 0;
 };
 
 } // namespace seqsession

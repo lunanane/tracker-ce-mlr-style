@@ -18,7 +18,15 @@
 
 void cutPad(uint8_t col, uint8_t row, bool down, bool shift = false); // shift: Shift held on the press (RESYNC pad = SYNC ALL)
 void cutLeds(uint8_t* out48);        // 48 levels 0..15, index = row * 12 + col
-void cutSetGroup(uint8_t firstTrack); // 0, 4, 8 or 12 (anything else rounds down to a multiple of 4)
+void cutInit();                      // constructs the Cut through seqCutInit() (the first use of the layer does it too)
+bool cutSlotsUsed();                 // the MLR layer was used at least once (the cue cache works only then)
+bool cutTrackRecArmed(uint8_t track); // a take of the track is armed (Rec key or the slot's REC pad)
+uint8_t cutSlotTrack(uint8_t slot);  // the track slot 0 (A) / 1 (B) holds; defaults 0 and 1
+void cutAssignSlot(uint8_t slot, uint8_t track); // a track belongs to one slot: taking the other slot's track swaps them
+void cutPickToggle(uint8_t slot);    // "Assign slot n" screen button: the slot's two pad rows become the track picker / back
+int8_t cutPickSlot();                // slot being picked for, -1 = none
+void cutLegendToggle();              // "Help" screen button: the pad legend on the lane screen
+bool cutLegendShown();
 void cutRec(bool down);              // set the Rec (take armed) state directly: true = armed, false = close all takes
 void cutRecToggle();                 // the Rec key (a press): armed <-> closed, hold events and the release are not passed here
 uint8_t cutQuantMode();              // jump quantise: seqcut::Quant (off / step / beat / bar), default beat

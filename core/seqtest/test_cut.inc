@@ -15,10 +15,49 @@ static int g_laneCreate = 0, g_laneForget = 0;
 void laneViewCreate() { g_laneCreate++; }
 void laneViewForget() { g_laneForget++; }
 void laneViewShow(bool show) { if (show) g_laneShow++; else g_laneHide++; }
-bool laneViewRefresh(bool, uint8_t) { return false; }
+bool laneViewRefresh(bool) { return false; }
 bool cutShiftHeld() { return g_shiftHeld; }
-void laneViewRequestGroup(uint8_t first) { g_groupRequests++; g_lastGroupRequest = first; }
 bool laneViewAnyOffGrid() { return seqEngine.cut() != 0 && seqEngine.cut()->activeMask() != 0; }
+
+
+// ---- legacy-row shim (plan 016 A) -------------------------------------------------------------------------------------------------
+// The tests of plans 002-008 were written for "pad row r of the group = track g + r, 8 pads share the 16 steps of the pattern". With the
+// MLR slots a test row r is the track g + r: it is put into slot r & 1 and its grid is set to 1/8 (2 steps per pad), where 16 pattern
+// steps give exactly the old 8 positions - so those tests keep checking the same behaviour through the new layout.
+static int g_tg = 0;
+static void tSetGroup(int first)
+{
+    cutInit();
+    g_tg = first & ~3;
+}
+static uint8_t tPrep(uint8_t row, uint8_t col)
+{
+    const uint8_t track = (uint8_t)(g_tg + row);
+    cutInit();
+    cutAssignSlot((uint8_t)(row & 1), track);
+    seqcut::Cut* c = seqEngine.cut();
+    if (c && col < seqcut::kPosCols && !(c->view(track).flags2 & seqcut::V2_GRID8))
+    {
+        seqEngine.postCut(track, seqcut::packGrid(seqcut::GRID_8));
+        seqEngine.idleTick();
+    }
+    return (uint8_t)((row & 1) * 2);
+}
+static void tCutPad(uint8_t col, uint8_t row, bool down, bool shift = false)
+{
+    if (col >= seqcut::kCols || row >= seqcut::kRows)
+    {
+        cutPad(col, row, down, shift);
+        return;
+    }
+    const uint8_t pr = down ? tPrep(row, col) : (uint8_t)((row & 1) * 2);
+    cutPad(col, pr, down, shift);
+}
+static void tAPad(seqsession::CutSessionLayer& a, uint8_t col, uint8_t row, bool down)
+{
+    const uint8_t pr = down ? tPrep(row, col) : (uint8_t)((row & 1) * 2);
+    a.pad(col, pr, down);
+}
 
 namespace
 {
@@ -418,7 +457,7 @@ static void test_cut_engine_ring()
 static void test_cut_layer()
 {
     using namespace seqcut;
-    cutSetGroup(0); // constructs the Cut through seqCutInit()
+    tSetGroup(0); // constructs the Cut through seqCutInit()
     seqcut::Cut* c = seqEngine.cut();
     CHECK(c != 0);
     if (!c)
@@ -430,21 +469,21 @@ static void test_cut_layer()
     cutQuantSet(Q_STEP); // (plan 008: a take starts with its first gesture on the grid; this test steps two steps only)
     cutUpdate();
     seqEngine.idleTick();
-    cutSetGroup(4); // tracks 4..7
+    tSetGroup(4); // tracks 4..7
     cutLeds(leds);
     CHECK(leds[0] == LED_BRIGHT && leds[1] == LED_DIM); // idle: playhead shown at column 0
-    cutPad(3, 1, true);                                  // track 5, column 3
+    tCutPad(3, 1, true);                                  // track 5, column 3
     seqEngine.idleTick();
     CHECK(c->activeMask() == (1u << 5));
     // group changes while the pad is held: the release still goes to track 5
-    cutSetGroup(8);
-    cutPad(3, 1, false);
+    tSetGroup(8);
+    tCutPad(3, 1, false);
     seqEngine.idleTick();
     CHECK(c->playhead(5).heldCount() == 0);
     // two pads of a row = loop on that row's track
-    cutSetGroup(0);
-    cutPad(1, 0, true);
-    cutPad(4, 0, true);
+    tSetGroup(0);
+    tCutPad(1, 0, true);
+    tCutPad(4, 0, true);
     seqEngine.idleTick();
     CHECK(c->view(0).loopLo == 1 && c->view(0).loopHi == 4);
     cutLeds(leds);
@@ -453,18 +492,18 @@ static void test_cut_layer()
     seqEngine.idleTick();
     CHECK(c->playhead(0).heldCount() == 0);
     // controls
-    cutPad(COL_REVERSE, 2, true);
-    cutPad(COL_REVERSE, 2, false);
-    cutPad(COL_RATE, 2, true);
-    cutPad(COL_STOP, 3, true);
+    tCutPad(COL_REVERSE, 2, true);
+    tCutPad(COL_REVERSE, 2, false);
+    tCutPad(COL_RATE, 2, true);
+    tCutPad(COL_STOP, 3, true);
     seqEngine.idleTick();
     CHECK(c->view(2).flags & VF_REVERSE);
     CHECK(viewRate(c->view(2)) == 2);
     CHECK(c->view(3).flags & VF_STOPPED);
     // recording: a row starts its take with its first pad, Rec release closes all takes
     cutRec(true);
-    cutPad(5, 0, true);
-    cutPad(5, 0, false);
+    tCutPad(5, 0, true);
+    tCutPad(5, 0, false);
     seqEngine.idleTick();
     CHECK(c->view(0).flags & VF_REC);
     CHECK(!(c->view(1).flags & VF_REC)); // untouched rows record nothing
@@ -472,29 +511,29 @@ static void test_cut_layer()
     f.pos = 0;
     stepOnce(*c, f, g);
     stepOnce(*c, f, g);
-    cutSetGroup(4); // the take keeps running while the group changes
+    tSetGroup(4); // the take keeps running while the group changes
     cutRec(false);
     seqEngine.idleTick();
     CHECK(!(c->view(0).flags & VF_REC) && (c->view(0).flags & VF_RECORDED));
     // a release that does not fit into the queue is kept and retried
-    cutSetGroup(0);
+    tSetGroup(0);
     cutReleaseAll();
     seqEngine.idleTick();
-    cutPad(2, 0, true);
+    tCutPad(2, 0, true);
     seqEngine.idleTick();
     CHECK(c->playhead(0).heldCount() == 1);
     for (int i = 0; i < 70; i++)
         seqEngine.postCut(9, seqcut::packArg(seqcut::SUB_RESYNC, true, 0)); // fills the queue (inactive track: ignored)
-    cutPad(2, 0, false);
+    tCutPad(2, 0, false);
     seqEngine.idleTick();
     seqEngine.idleTick();
     cutLeds(leds); // retries the lost release
     seqEngine.idleTick();
     CHECK(c->playhead(0).heldCount() == 0);
     // out of range pads are ignored
-    cutPad(12, 0, true);
-    cutPad(0, 4, true);
-    cutSetGroup(0);
+    tCutPad(12, 0, true);
+    tCutPad(0, 4, true);
+    tSetGroup(0);
 }
 
 // ---- integration: Session STOP wins over CUT, clip launch restarts the playhead, Session layer adapter ----
@@ -558,26 +597,26 @@ static void test_cut_session_layer_adapter()
         a.leave();
         seqEngine.resetState();
         seqEngine.idleTick();
-        a.setGroup(starts[gi]);
+        tSetGroup(starts[gi]);
         for (uint8_t row = 0; row < 4; row++)
         {
-            a.pad(11, row, true); // the last of the 12 pad columns (RESYNC) is the layer's
-            a.pad(11, row, false);
+            tAPad(a, 11, row, true); // the last of the 12 pad columns (RESYNC) is the layer's
+            tAPad(a, 11, row, false);
         }
-        a.pad(3, 2, true); // track starts[gi] + 2, position column 3
+        tAPad(a, 3, 2, true); // track starts[gi] + 2, position column 3
         seqEngine.idleTick();
         CHECK(c->activeMask() == (1u << (starts[gi] + 2)));
-        a.pad(3, 2, false);
+        tAPad(a, 3, 2, false);
         seqEngine.idleTick();
     }
     // an 8-track group start rounds down to a group of 4
-    a.setGroup(8);
-    a.pad(0, 1, true);
-    a.pad(0, 1, false);
+    tSetGroup(8);
+    tAPad(a, 0, 1, true);
+    tAPad(a, 0, 1, false);
     seqEngine.idleTick();
     CHECK(((c->activeMask() >> 9) & 1u) != 0);
     // leaving lets go of held pads
-    a.pad(2, 0, true);
+    tAPad(a, 2, 0, true);
     seqEngine.idleTick();
     CHECK(c->playhead(8).heldCount() == 1);
     a.leave();
@@ -614,11 +653,16 @@ void stepTracks(seqcut::Cut& c, FakePattern& f, int& global, int n, seqcut::Step
 // The shared global Cut object with a fake pattern, clean state.
 seqcut::Cut* freshCut(FakePattern& f)
 {
-    cutSetGroup(0); // constructs the Cut through seqCutInit()
+    tSetGroup(0); // constructs the Cut through seqCutInit()
     seqcut::Cut* c = seqEngine.cut();
     if (c)
         install(*c, f);
     seqEngine.resetState();
+    seqEngine.idleTick();
+    // the engine tests below were written for 8 pads over a 16 or 32 step pattern: the grid 1/8 (2 steps per pad) resp. 1/4 (4 steps)
+    // gives exactly those positions
+    for (uint8_t t = 0; t < 16; t++)
+        seqEngine.postCut(t, seqcut::packGrid(f.steps >= 32 ? seqcut::GRID_4 : seqcut::GRID_8));
     seqEngine.idleTick();
     g_shiftHeld = false;
     return c;
@@ -785,31 +829,31 @@ static void test_syncall_layer_paths()
     // jam all four rows of group 0, one row of group 2; Rec held, a pad held on row 0 (its take starts), two pads held on row 1
     for (uint8_t row = 0; row < 4; row++)
     {
-        cutPad(2, row, true);
-        cutPad(2, row, false);
+        tCutPad(2, row, true);
+        tCutPad(2, row, false);
     }
-    cutSetGroup(8);
-    cutPad(4, 2, true);
-    cutPad(4, 2, false);
-    cutSetGroup(0);
+    tSetGroup(8);
+    tCutPad(4, 2, true);
+    tCutPad(4, 2, false);
+    tSetGroup(0);
     cutRec(true);
-    cutPad(6, 0, true);
-    cutPad(1, 1, true);
-    cutPad(3, 1, true);
+    tCutPad(6, 0, true);
+    tCutPad(1, 1, true);
+    tCutPad(3, 1, true);
     seqEngine.idleTick();
     CHECK((c->activeMask() & 0x0F) == 0x0F && ((c->activeMask() >> 10) & 1u));
     CHECK(c->playhead(0).heldCount() == 1 && c->playhead(1).heldCount() == 2);
     CHECK(c->view(0).flags & VF_REC);
 
     // without Shift a RESYNC pad belongs to its row only
-    cutPad(COL_RESYNC, 3, true);
-    cutPad(COL_RESYNC, 3, false);
+    tCutPad(COL_RESYNC, 3, true);
+    tCutPad(COL_RESYNC, 3, false);
     seqEngine.idleTick();
     CHECK(c->playhead(0).heldCount() == 1 && (c->view(0).flags & VF_REC));
 
     // Shift + any RESYNC pad: all 16 tracks, held pads and the open take are dropped in one pass
-    cutPad(COL_RESYNC, 2, true, true);
-    cutPad(COL_RESYNC, 2, false, true);
+    tCutPad(COL_RESYNC, 2, true, true);
+    tCutPad(COL_RESYNC, 2, false, true);
     seqEngine.idleTick();
     CHECK(!cutSyncPending());
     for (uint8_t t = 0; t < 16; t++)
@@ -819,9 +863,9 @@ static void test_syncall_layer_paths()
         CHECK(!(v.flags & (VF_REC | VF_RECORDED | VF_REVERSE | VF_STOPPED)) && viewRate(v) == 1);
     }
     // the physical pads and Rec are released afterwards: nothing is posted for them (the take was forgotten)
-    cutPad(6, 0, false);
-    cutPad(1, 1, false);
-    cutPad(3, 1, false);
+    tCutPad(6, 0, false);
+    tCutPad(1, 1, false);
+    tCutPad(3, 1, false);
     cutRec(false);
     seqEngine.idleTick();
     CHECK(!(c->view(0).flags & VF_REC) && c->playhead(0).heldCount() == 0);
@@ -851,8 +895,8 @@ static void test_syncall_session_layer_adapter()
     auto jamAll = [&]() {
         for (uint8_t row = 0; row < 4; row++)
         {
-            a.pad(4, row, true);
-            a.pad(4, row, false);
+            tAPad(a, 4, row, true);
+            tAPad(a, 4, row, false);
         }
         seqEngine.idleTick();
     };
@@ -868,17 +912,17 @@ static void test_syncall_session_layer_adapter()
     jamAll();
     CHECK((c->activeMask() & 0x0F) == 0x0F);
     g_shiftHeld = true;
-    a.pad(11, 1, true);
+    tAPad(a, 11, 1, true);
     g_shiftHeld = false; // Shift let go first; the pad release has no meaning
-    a.pad(11, 1, false);
+    tAPad(a, 11, 1, false);
     seqEngine.idleTick();
     snapAll(7);
     CHECK(c->activeMask() == 0);
 
     // without Shift: that row only
     jamAll();
-    a.pad(11, 1, true);
-    a.pad(11, 1, false);
+    tAPad(a, 11, 1, true);
+    tAPad(a, 11, 1, false);
     seqEngine.idleTick();
     snapAll(8);
     CHECK((c->activeMask() & 0x0F) == 0x0D);
@@ -887,7 +931,8 @@ static void test_syncall_session_layer_adapter()
     char lab[12];
     CHECK(a.buttonLabel(kScreenButtonSyncAll, lab) && strcmp(lab, "[SYNC ALL]") == 0);
     // (plan 008 A: button 5 = jump quantise and button 7 = the [REC] armed label are the layer's now; tested in test_rec.inc)
-    CHECK(!a.buttonLabel(0, lab) && !a.buttonLabel(7, lab));
+    // (plan 016 A: the buttons 1-3 are Assign slot 1 / 2 and Help, 4 is empty; tested in test_mlr_slots)
+    CHECK(!a.buttonLabel(7, lab));
     CHECK(!a.button(6, true) && !a.button(7, true));
     CHECK(a.button(kScreenButtonSyncAll, false));
     seqEngine.idleTick();
@@ -912,16 +957,16 @@ static void test_syncall_ring_full_is_retried()
     CHECK(c != 0);
     if (!c)
         return;
-    cutPad(3, 0, true);
-    cutPad(3, 0, false);
-    cutPad(COL_REVERSE, 0, true);
+    tCutPad(3, 0, true);
+    tCutPad(3, 0, false);
+    tCutPad(COL_REVERSE, 0, true);
     seqEngine.idleTick();
     CHECK(c->view(0).flags & VF_REVERSE);
     for (int i = 0; i < 70; i++)
         seqEngine.postCut(9, packArg(SUB_RESYNC, true, 0)); // the queue is full
     cutSyncAll();
     CHECK(cutSyncPending());       // kept, not lost
-    cutPad(5, 0, true);            // a press must not overtake the waiting SYNC ALL (it would be wiped by it)
+    tCutPad(5, 0, true);            // a press must not overtake the waiting SYNC ALL (it would be wiped by it)
     seqEngine.idleTick();          // the audio side drains the queue
     CHECK(c->view(0).flags & VF_REVERSE);
     cutUpdate();                   // the main loop retries
@@ -929,7 +974,7 @@ static void test_syncall_ring_full_is_retried()
     seqEngine.idleTick();
     CHECK(!(c->view(0).flags & VF_REVERSE));
     CHECK(c->playhead(0).heldCount() == 0);
-    cutPad(5, 0, false);
+    tCutPad(5, 0, false);
     seqEngine.resetState();
     seqEngine.idleTick();
 }
@@ -950,29 +995,29 @@ static void test_survival_and_panic()
     seqEngine.idleTick();
     seqsession::CutSessionLayer a;
     a.enter(0);
-    a.pad(5, 0, true);  a.pad(5, 0, false);                    // row 0: a jam at column 5
-    a.pad(COL_REVERSE, 1, true);  a.pad(COL_REVERSE, 1, false); // row 1: reverse
-    a.pad(COL_RATE, 2, true);  a.pad(COL_RATE, 2, false);       // row 2: double rate
-    a.pad(COL_STOP, 3, true);  a.pad(COL_STOP, 3, false);       // row 3: stopped
-    a.setGroup(4);
+    tAPad(a, 5, 0, true);  tAPad(a, 5, 0, false);                    // row 0: a jam at column 5
+    tAPad(a, COL_REVERSE, 1, true);  tAPad(a, COL_REVERSE, 1, false); // row 1: reverse
+    tAPad(a, COL_RATE, 2, true);  tAPad(a, COL_RATE, 2, false);       // row 2: double rate
+    tAPad(a, COL_STOP, 3, true);  tAPad(a, COL_STOP, 3, false);       // row 3: stopped
+    tSetGroup(4);
     a.rec(true);
-    a.pad(2, 0, true);                                          // track 4: a take starts ...
+    tAPad(a, 2, 0, true);                                          // track 4: a take starts ...
     seqEngine.idleTick();
     c->setStock(4, 1);
     c->boundary(4, 16, 1);
     c->setStock(4, 2);
     c->boundary(4, 16, 2);
-    a.pad(2, 0, false);
+    tAPad(a, 2, 0, false);
     a.rec(false);                                               // the Rec release means nothing (plan 008 A: Rec is a toggle)
     seqEngine.idleTick();
     CHECK(cutRecHeld());
     a.rec(true);                                                // ... the next press closes: a recorded playhead loop
     seqEngine.idleTick();
     CHECK(c->view(4).flags & VF_RECORDED);
-    a.pad(3, 2, true);                                          // track 6: a pad is held in the hand (loop gesture)
-    a.pad(5, 2, true);
+    tAPad(a, 3, 2, true);                                          // track 6: a pad is held in the hand (loop gesture)
+    tAPad(a, 5, 2, true);
     a.rec(true);
-    a.pad(1, 3, true);                                          // track 7: a take is open
+    tAPad(a, 1, 3, true);                                          // track 7: a take is open
     seqEngine.idleTick();
     CHECK(c->playhead(6).heldCount() == 2 && (c->view(7).flags & VF_REC));
     const uint16_t before = c->activeMask();
@@ -993,10 +1038,10 @@ static void test_survival_and_panic()
     CHECK(c->activeMask() == before);                           // coming back changes nothing
 
     // M6: Stop = panic. Holds and takes end, SYNC ALL; the next Play starts every track on the grid.
-    a.setGroup(0);
-    a.pad(5, 0, true);
+    tSetGroup(0);
+    tAPad(a, 5, 0, true);
     a.rec(true);
-    a.pad(6, 1, true);
+    tAPad(a, 6, 1, true);
     seqEngine.idleTick();
     cutPanic();
     seqEngine.idleTick();
@@ -1009,8 +1054,8 @@ static void test_survival_and_panic()
     }
     c->transportStart();
     CHECK(c->activeMask() == 0);
-    a.pad(5, 0, false);  // the physical releases arrive later: ignored
-    a.pad(6, 1, false);
+    tAPad(a, 5, 0, false);  // the physical releases arrive later: ignored
+    tAPad(a, 6, 1, false);
     a.rec(false);
     seqEngine.idleTick();
     CHECK(c->activeMask() == 0);
@@ -1024,14 +1069,9 @@ static void test_group_arrows()
     seqsession::CutSessionLayer a;
     a.enter(4);
     g_groupRequests = 0;
-    CHECK(a.arrow(seqsession::ARROW_LEFT, false) && g_lastGroupRequest == 0);
-    CHECK(a.arrow(seqsession::ARROW_RIGHT, false) && g_lastGroupRequest == 8);
+    // plan 016 A: no groups of tracks any more (the slots pick their tracks); Left / Right are swallowed, Up / Down are the host's
+    CHECK(a.arrow(seqsession::ARROW_LEFT, false) && a.arrow(seqsession::ARROW_RIGHT, false) && g_groupRequests == 0);
     CHECK(!a.arrow(seqsession::ARROW_UP, false) && !a.arrow(seqsession::ARROW_DOWN, false));
-    a.setGroup(0);
-    g_groupRequests = 0;
-    CHECK(a.arrow(seqsession::ARROW_LEFT, false) && g_groupRequests == 0); // handled, nowhere to go
-    a.setGroup(12);
-    CHECK(a.arrow(seqsession::ARROW_RIGHT, false) && g_groupRequests == 0);
     const int showBefore = g_laneShow, hideBefore = g_laneHide;
     a.enter(0);
     a.leave();

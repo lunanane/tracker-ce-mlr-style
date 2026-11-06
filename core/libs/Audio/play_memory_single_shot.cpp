@@ -1,6 +1,7 @@
 #include "Audio.h"
 #include "play_memory.h"
 #include "utility/dspinst.h"
+#include "seqMlrCue.h"
 
 AUDIO_CORE_FLASH void AudioPlayMemory::playSingleShot(uint8_t instrIdx, int8_t note)
 {
@@ -69,6 +70,11 @@ AUDIO_CORE_FLASH void AudioPlayMemory::playSingleShot(uint8_t instrIdx, int8_t n
     length = currentSampleLength - pointsInSamples.start;
     iPitchCounter = reverseDirectionFlag ? constrainsInSamples.endPoint - 1 : 0;
 
+    if (currentIsStreamed && !reverseDirectionFlag && pointsInSamples.start >= currentPreCacheFrames)
+    {
+        // MLR cue cache (plan 016 A2): see play_memory_loop_forward.cpp
+        seqmlr::findCue(instrIdx, pointsInSamples.start, channel, currentSliceCacheAddress, currentSliceCacheFrames);
+    }
     if (currentIsStreamed && channel == 0 && voiceIndex >= 0)
     {
         voiceStreamManager.notifyNoteOn((uint8_t)voiceIndex,
@@ -79,7 +85,8 @@ AUDIO_CORE_FLASH void AudioPlayMemory::playSingleShot(uint8_t instrIdx, int8_t n
                                         pointsInSamples.end,
                                         currentPlayMode,
                                         reverseDirectionFlag != 0,
-                                        pitchControl);
+                                        pitchControl,
+                                        currentSliceCacheFrames);
     }
 
     playing = 1;

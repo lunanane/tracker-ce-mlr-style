@@ -11,7 +11,11 @@ using namespace seqlogic;
 static seqcut::Cut g_cutObj;
 seqtracks::Engine seqEngine;
 seqlogic::TapDetector seqPatternTap;
-void seqCutInit() { seqEngine.setCut(&g_cutObj); }
+void seqCutInit() { g_cutObj.setSectionMode(true); seqEngine.setCut(&g_cutObj); } // as seqTracks.cpp: MLR slots on the musical grid
+static uint16_t g_mutedMask = 0;
+bool seqCutTrackMuted(uint8_t t) { return ((g_mutedMask >> t) & 1u) != 0; }
+void seqCutToggleMute(uint8_t t) { g_mutedMask ^= (uint16_t)(1u << t); }
+uint16_t seqCutTracksWithNotes() { return 0x00FF; }
 
 static int g_fail = 0, g_checks = 0;
 #define CHECK(c)                                                                    \

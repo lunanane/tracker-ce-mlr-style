@@ -2,13 +2,16 @@
 #include "cutLayer.h"
 #include "seqTracks.h"
 #include "seqCutLogic.h"
+#include "seqMlrLogic.h"
 #include <string.h>
 
 using namespace seqcut;
 
 namespace
 {
-uint8_t s_first = 0;
+uint8_t s_slot[kSlots] = { 0, 1 }; // the track each slot holds (plan 016 A: slot A = pad rows 1-2, slot B = rows 3-4)
+int8_t s_pick = -1;                // slot whose two pad rows are the track picker, -1 = none
+bool s_legend = false;             // the pad legend is shown on the screen
 bool s_rec = false;
 uint16_t s_recTracks = 0; // tracks whose take was started while Rec was held
 int8_t s_heldTrack[kCutPads];
@@ -75,11 +78,32 @@ void post(uint8_t track, uint8_t sub, bool down, uint8_t col)
 }
 } // namespace
 
-void cutSetGroup(uint8_t firstTrack)
+void cutInit() { init(); }
+bool cutSlotsUsed() { return s_init; }
+bool cutTrackRecArmed(uint8_t track) { return track < kCutTracks && ((s_recTracks >> track) & 1u) != 0; }
+
+uint8_t cutSlotTrack(uint8_t slot) { return s_slot[slot & 1]; }
+
+// A track belongs to one slot: picking the other slot's track swaps the two.
+void cutAssignSlot(uint8_t slot, uint8_t track)
 {
     init();
-    s_first = groupFirst(firstTrack); // held pads keep the track they were pressed on
+    slot &= 1;
+    if (track >= kCutTracks)
+        return;
+    if (s_slot[slot ^ 1] == track)
+        s_slot[slot ^ 1] = s_slot[slot];
+    s_slot[slot] = track;
 }
+
+void cutPickToggle(uint8_t slot)
+{
+    init();
+    s_pick = (s_pick == (int8_t)(slot & 1)) ? (int8_t)-1 : (int8_t)(slot & 1);
+}
+int8_t cutPickSlot() { return s_pick; }
+void cutLegendToggle() { s_legend = !s_legend; }
+bool cutLegendShown() { return s_legend; }
 
 void cutPad(uint8_t col, uint8_t row, bool down, bool shift)
 {
@@ -87,10 +111,20 @@ void cutPad(uint8_t col, uint8_t row, bool down, bool shift)
         return;
     init();
     const uint8_t idx = (uint8_t)(row * kCols + col);
+    const PadInfo pi = padInfo(col, row);
+    if (pi.role == PR_STEP && s_pick == (int8_t)pi.slot)
+    {
+        if (down)
+        {
+            cutAssignSlot(pi.slot, pi.idx); // the picker: this pad is the track; the rows return to MLR
+            s_pick = -1;
+        }
+        return;
+    }
     uint8_t track;
     if (down)
     {
-        track = trackOfRow(s_first, row);
+        track = s_slot[pi.slot];
         s_heldTrack[idx] = (int8_t)track;
     }
     else
@@ -100,32 +134,48 @@ void cutPad(uint8_t col, uint8_t row, bool down, bool shift)
         track = (uint8_t)s_heldTrack[idx];
         s_heldTrack[idx] = -1;
     }
-    if (col < kPosCols)
+    if (pi.role == PR_STEP)
     {
         if (down && s_rec && !((s_recTracks >> track) & 1u))
         {
             s_recTracks = (uint16_t)(s_recTracks | (1u << track));
-            post(track, SUB_REC, true, 0); // the take starts with the first pad of the row
+            post(track, SUB_REC, true, 0); // the take starts with the first pad of the slot
         }
-        post(track, SUB_PAD, down, col);
+        post(track, SUB_PAD, down, pi.idx);
         return;
     }
     if (!down)
         return;
-    switch (col)
+    const View v = seqEngine.cut() ? seqEngine.cut()->view(track) : View();
+    switch (pi.role)
     {
-        case COL_STOP: post(track, SUB_STOP, true, 0); break;
-        case COL_REVERSE: post(track, SUB_REVERSE, true, 0); break;
-        case COL_RATE: post(track, SUB_RATE, true, 0); break;
-        case COL_RESYNC:
+        case PR_STOP: post(track, SUB_STOP, true, 0); break;
+        case PR_REV: post(track, SUB_REVERSE, true, 0); break;
+        case PR_RATE: post(track, SUB_RATE, true, 0); break;
+        case PR_RSYNC:
             if (shift)
             {
-                cutSyncAll(); // Shift + RESYNC: all tracks
+                cutSyncAll(); // Shift + RSYNC: all tracks
                 break;
             }
             s_recTracks = (uint16_t)(s_recTracks & ~(1u << track)); // a resync ends a take in progress
             post(track, SUB_RESYNC, true, 0);
             break;
+        case PR_GRID: seqEngine.postCut(track, packGrid((v.flags2 & V2_GRID8) ? GRID_4 : GRID_8)); break;
+        case PR_HOLD: seqEngine.postCut(track, packHold(!(v.flags2 & V2_HOLD))); break;
+        case PR_REC: // a take of this slot only: the Rec key stays the global toggle
+            if ((s_recTracks >> track) & 1u)
+            {
+                s_recTracks = (uint16_t)(s_recTracks & ~(1u << track));
+                post(track, SUB_REC, false, 0);
+            }
+            else
+            {
+                s_recTracks = (uint16_t)(s_recTracks | (1u << track));
+                post(track, SUB_REC, true, 0);
+            }
+            break;
+        case PR_MUTE: seqCutToggleMute(track); break;
         default: break;
     }
 }
@@ -149,19 +199,22 @@ void cutLeds(uint8_t* out48)
 {
     init();
     trySync(); // called on every redraw: also retries lost releases and a SYNC ALL
-    View views[kRows];
+    SlotLeds sl[kSlots];
     Cut* c = seqEngine.cut();
-    for (uint8_t r = 0; r < kRows; r++)
+    const uint16_t has = s_pick >= 0 ? seqCutTracksWithNotes() : 0;
+    for (uint8_t k = 0; k < kSlots; k++)
     {
+        memset(&sl[k], 0, sizeof(sl[k]));
+        sl[k].track = s_slot[k];
         if (c)
-            views[r] = c->view(trackOfRow(s_first, r));
-        else
-        {
-            views[r].col = 0; views[r].loopLo = 1; views[r].loopHi = 0; views[r].flags = (uint8_t)(1 << VF_RATE_SHIFT);
-        }
+            sl[k].v = c->view(s_slot[k]);
+        sl[k].picking = s_pick == (int8_t)k;
+        sl[k].has = has;
+        sl[k].muted = seqCutTrackMuted(s_slot[k]);
+        sl[k].rec = (s_recTracks >> s_slot[k]) & 1u;
     }
     s_blink++;
-    fillLeds(views, ((s_blink >> 3) & 1u) != 0, out48);
+    fillMlrLeds(sl, ((s_blink >> 3) & 1u) != 0, out48);
 }
 
 void cutSyncAll()
