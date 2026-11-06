@@ -102,3 +102,29 @@ plan with the RAM trade above (needs the owner's call on -128 KB pool and +14 KB
   slack, mode fallbacks, load policy, promote).
 - Device list: `docs/seq-tracks-test-list.md` section 11o.
 - Build: `make original` (image size and EXTERNAL_RAM constructor checks pass), seqtest and seqgen `make test`.
+
+## As built (part A)
+- `core/source/sampleMemLogic.h`: `decideImport`, `decideLoad`, `importResidentBytes`, `canPromote`,
+  `legacyImportFits` (the old rule, kept only so the host test can show the refusal). `playModeNeedsResident()` added in
+  `mtStructs.h`.
+- `FileManager/SampleImport.cpp`: `loadImportingSamplesData` decides per slot (running total of the pool bytes already
+  planned for the batch); new `streamConvertToWorkspace` state machine (one 32 KB chunk per `update()`, left block then
+  a second pass for the right block, the converted chunk buffer is `externalRamFileManagerBuffL`, output <= 8160 frames
+  per channel per chunk, `endFile` truncates a stale tail, then `setupInstrumentStream`). `setInstrumentSampleAddress`
+  got an optional `streamPreCacheFrames` so the slot is reserved as pre-cache only before the memory move.
+  `SampleLoadData.streamImport` (plain member, no constructor on the EXTERNAL_RAM buffer).
+- Project load: `startNewInstrumentSampleLoad` uses `decideLoad`; a changed play mode marks the instrument struct changed.
+- Importer UI: `processDirFileSizes` stores the resident estimate for WAVs; free / replaced-slot figures use
+  `getSampleMemorySize`; the SD mark and the mode-switch popup as designed.
+- Not changed: `VoiceStreamManager.*`, playback loops, governor, recorder, `.pti` / `.mod` / `.it` import (still resident
+  first), the 48 slot count.
+- Checks: `make original` clean (image end 0xEC59C, margin 64 100 B, RAM 87.87 %, EXTERNAL_RAM 99.58 %, no constructor on
+  EXTERNAL_RAM), `core/seqtest` and `seqgen` `make test` pass. **Not run on a device**: the streamed import path (SD write
+  while converting, stereo second pass, range import, lo-fi) is device-only code; test list 11o.
+- Known limits: the streamed import converts in 32 KB chunks as the resident import did (chunk-edge resampling is the
+  same as before); stereo reads the WAV twice (once per channel block); a streamed import onto a slot with a very
+  large old file relies on `endFile` to truncate.
+
+## Part B decision needed (owner)
+Not implemented: see "Part B" above. The cheapest safe step is option 1 in its own plan after part A has been used; it
+costs ~14 KB internal RAM (87.9 % -> 93.5 %) and ~105 KB EXTERNAL_RAM (taken from the sample pool) for +32 slots.

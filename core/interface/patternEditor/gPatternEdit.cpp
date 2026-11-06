@@ -473,9 +473,16 @@ void cPatternEditor::fillInstrumentNames()
     {
         if (mtProject.instrument[i].isActive)
         {
-            strncpy(&interfaceGlobals.intrumentsNames[i][0],
+            // plan 023: "SD " marks a long sample that streams from the SD card
+            const int prefix = mtProject.sampleMemory[i].isStreamed ? 3 : 0;
+            if (prefix)
+            {
+                strcpy(&interfaceGlobals.intrumentsNames[i][0], "SD ");
+            }
+            strncpy(&interfaceGlobals.intrumentsNames[i][prefix],
                     mtProject.instrument[i].sample.file_name,
                     SAMPLE_NAME_SIZE);
+            interfaceGlobals.intrumentsNames[i][SAMPLE_NAME_SIZE + prefix] = 0;
         }
         else
         {

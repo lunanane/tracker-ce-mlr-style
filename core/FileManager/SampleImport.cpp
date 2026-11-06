@@ -6,11 +6,18 @@
 #include "fileTransfer.h"
 #include "mtAudioEngine.h"
 
+#include "VoiceStreamManager.h"
 #include "log.h"
+#include "sampleMemLogic.h"
 
 #include <cstring>
 
 constexpr uint32_t lofiSampleRate = targetSampleRate / 2;
+
+extern uint8_t externalRamFileManagerSrcBuff[]; // 32640 B, input chunk
+extern uint8_t externalRamFileManagerBuffL[];   // 32640 B, converted L (first half) + R (second half)
+constexpr uint32_t kStreamSrcChunkBytes = 32640;
+constexpr uint32_t kStreamOutHalfFrames = 8160; // frames per channel in one converted chunk
 
 __NOINIT(EXTERNAL_RAM)
 static FileManagerOperation::SampleLoadData sampleImportDataBuff[48];
@@ -147,6 +154,9 @@ void SampleImport::importSamplesToWorkspaceInit()
     mtProject.used_memory -= oldSamplesSize;
 
     sampleLoadState = 0;
+    importPlannedBytes = 0;
+    streamStep = 0;
+    streamConvertClose();
 
     memoryToImportTotal = 0;
     memoryToImportDone = 0;
@@ -425,13 +435,45 @@ void SampleImport::loadImportingSamplesData(FileManagerOperation::SampleLoadData
                       sampleImportData[instrIdx].fileName,
                       SAMPLE_NAME_SIZE);
 
-                    newFileManager.completeLoadedInstrumentStruct(
-                      instrIdx, true, sampleImportData[instrIdx].destSampleCountPerChannel);
+                    // plan 023: a sample that does not fit the free pool is converted straight to
+                    // the SD card and kept as a streamed sample (pre-cache only in the pool)
+                    const uint32_t channels = sampleImportData[instrIdx].destChannelCount;
+                    const uint32_t frames = sampleImportData[instrIdx].destSampleCountPerChannel;
+                    const uint32_t usedNow = mtProject.used_memory + importPlannedBytes;
+                    const uint32_t freeNow =
+                      mtProject.max_memory > usedNow ? mtProject.max_memory - usedNow : 0;
+                    const sampmem::Placement placement = sampmem::decideImport(
+                      frames,
+                      channels,
+                      playModeNeedsResident(mtProject.instrument[instrIdx].playMode),
+                      freeNow);
 
-                    newFileManager.setInstrumentSampleAddress(
-                      instrIdx,
-                      sampleImportData[instrIdx].destChannelCount,
-                      sampleImportData[instrIdx].destSampleCountPerChannel);
+                    if (placement == sampmem::Placement::Refused)
+                    {
+                        newFileManager.completeLoadedInstrumentStruct(instrIdx, false);
+                        continue;
+                    }
+
+                    if (placement == sampmem::Placement::StreamedOneShot)
+                    {
+                        mtProject.instrument[instrIdx].playMode = playModeSingleShot;
+                        mtProject.instrument[instrIdx].sample.type = mtSampleTypeWaveFile;
+                    }
+
+                    newFileManager.completeLoadedInstrumentStruct(instrIdx, true, frames);
+
+                    if (placement == sampmem::Placement::Resident)
+                    {
+                        importPlannedBytes += sampmem::sampleBytes(frames, channels);
+                        newFileManager.setInstrumentSampleAddress(instrIdx, channels, frames);
+                    }
+                    else
+                    {
+                        sampleImportData[instrIdx].streamImport = true;
+                        importPlannedBytes += sampmem::preCacheBytes(frames, channels);
+                        newFileManager.setInstrumentSampleAddress(
+                          instrIdx, channels, frames, sampmem::kPreCacheFrames);
+                    }
 
                     continue;
                 }
@@ -512,6 +554,11 @@ bool SampleImport::loadSampleDataToMemeory(int idx,
         return true;
     }
 
+    if (sampleImportData->streamImport)
+    {
+        return streamConvertToWorkspace(idx, sampleImportData);
+    }
+
     char srcSamplePath[PATCH_SIZE];
     snprintf(srcSamplePath,
              sizeof(srcSamplePath),
@@ -571,4 +618,211 @@ bool SampleImport::loadSampleDataToMemeory(int idx,
     }
 
     return false;
+}
+
+//=================================================================================================
+// Streamed import (plan 023): the converted sample never has to be resident. The WAV is read and
+// converted in chunks and written to the workspace instrument file (left channel block, then the
+// right channel block, the .pti layout); afterwards the stream is set up like for any streamed
+// instrument, which loads the pre-cache into the slot's pool area.
+//=================================================================================================
+void SampleImport::streamConvertClose()
+{
+    if (streamSrc != nullptr)
+    {
+        fileSystem->closeFile(streamSrc);
+        streamSrc = nullptr;
+    }
+    if (streamDst != nullptr)
+    {
+        fileSystem->closeFile(streamDst);
+        streamDst = nullptr;
+    }
+}
+
+bool SampleImport::streamConvertToWorkspace(int idx, FileManagerOperation::SampleLoadData* d)
+{
+    const uint32_t frames = d->destSampleCountPerChannel;
+    const uint32_t channels = d->destChannelCount;
+    const uint32_t headerSize = sizeof(strInstrumentFile);
+
+    char dstPath[PATCH_SIZE];
+    snprintf(dstPath, sizeof(dstPath), cWorkspaceInstrumentFileFormatNew, idx + 1);
+
+    if (streamStep == 0)
+    {
+        char srcPath[PATCH_SIZE];
+        snprintf(srcPath, sizeof(srcPath), "%s/%s", d->filePath, d->fileName);
+
+        // the workspace file gets its header first; the data follows at headerSize
+        newFileManager.setInstrumentStructChanged(idx);
+        newFileManager.saveInstrumentStructToWorkspace(idx);
+
+        auto [srcOpen, srcH] = fileSystem->openFile(srcPath, FileSystem::FileOpenMode::kRead);
+        auto [dstOpen, dstH] = fileSystem->openFile(dstPath, FileSystem::FileOpenMode::kWriteOpen);
+        if (!srcOpen || !dstOpen || frames == 0)
+        {
+            if (srcOpen)
+            {
+                fileSystem->closeFile(srcH);
+            }
+            if (dstOpen)
+            {
+                fileSystem->closeFile(dstH);
+            }
+            newFileManager.completeLoadedInstrumentStruct(idx, false);
+            return true;
+        }
+        streamSrc = srcH;
+        streamDst = dstH;
+        streamPass = 0;
+        streamSrcDone = 0;
+        streamFramesDone = 0;
+        fileSystem->seekFile(d->fileOffset, streamSrc);
+        fileSystem->seekFile(headerSize, streamDst);
+        streamStep = 1;
+        return false;
+    }
+
+    // one chunk per call (keeps the main loop responsive)
+    const uint32_t srcBytesPerFrame = d->sourceAllChannelBytesPerSample;
+    const uint32_t srcTotalBytes = srcBytesPerFrame * d->sourceTotalSamplesCountPerChannel;
+    int16_t* bufL = (int16_t*)externalRamFileManagerBuffL;
+    int16_t* bufR = bufL + kStreamOutHalfFrames;
+
+    uint32_t chunkFrames = kStreamSrcChunkBytes / srcBytesPerFrame;
+    uint32_t maxByOut =
+      (uint32_t)((uint64_t)kStreamOutHalfFrames * d->sourceSampleRate / targetSampleRate);
+    if (chunkFrames > maxByOut)
+    {
+        chunkFrames = maxByOut;
+    }
+    if (chunkFrames == 0)
+    {
+        chunkFrames = 1;
+    }
+    uint32_t want = chunkFrames * srcBytesPerFrame;
+    if (want > srcTotalBytes - streamSrcDone)
+    {
+        want = srcTotalBytes - streamSrcDone;
+    }
+
+    int32_t got = 0;
+    if (want >= srcBytesPerFrame)
+    {
+        got = fileSystem->readFile(externalRamFileManagerSrcBuff, want, streamSrc);
+    }
+
+    bool passDone = false;
+    if (got < (int32_t)srcBytesPerFrame)
+    {
+        passDone = true; // end of source data (or short file): the rest is padded with silence
+    }
+    else
+    {
+        got -= got % srcBytesPerFrame;
+        const int16_t* out = nullptr;
+        uint32_t outFrames = 0;
+
+        if (d->conversion)
+        {
+            ConversionConfig cfg;
+            cfg.inputData = externalRamFileManagerSrcBuff;
+            cfg.inputSize = got;
+            cfg.outPtrL = bufL;
+            cfg.outPtrR = (channels == 2) ? bufR : nullptr;
+            cfg.sourceChannelCount = d->sourceChannelCount;
+            cfg.sourceBitsPerSample = d->sourceBitsPerSample;
+            cfg.sourceSampleRate = d->sourceSampleRate;
+            cfg.sourceFormat = d->sourceFormat;
+            cfg.destSampleRate = targetSampleRate;
+            outFrames = convertAudioData(cfg);
+            out = (streamPass == 0) ? bufL : bufR;
+        }
+        else // 16 bit mono at the target rate: no conversion
+        {
+            outFrames = got / 2;
+            out = (const int16_t*)externalRamFileManagerSrcBuff;
+        }
+
+        if (outFrames > frames - streamFramesDone)
+        {
+            outFrames = frames - streamFramesDone;
+        }
+        if (outFrames > 0)
+        {
+            int32_t wr = fileSystem->writeFile(out, outFrames * 2, streamDst);
+            if (wr != (int32_t)(outFrames * 2))
+            {
+                streamConvertClose();
+                streamStep = 0;
+                newFileManager.completeLoadedInstrumentStruct(idx, false);
+                stopOperationWithError(fmImportSamplesError);
+                return true;
+            }
+            streamFramesDone += outFrames;
+            memoryToImportDone += outFrames * 2;
+        }
+        streamSrcDone += got;
+        if (streamPass == 0)
+        {
+            memoryToImportDone += got;
+        }
+        if (streamFramesDone >= frames || streamSrcDone >= srcTotalBytes)
+        {
+            passDone = true;
+        }
+    }
+
+    if (!passDone)
+    {
+        return false;
+    }
+
+    // pad the rest of this channel with silence (rounding of the resampled length)
+    if (streamFramesDone < frames)
+    {
+        memset(externalRamFileManagerBuffL, 0, kStreamOutHalfFrames * 2);
+        while (streamFramesDone < frames)
+        {
+            uint32_t n = frames - streamFramesDone;
+            if (n > kStreamOutHalfFrames)
+            {
+                n = kStreamOutHalfFrames;
+            }
+            if (fileSystem->writeFile(externalRamFileManagerBuffL, n * 2, streamDst) !=
+                (int32_t)(n * 2))
+            {
+                streamConvertClose();
+                streamStep = 0;
+                newFileManager.completeLoadedInstrumentStruct(idx, false);
+                stopOperationWithError(fmImportSamplesError);
+                return true;
+            }
+            streamFramesDone += n;
+        }
+    }
+
+    if ((uint32_t)streamPass + 1 < channels)
+    {
+        // second channel: read the source again from its start
+        streamPass++;
+        streamSrcDone = 0;
+        streamFramesDone = 0;
+        fileSystem->seekFile(d->fileOffset, streamSrc);
+        return false;
+    }
+
+    fileSystem->endFile(streamDst); // drop any stale tail of an older, longer file
+    streamConvertClose();
+    streamStep = 0;
+
+    if (!voiceStreamManager.setupInstrumentStream(idx, dstPath, headerSize, frames, channels == 2))
+    {
+        newFileManager.completeLoadedInstrumentStruct(idx, false);
+        return true;
+    }
+
+    mtProject.used_memory += sampmem::preCacheBytes(frames, channels);
+    return true;
 }

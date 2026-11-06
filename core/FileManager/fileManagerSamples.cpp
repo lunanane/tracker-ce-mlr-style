@@ -507,7 +507,9 @@ uint32_t cFileManager::getWaveSizeIfValid(const char* filename)
     return getWaveSizeAndHederIfValid(filename, sampleHeader);
 }
 
-uint32_t cFileManager::getWaveSizeAfterConversion(const char* filename, bool countStereo)
+uint32_t cFileManager::getWaveSizeAfterConversion(const char* filename,
+                                                  bool countStereo,
+                                                  uint32_t* channelsOut)
 {
     strWavFileHeader sampleHeader = {};
 
@@ -531,6 +533,11 @@ uint32_t cFileManager::getWaveSizeAfterConversion(const char* filename, bool cou
 
     uint64_t samplesCount =
       (uint64_t)totalSamplesCountPerChannel * targetSampleRate / sampleHeader.sampleRate;
+
+    if (channelsOut)
+    {
+        *channelsOut = (countStereo && sampleHeader.numChannels >= 2) ? 2 : 1;
+    }
 
     return samplesCount * ((countStereo && sampleHeader.numChannels >= 2) ? 4 : 2);
 }

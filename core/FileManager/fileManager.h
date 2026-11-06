@@ -400,7 +400,11 @@ class cFileManager
     void createCurrentProjectFolderTree();
 
     bool isInstrumentStereo(int idx);
-    void setInstrumentSampleAddress(int idx, uint16_t channelCount, uint32_t samplesCount);
+    // streamPreCacheFrames > 0: the slot is reserved as a streamed sample (pre-cache only)
+    void setInstrumentSampleAddress(int idx,
+                                    uint16_t channelCount,
+                                    uint32_t samplesCount,
+                                    uint32_t streamPreCacheFrames = 0);
     bool promoteStreamedInstrumentToRam(int idx);
     bool demoteRamInstrumentToStream(int idx, const char* backingPtiPath, uint32_t dataOffset);
 
@@ -414,7 +418,9 @@ class cFileManager
 
     uint32_t getWaveSizeAndHederIfValid(const char* fileName, strWavFileHeader& header);
     uint32_t getWaveSizeIfValid(const char* filename);
-    uint32_t getWaveSizeAfterConversion(const char* filename, bool countStereo);
+    uint32_t getWaveSizeAfterConversion(const char* filename,
+                                        bool countStereo,
+                                        uint32_t* channelsOut = nullptr);
 
     bool startNewInstrumentSampleLoad(int idx, char* samplePath, uint32_t& instrumentFileDataOffset);
     bool loadSampleData(int idx,

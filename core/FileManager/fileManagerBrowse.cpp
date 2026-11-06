@@ -8,6 +8,7 @@
 #include "mtSequencer.h"
 
 #include "AudioDataUtilities.h"
+#include "sampleMemLogic.h"
 #include "fileManager.h"
 #include "fileTransfer.h"
 
@@ -352,8 +353,12 @@ void cFileManager::processDirFileSizes() // wykonywalne w petli
     strcat(filePath, explorerList[openCurrentPos]);
 
     // if its wav file get size after conversion
+    // Long samples are imported as streamed samples (plan 023): only the pre-cache counts
+    // against the pool, so that is what the importer's memory bar and check use.
+    uint32_t waveChannels = 1;
+    uint32_t waveBytes = getWaveSizeAfterConversion(filePath, stereoSampleMode, &waveChannels);
     currentFolderMemoryFileUsage[openCurrentPos] =
-      getWaveSizeAfterConversion(filePath, stereoSampleMode);
+      waveBytes == 0 ? 0 : sampmem::importResidentBytes(waveBytes / (2 * waveChannels), waveChannels);
 
     // if its instrument file get pti sample data size
     if (currentFolderMemoryFileUsage[openCurrentPos] == 0)

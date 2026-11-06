@@ -74,6 +74,19 @@ class SampleImport : public FileManagerOperation
                           uint16_t dataTo);
 
     bool loadSampleDataToMemeory(int idx, FileManagerOperation::SampleLoadData* sampleImportData);
+
+    // plan 023: WAV -> workspace .pti in chunks, only the pre-cache stays in the pool.
+    // Returns true when finished (success or failure; failure clears the instrument).
+    bool streamConvertToWorkspace(int idx, FileManagerOperation::SampleLoadData* sampleImportData);
+    void streamConvertClose();
+
+    uint32_t importPlannedBytes = 0; // pool bytes planned for the slots of the running import
+    uint8_t streamStep = 0;          // 0 = start, 1 = converting
+    uint8_t streamPass = 0;          // 0 = left channel, 1 = right channel
+    uint32_t streamSrcDone = 0;      // source bytes consumed in this pass
+    uint32_t streamFramesDone = 0;   // converted frames written in this pass
+    FileSystem::FileHandle streamSrc = nullptr;
+    FileSystem::FileHandle streamDst = nullptr;
 };
 
 #endif /* FILEMANAGER_SAMPLEIMPORT_H_ */
