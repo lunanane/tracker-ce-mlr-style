@@ -909,6 +909,25 @@ Host tests (`core/seqtest`, `make test`): `plinky`: `test_morph_math`, `test_mor
 | Project > limiter sidechain = a kick track (sample), a PolySynth pad playing | The pad pumps with the kick, like a sample track would. |
 | Limiter sidechain off | The pad does not duck; the limiter still limits the mix. |
 
+## 11m. v0.4 part A: three PolySynths, shared pool + governor, Shift multi-edit, synths first (plan 019, Original Tracker only)
+
+Host tests: `core/seqtest` `test_plinky3.inc` (old-sound identity against golden hashes of the v0.3.8 engine for Voices 1..4, instances, pool, sends, governor, plinky.bin with three instances, multi-edit values, instrument order), `test_plinkyseq.inc` (tabs, ALL tag, two FIFO stages), `test_trace.cpp` / `test_stages.cpp` (8 pool voices in the pitch view).
+
+| # | Check on the device | Expected |
+| - | - | - |
+| 1 | Instrument picker (Instrument key, popup): top of the list | PolySynth 1, PolySynth 2, PolySynth 3, then samples 1..48, then MIDI channels 1..13 |
+| 2 | Instrument + jog in the pattern editor from the first step | steps PolySynth 1, 2, 3, then MIDI 13 .. 1, then the samples; stops at both ends |
+| 3 | Open a v0.3.x project that used the PolySynth (MIDI 16) | patterns play the same; the instrument is PolySynth 1 |
+| 4 | Play mode, a track on PolySynth 2, Instrument Parameters key | the view opens with the SYNTH 2 tab bright; each press: SYNTH 3, SYNTH 1, SYNTH 2 |
+| 5 | Instrument page of PolySynth 1, Params key | the page steps to PolySynth 2 and 3 (title, tab, values follow) |
+| 6 | Edit Cutoff on SYNTH 1, switch to SYNTH 2 | SYNTH 2 has its own value; save, reload: all three keep theirs |
+| 7 | Hold Shift while turning a dial | ALL tag appears; every instance moves by the same amount, each stops at its own limit |
+| 8 | Play 4 notes on each of the three synths | the pool holds 8 voices; the oldest/quietest voice is taken, no clicks |
+| 9 | Heavy project (many sample voices + reverb) with all three synths | the V readout drops below 8 under load, sound keeps going; it comes back after 2 s of headroom |
+| 10 | Pitch view (FX2) with notes on all three | teal, yellow and violet lines, lighter shades for further voices of one instance |
+| 11 | Reverb/Delay sends of PolySynth 2 and 3 | each instance has its own send level |
+| 12 | Open the project in v0.3.8 | PolySynth 1 sounds as saved; instances 2 and 3 are ignored |
+
 ## 12. Stock behaviour (never enter Play mode, Session or the fader page)
 | Press | Expected |
 |---|---|

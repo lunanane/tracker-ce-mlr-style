@@ -462,6 +462,7 @@ static void test_note_band()
     CHECK(kVoiceX + (kVoices - 1) * kVoiceStep + kVoiceBar + 44 + 40 <= 800 && kVoiceY - 4 >= 396 && kVoiceY + 4 <= 424);
 }
 
+#include "seqTraceStages.h"
 static void test_plinky_overlay_draw_budget()
 {
     using namespace seqplinky;
@@ -518,6 +519,35 @@ static void test_plinky_overlay_draw_budget()
     // 4200 bytes. Since v0.3.6 A1 the pattern control is hidden while the view is open, so the frame is page + title bar (600) + strip
     // (1720) + 400 margin: the view may use as much as the pitch view (5400); 4200 keeps 1200 bytes of that margin free.
     CHECK(worst <= 4200);
+    // v0.3.9 FIFO rule: the view is drawn in two stages of at most tracestage::kStageBytes FIFO bytes (seqTraceStages.h); nothing is dropped
+    // and the two stages together contain every shape and text of the single stage drawing, for every cursor, ALL marker and instance
+    m.track = 16;
+    m.cpu = m.peak = 100;
+    m.morphPat = 255;
+    m.all = 1;
+    m.cap = 8;
+    int worstStage = 0;
+    for (int inst = 0; inst < kInstances; inst++)
+        for (int s = 0; s < kSections; s++)
+            for (int i = 0; i < section((uint8_t)s).count; i++)
+            {
+                m.inst = (uint8_t)inst;
+                m.sec = (uint8_t)s;
+                m.idx = (uint8_t)i;
+                PlCtx full, c0, c1;
+                draw(full, m, pal);
+                tracestage::Split<PlCtx> s0(c0, 0), s1(c1, 1);
+                draw(s0, m, pal);
+                draw(s1, m, pal);
+                CHECK(s0.used[0] <= tracestage::kStageBytes && s1.used[1] <= tracestage::kStageBytes);
+                CHECK(s0.dropped == 0 && s1.dropped == 0);
+                CHECK(c0.rects + c1.rects == full.rects && c0.texts + c1.texts == full.texts);
+                worstStage = worstStage < s0.used[0] ? s0.used[0] : worstStage;
+                worstStage = worstStage < s1.used[1] ? s1.used[1] : worstStage;
+            }
+    printf("  PolySynth view in two FIFO stages: worst stage %d bytes (limit %d)\n", worstStage, (int)tracestage::kStageBytes);
+    CHECK(worstStage <= tracestage::kStageBytes);
+    m.morphPat = 0;
     // cells and rows do not overlap and fit: 7 cells in the widest row (the Voice row, plan 012)
     CHECK(kCellX0 + 6 * kCellStep + kCellW <= kBoxX1 && kCellW <= kCellStep);
     CHECK(kRowY0 + (kSections - 1) * kRowStep + kRowH <= 396);

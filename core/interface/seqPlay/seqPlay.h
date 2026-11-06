@@ -49,6 +49,7 @@ class cSeqPlayLegend : public cDisplayControl
     virtual ~cSeqPlayLegend() {}
 
     virtual void update();
+    virtual void update2(); // second display stage of the PolySynth view (FIFO rule, seqTraceStages.h)
     virtual void setStyle(uint32_t style) { this->style = style; }
     virtual void setText(const char*) {}
     virtual void setValue(int) {}
