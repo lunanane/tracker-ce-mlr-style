@@ -9,6 +9,7 @@
 #include "cutLayer.h"
 #include "laneView.h"
 #include "seqCutLogic.h"
+#include "seqMlrLogic.h"
 #include "seqSessionLogic.h"
 #include "sessionLayer.h"
 #include <stdio.h>

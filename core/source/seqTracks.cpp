@@ -1,6 +1,7 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 #include "seqTracks.h"
 #include "mtSequencer.h"
+#include "mtAudioEngine.h"
 #include "mtStructs.h"
 #include "fileManager.h"
 #include "fileManagerDefs.h"
