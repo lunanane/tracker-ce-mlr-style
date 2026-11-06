@@ -2035,7 +2035,7 @@ void cInstrumentEditor::plinkyRefresh()
         return;
     }
     const uint32_t now = seqNowMs();
-    if (now - plinkyLastMs < 50)
+    if (now - plinkyLastMs < 100) // v0.4.3: 10 per second like the Play-mode view (was 20: the whole view redrew while voices sounded)
         return;
     plinkyLastMs = now;
     showPlinkyCpu(false);

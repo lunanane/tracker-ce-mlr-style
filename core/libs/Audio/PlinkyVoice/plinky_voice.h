@@ -537,49 +537,28 @@ class Engine
                 I.chPos = 0;
                 I.chStale = false;
             }
-            const float chMix = (float)I.ef[P_CH_MIX] * 0.005f; // 0 .. 0.5 wet share
-            const float chDph = 0.2f * exp2fast((float)I.ef[P_CH_RATE] * 0.05f) * (1.0f / kFs);
-            const float chDepth = (float)I.ef[P_CH_DEPTH] * 2.2f; // +- 220 samples (5 ms) at full depth
-            for (int i = 0; i < kBlock; i++)
+            Mix m;
+            m.lv = lv;
+            m.dl = dl;
+            m.sRev = sRev;
+            m.sDly = sDly;
+            if (chorus)
             {
-                lv += dl;
-                float yl = softclip(busL[i] * lv) * 32767.0f, yr = softclip(busR[i] * lv) * 32767.0f;
-                if (chorus)
-                {   // modulated delay per side (triangle LFOs half a cycle apart), linear interpolation, 10 ms centre
-                    I.chPhase += chDph;
-                    if (I.chPhase >= 1.0f)
-                        I.chPhase -= 1.0f;
-                    float pl = I.chPhase, pr = I.chPhase + 0.5f;
-                    if (pr >= 1.0f)
-                        pr -= 1.0f;
-                    const float tl = (pl < 0.5f ? pl : 1.0f - pl) * 4.0f - 1.0f, tr = (pr < 0.5f ? pr : 1.0f - pr) * 4.0f - 1.0f;
-                    I.chMem[I.chPos & (kChLen - 1)] = (int16_t)yl;
-                    I.chMem[kChLen + (I.chPos & (kChLen - 1))] = (int16_t)yr;
-                    const float dL = 441.0f + chDepth * tl, dR = 441.0f + chDepth * tr;
-                    const int iL = (int)dL, iR = (int)dR;
-                    const float fL = dL - (float)iL, fR = dR - (float)iR;
-                    const int16_t* lineL = I.chMem;
-                    const int16_t* lineR = I.chMem + kChLen;
-                    const float wl = (float)lineL[(I.chPos - iL) & (kChLen - 1)] +
-                                     ((float)lineL[(I.chPos - iL - 1) & (kChLen - 1)] - (float)lineL[(I.chPos - iL) & (kChLen - 1)]) * fL;
-                    const float wr = (float)lineR[(I.chPos - iR) & (kChLen - 1)] +
-                                     ((float)lineR[(I.chPos - iR - 1) & (kChLen - 1)] - (float)lineR[(I.chPos - iR) & (kChLen - 1)]) * fR;
-                    I.chPos++;
-                    yl += (wl - yl) * chMix;
-                    yr += (wr - yr) * chMix;
-                }
-                o.dryL[i] = (int16_t)sat16(o.dryL[i] + (int)yl);
-                o.dryR[i] = (int16_t)sat16(o.dryR[i] + (int)yr);
-                if (doRev)
-                {
-                    o.revL[i] = (int16_t)sat16(o.revL[i] + (int)(yl * sRev));
-                    o.revR[i] = (int16_t)sat16(o.revR[i] + (int)(yr * sRev));
-                }
-                if (doDly)
-                {
-                    o.dlyL[i] = (int16_t)sat16(o.dlyL[i] + (int)(yl * sDly));
-                    o.dlyR[i] = (int16_t)sat16(o.dlyR[i] + (int)(yr * sDly));
-                }
+                m.chMix = (float)I.ef[P_CH_MIX] * 0.005f; // 0 .. 0.5 wet share
+                m.chDph = 0.2f * exp2fast((float)I.ef[P_CH_RATE] * 0.05f) * (1.0f / kFs);
+                m.chDepth = (float)I.ef[P_CH_DEPTH] * 2.2f; // +- 220 samples (5 ms) at full depth
+            }
+            // v0.4.3 (performance): one loop per combination of chorus / reverb send / delay send, no per-sample switch
+            switch ((chorus ? 4 : 0) + (doRev ? 2 : 0) + (doDly ? 1 : 0))
+            {
+                case 0: mixInst<false, false, false>(I, o, m); break;
+                case 1: mixInst<false, false, true>(I, o, m); break;
+                case 2: mixInst<false, true, false>(I, o, m); break;
+                case 3: mixInst<false, true, true>(I, o, m); break;
+                case 4: mixInst<true, false, false>(I, o, m); break;
+                case 5: mixInst<true, false, true>(I, o, m); break;
+                case 6: mixInst<true, true, false>(I, o, m); break;
+                default: mixInst<true, true, true>(I, o, m); break;
             }
             I.lvlPrev = d.level;
         }
@@ -599,7 +578,80 @@ class Engine
     }
 
   private:
-    static int sat16(int x) { return x > 32767 ? 32767 : (x < -32768 ? -32768 : x); }
+    static int sat16(int x)
+    {
+#if defined(__ARM_FEATURE_SAT)
+        return __builtin_arm_ssat(x, 16); // one instruction on the Cortex-M4, the same result
+#else
+        return x > 32767 ? 32767 : (x < -32768 ? -32768 : x);
+#endif
+    }
+    struct Mix
+    {
+        float lv, dl, sRev, sDly;
+        float chMix = 0.0f, chDph = 0.0f, chDepth = 0.0f;
+    };
+    // the instance's bus (busL / busR) at its level ramp, soft clipped, chorus, added to the dry outputs and the sends (the same
+    // arithmetic in the same order as the single loop it replaces)
+    template <bool CH, bool REV, bool DLY> void mixInst(Inst& I, const Out& o, const Mix& m)
+    {
+        float lv = m.lv;
+        const float dl = m.dl, sRev = m.sRev, sDly = m.sDly, chMix = m.chMix, chDph = m.chDph, chDepth = m.chDepth;
+        int16_t* const dryL = o.dryL;
+        int16_t* const dryR = o.dryR;
+        int16_t* const revL = o.revL;
+        int16_t* const revR = o.revR;
+        int16_t* const dlyL = o.dlyL;
+        int16_t* const dlyR = o.dlyR;
+        int16_t* const lineL = CH ? I.chMem : nullptr;
+        int16_t* const lineR = CH ? I.chMem + kChLen : nullptr;
+        float chPhase = I.chPhase;
+        uint16_t chPos = I.chPos;
+        for (int i = 0; i < kBlock; i++)
+        {
+            lv += dl;
+            float yl = softclip(busL[i] * lv) * 32767.0f, yr = softclip(busR[i] * lv) * 32767.0f;
+            if (CH)
+            {   // modulated delay per side (triangle LFOs half a cycle apart), linear interpolation, 10 ms centre
+                chPhase += chDph;
+                if (chPhase >= 1.0f)
+                    chPhase -= 1.0f;
+                float pl = chPhase, pr = chPhase + 0.5f;
+                if (pr >= 1.0f)
+                    pr -= 1.0f;
+                const float tl = (pl < 0.5f ? pl : 1.0f - pl) * 4.0f - 1.0f, tr = (pr < 0.5f ? pr : 1.0f - pr) * 4.0f - 1.0f;
+                lineL[chPos & (kChLen - 1)] = (int16_t)yl;
+                lineR[chPos & (kChLen - 1)] = (int16_t)yr;
+                const float dL = 441.0f + chDepth * tl, dR = 441.0f + chDepth * tr;
+                const int iL = (int)dL, iR = (int)dR;
+                const float fL = dL - (float)iL, fR = dR - (float)iR;
+                const float wl = (float)lineL[(chPos - iL) & (kChLen - 1)] +
+                                 ((float)lineL[(chPos - iL - 1) & (kChLen - 1)] - (float)lineL[(chPos - iL) & (kChLen - 1)]) * fL;
+                const float wr = (float)lineR[(chPos - iR) & (kChLen - 1)] +
+                                 ((float)lineR[(chPos - iR - 1) & (kChLen - 1)] - (float)lineR[(chPos - iR) & (kChLen - 1)]) * fR;
+                chPos++;
+                yl += (wl - yl) * chMix;
+                yr += (wr - yr) * chMix;
+            }
+            dryL[i] = (int16_t)sat16(dryL[i] + (int)yl);
+            dryR[i] = (int16_t)sat16(dryR[i] + (int)yr);
+            if (REV)
+            {
+                revL[i] = (int16_t)sat16(revL[i] + (int)(yl * sRev));
+                revR[i] = (int16_t)sat16(revR[i] + (int)(yr * sRev));
+            }
+            if (DLY)
+            {
+                dlyL[i] = (int16_t)sat16(dlyL[i] + (int)(yl * sDly));
+                dlyR[i] = (int16_t)sat16(dlyR[i] + (int)(yr * sDly));
+            }
+        }
+        if (CH)
+        {
+            I.chPhase = chPhase;
+            I.chPos = chPos;
+        }
+    }
     enum { EV_ON, EV_OFF, EV_ALLOFF, EV_BEND, EV_CC };
     enum { E_N = 32 };
     struct Ev
@@ -1035,14 +1087,51 @@ class Engine
         d.ladK = 3.9f * r * r;
     }
 
+    // v0.4.3: the state of one voice block between its set-up (voicePrep), the sample loop (voiceLoop<K>) and the write-back (voiceFinish)
+    struct VLoop
+    {
+        uint32_t ph0, ph1, ph2, ph3, pv0, pv1, pv2, pv3, off, sp0, sp1, spv0, spv1, spv2, spv3, r;
+        int32_t dp0, dp1, dp2, dp3, dd0, dd1, dd2, dd3, doff, sd0, sd1, shL, shR;
+        float g, k, dg, dk, res, nz, wL, dwW, xfU, dxfU, w1c, y1L, y2L, y1R, y2R, sgl1, sgl2, dsg1, dsg2, fgS, fgE, gT, kT;
+        const int16_t *tL0, *tL1, *tR0, *tR1;
+        bool ST, PU, WT, SUB;
+        int FT;
+    };
+
+    // v0.4.3 (performance): the sample loop of the default path (no sub oscillator, low pass gate) is compiled once per oscillator kind
+    // and width, so the common sounds run a loop without per-sample switches and without the sub / SVF / ladder state (register
+    // pressure); everything else takes the general loop with the per block switches. The set-up and the write-back are shared. Same
+    // arithmetic in the same order: the output is identical.
     void renderVoice(Voice& vo, const Derived& d)
     {
-        // both are per block constants: a predictable branch per sample instead of four copies of the loop (flash is tight)
+        VLoop L;
+        if (!voicePrep(vo, d, L))
+            return;
+        if (!d.sub && d.ft == 0)
+        {
+            switch ((d.wt ? 4 : (d.pulse ? 2 : 0)) + (d.stereo ? 1 : 0))
+            {
+                case 0: voiceLoop<0>(vo, d, L); break;
+                case 1: voiceLoop<1>(vo, d, L); break;
+                case 2: voiceLoop<2>(vo, d, L); break;
+                case 3: voiceLoop<3>(vo, d, L); break;
+                case 4: voiceLoop<4>(vo, d, L); break;
+                default: voiceLoop<5>(vo, d, L); break;
+            }
+        }
+        else
+            voiceLoop<6>(vo, d, L);
+        voiceFinish(vo, d, L);
+    }
+
+    // block rate part of a voice: envelopes, targets, coefficients. false: the voice ended (cleared), nothing to render
+    bool voicePrep(Voice& vo, const Derived& d, VLoop& L)
+    {
         const bool ST = d.stereo, PU = d.pulse, WT = d.wt;
         if ((vo.stage == ST_RELEASE && vo.env == 0.0f) || (vo.kill && vo.g == 0.0f))
         {
             vo.clear(); // the last block ramped down to zero
-            return;
+            return false;
         }
         switch (vo.stage)
         {
@@ -1163,8 +1252,6 @@ class Engine
             dsg2 = (d.subG2 - sgl2) * (1.0f / kBlock);
         }
         vo.subOn = SUB;
-        float a1 = 0, a2 = 0, a3 = 0, fk = 0, G = 0, G2 = 0, G3 = 0, invD = 1.0f;
-        const float svfK = d.svfK, ladK = d.ladK;
         float g = vo.g, k = vo.k;
         const float dg = (gT - g) * (1.0f / kBlock), dk = (kT - k) * (1.0f / kBlock);
         const float res = d.res, nz = d.noise;
@@ -1209,6 +1296,89 @@ class Engine
         }
         float y1L = vo.y[0], y2L = vo.y[1], y1R = vo.y[2], y2R = vo.y[3];
         uint32_t r = rng;
+
+        L.ph0 = ph0;
+        L.ph1 = ph1;
+        L.ph2 = ph2;
+        L.ph3 = ph3;
+        L.pv0 = pv0;
+        L.pv1 = pv1;
+        L.pv2 = pv2;
+        L.pv3 = pv3;
+        L.off = off;
+        L.sp0 = sp0;
+        L.sp1 = sp1;
+        L.spv0 = spv0;
+        L.spv1 = spv1;
+        L.spv2 = spv2;
+        L.spv3 = spv3;
+        L.r = r;
+        L.dp0 = dp0;
+        L.dp1 = dp1;
+        L.dp2 = dp2;
+        L.dp3 = dp3;
+        L.dd0 = dd0;
+        L.dd1 = dd1;
+        L.dd2 = dd2;
+        L.dd3 = dd3;
+        L.doff = doff;
+        L.sd0 = sd0;
+        L.sd1 = sd1;
+        L.shL = shL;
+        L.shR = shR;
+        L.g = g;
+        L.k = k;
+        L.dg = dg;
+        L.dk = dk;
+        L.res = res;
+        L.nz = nz;
+        L.wL = wL;
+        L.dwW = dwW;
+        L.xfU = xfU;
+        L.dxfU = dxfU;
+        L.w1c = w1c;
+        L.y1L = y1L;
+        L.y2L = y2L;
+        L.y1R = y1R;
+        L.y2R = y2R;
+        L.sgl1 = sgl1;
+        L.sgl2 = sgl2;
+        L.dsg1 = dsg1;
+        L.dsg2 = dsg2;
+        L.fgS = fgS;
+        L.fgE = fgE;
+        L.gT = gT;
+        L.kT = kT;
+        L.tL0 = tL0;
+        L.tL1 = tL1;
+        L.tR0 = tR0;
+        L.tR1 = tR1;
+        L.ST = ST;
+        L.PU = PU;
+        L.WT = WT;
+        L.SUB = SUB;
+        L.FT = FT;
+        return true;
+    }
+
+    // K < 6: fixed kind (bit 0 stereo, K >> 1: 0 saws, 1 pulse, 2 wavetable), no sub, low pass gate. K = 6: the switches of the block.
+    template <int K> __attribute__((noinline)) void voiceLoop(Voice& vo, const Derived& d, VLoop& L)
+    {
+        constexpr bool kFixed = K < 6;
+        const bool ST = kFixed ? (K & 1) != 0 : L.ST, PU = kFixed ? (K >> 1) == 1 : L.PU, WT = kFixed ? (K >> 1) == 2 : L.WT;
+        const bool SUB = kFixed ? false : L.SUB;
+        const int FT = kFixed ? 0 : L.FT;
+        uint32_t ph0 = L.ph0, ph1 = L.ph1, ph2 = L.ph2, ph3 = L.ph3, pv0 = L.pv0, pv1 = L.pv1, pv2 = L.pv2, pv3 = L.pv3, off = L.off;
+        uint32_t sp0 = L.sp0, sp1 = L.sp1, spv0 = L.spv0, spv1 = L.spv1, spv2 = L.spv2, spv3 = L.spv3, r = L.r;
+        int32_t dp0 = L.dp0, dp1 = L.dp1, dp2 = L.dp2, dp3 = L.dp3;
+        const int32_t dd0 = L.dd0, dd1 = L.dd1, dd2 = L.dd2, dd3 = L.dd3, doff = L.doff, sd0 = L.sd0, sd1 = L.sd1;
+        const int shL = L.shL, shR = L.shR;
+        float g = L.g, k = L.k, wL = L.wL, xfU = L.xfU, y1L = L.y1L, y2L = L.y2L, y1R = L.y1R, y2R = L.y2R, sgl1 = L.sgl1, sgl2 = L.sgl2;
+        const float dg = L.dg, dk = L.dk, res = L.res, nz = L.nz, dwW = L.dwW, dxfU = L.dxfU, w1c = L.w1c, dsg1 = L.dsg1, dsg2 = L.dsg2;
+        const float fgS = L.fgS, fgE = L.fgE;
+        const int16_t *tL0 = L.tL0, *tL1 = L.tL1, *tR0 = L.tR0, *tR1 = L.tR1;
+        float a1 = 0, a2 = 0, a3 = 0, fk = 0, G = 0, G2 = 0, G3 = 0, invD = 1.0f;
+        const float svfK = d.svfK, ladK = d.ladK;
         float* oL = busL;
         float* oR = busR;
 
@@ -1355,6 +1525,35 @@ class Engine
                 oR[i] += y2L;
             }
         }
+        L.r = r;
+        L.ph0 = ph0;
+        L.ph1 = ph1;
+        L.ph2 = ph2;
+        L.ph3 = ph3;
+        L.pv0 = pv0;
+        L.pv1 = pv1;
+        L.pv2 = pv2;
+        L.pv3 = pv3;
+        L.sp0 = sp0;
+        L.sp1 = sp1;
+        L.spv0 = spv0;
+        L.spv1 = spv1;
+        L.spv2 = spv2;
+        L.spv3 = spv3;
+        L.y1L = y1L;
+        L.y2L = y2L;
+        L.y1R = y1R;
+        L.y2R = y2R;
+    }
+
+    // write-back of the block's end state
+    void voiceFinish(Voice& vo, const Derived& d, VLoop& L)
+    {
+        const bool SUB = L.SUB;
+        const uint32_t r = L.r, sp0 = L.sp0, sp1 = L.sp1, spv0 = L.spv0, spv1 = L.spv1, spv2 = L.spv2, spv3 = L.spv3;
+        const uint32_t ph0 = L.ph0, ph1 = L.ph1, ph2 = L.ph2, ph3 = L.ph3, pv0 = L.pv0, pv1 = L.pv1, pv2 = L.pv2, pv3 = L.pv3;
+        const float gT = L.gT, kT = L.kT;
+        float y1L = L.y1L, y2L = L.y2L, y1R = L.y1R, y2R = L.y2R;
         rng = r;
         vo.sph[0] = sp0;
         vo.sph[1] = sp1;
