@@ -1,7 +1,7 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 // One display control for the plan 013 trace views: the PolySynth pitch trace (seqPitchTraceLogic.h) and the master amplitude view
 // (seqAmpViewLogic.h). The layout and drawing are the host-tested templates; this control only maps their context onto the FT81x
-// display list. Hidden (style 0) until a view shows it.
+// display list. Hidden (style 0) until a view shows it. v0.3.9: two display stages of at most 3840 FIFO bytes each (seqTraceStages.h).
 #ifndef INTERFACE_SEQ_TRACE_CONTROL_H_
 #define INTERFACE_SEQ_TRACE_CONTROL_H_
 
@@ -18,6 +18,8 @@ struct TraceViewData
     const ampview::Follower* amp = nullptr;
     char title[40] = { 0 };
     char hint[40] = { 0 };
+    // v0.3.9: != 0 (the ms of stage 0) while a frame is half built: the view must not change its follower until stage 1 has drawn it
+    mutable volatile uint32_t busyMs = 0;
 };
 
 class cSeqTraceControl : public cDisplayControl
@@ -27,6 +29,7 @@ class cSeqTraceControl : public cDisplayControl
     virtual ~cSeqTraceControl() {}
 
     virtual void update();
+    virtual void update2();
     virtual void setStyle(uint32_t style) { this->style = style; }
     virtual void setText(const char*) {}
     virtual void setValue(int) {}
@@ -34,6 +37,7 @@ class cSeqTraceControl : public cDisplayControl
     virtual void setData(void* data) { view = (const TraceViewData*)data; }
 
   private:
+    void drawStage(int stage);
     const TraceViewData* view = nullptr;
 };
 
