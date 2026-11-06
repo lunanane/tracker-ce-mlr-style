@@ -1711,6 +1711,10 @@ void cMasterParams::showMixerDelayReverbScreen()
 #endif
     display.refreshControl(blankSpaceCover[0]);
 #endif
+    // v0.4.3: the bars and names under the opaque amp view are hidden while it is open: their display lists would take the frame's room
+    // from the view's lines (the label strip and the title bar stay)
+    if (ampView.visible())
+        hideControlUnderMenu();
 
     display.synchronizeRefresh();
 

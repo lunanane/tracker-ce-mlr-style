@@ -17,13 +17,13 @@ AmpView ampView;
 
 namespace
 {
-// v0.3.7: the history of the 9 lanes (v0.4.1: about 4.1 KB each) and the per block peak rings (64 values for every track channel and the two master
-// channels, 2.3 KB) live in EXTERNAL_RAM. Raw storage only: an object with a constructor in EXTERNAL_RAM would get a static constructor that
-// runs before the SDRAM is up (boot hang of v0.3.4); the follower is built by placement new on the first open.
+// v0.3.7: the history of the 9 lanes (v0.4.1: about 4.1 KB each; v0.4.3: + the drawing scratch of about 20 KB) and the per block peak rings
+// (64 values for every track channel and the two master channels, 2.3 KB) live in EXTERNAL_RAM. Raw storage only: an object with a constructor
+// in EXTERNAL_RAM would get a static constructor that runs before the SDRAM is up (boot hang of v0.3.4); the follower is built by placement
+// new in begin() (first main loop pass).
 __NOINIT(EXTERNAL_RAM) alignas(ampview::Follower) uint8_t s_followerMem[sizeof(ampview::Follower)];
 __NOINIT(EXTERNAL_RAM) uint16_t s_rings[ampview::kTracks * 2 + 2][PeakRing::kLen];
-constexpr uint32_t kRefreshMs = 40; // 25 fps at most, only while open
-constexpr uint32_t kFrameLimit = 8172 - 400; // display.cpp step3 appends controls while the sum stays under 8172, keep a margin
+constexpr uint32_t kRefreshMs = 40; // feed and draw at most 25 times per second
 constexpr int kMaxCatchUp = 1024;   // blocks per pass (3 s): a main loop that stood still must not burst
 } // namespace
 
@@ -39,19 +39,12 @@ void AmpView::createControl()
     prop.data = &data_;
     data_.kind = TraceViewData::NONE;
     data_.busyMs = 0;
+    data_.lastComplete = false; // a new control: no display list of a last frame to measure
+    data_.measured = false;
     control_ = display.createControl<cSeqTraceControl>(&prop);
 }
 
-void AmpView::detach()
-{
-    for (int t = 0; t < ampview::kTracks; t++)
-        for (int ch = 0; ch < 2 && ch < instrumentPlayer[t].peakTapChannels(); ch++)
-            instrumentPlayer[t].setPeakTap(ch, nullptr);
-    engine.setMasterPeakRing(0, nullptr);
-    engine.setMasterPeakRing(1, nullptr);
-}
-
-// the Master module is entered: the history starts (once; entering another page of the module keeps it)
+// the first main loop pass (tick) or the Master module (start): the history starts, once; it runs from then on
 void AmpView::begin()
 {
     if (running_)
@@ -70,16 +63,24 @@ void AmpView::begin()
     engine.setMasterPeakRing(0, s_rings[kRingMaster]);
     engine.setMasterPeakRing(1, s_rings[kRingMaster + 1]);
     lastMs_ = seqNowMs();
+    drawnBlocks_ = 0;
+    corr_ = 0;
     running_ = true;
 }
 
-// the Master module is left
+// every main loop pass: the history runs in every module (v0.4.3)
+void AmpView::tick()
+{
+    if (!running_)
+        begin();
+    feed(seqNowMs());
+}
+
+// the Master module is left: its controls are destroyed (the view's too); the history keeps running
 void AmpView::forget()
 {
-    if (running_)
-        detach();
-    running_ = false;
     data_.kind = TraceViewData::NONE;
+    data_.busyMs = 0;
     control_ = -1;
 }
 
@@ -117,26 +118,23 @@ void AmpView::toggle()
     display.synchronizeRefresh();
 }
 
+// v0.4.3: the step is applied by update() (never between the two display stages of a frame: both must draw the same scale)
 void AmpView::jog(int16_t delta)
 {
     if (data_.kind != TraceViewData::AMP || !running_ || delta == 0)
         return;
-    follower_->jog(delta);
-    display.refreshControl(control_);
-    display.synchronizeRefresh();
+    const int p = pendingJog_ + (delta > 0 ? 1 : -1);
+    pendingJog_ = (int8_t)(p > 8 ? 8 : (p < -8 ? -8 : p));
 }
 
-void AmpView::update(bool pageOk)
+// the new block peaks of the rings into the history (every 40 ms at most)
+void AmpView::feed(uint32_t now)
 {
     if (!running_)
         return;
-    const bool shown = data_.kind == TraceViewData::AMP;
-    if (shown && !pageOk)
-        close();
-    const uint32_t now = seqNowMs();
     if ((uint32_t)(now - lastMs_) < kRefreshMs)
         return;
-    if (shown && data_.busyMs != 0 && (uint32_t)(now - data_.busyMs) < 200u)
+    if (data_.kind == TraceViewData::AMP && data_.busyMs != 0 && (uint32_t)(now - data_.busyMs) < 200u)
         return; // v0.3.9: the control is between its two display stages, both must draw the same history (seqTraceStages.h)
     lastMs_ = now;
 
@@ -199,20 +197,50 @@ void AmpView::update(bool pageOk)
     for (int i = 0; i < kRings; i++)
         last_[i] = (uint16_t)(last_[i] + (avail[i] < n ? avail[i] : n));
     last_[kRingMaster] = headM; // the clock ring is consumed completely (blocks beyond kMaxCatchUp are dropped)
+}
 
-    if (data_.kind != TraceViewData::AMP)
+void AmpView::update(bool pageOk)
+{
+    if (!running_)
+        begin();
+    const bool shown = data_.kind == TraceViewData::AMP;
+    if (shown && !pageOk)
+        close();
+    const uint32_t now = seqNowMs();
+    feed(now);
+    if (data_.kind != TraceViewData::AMP || control_ < 0)
+    {
+        pendingJog_ = 0;
         return; // history only: nothing to draw while the view is closed
+    }
+    if (data_.busyMs != 0 && (uint32_t)(now - data_.busyMs) < 200u)
+        return; // the last frame is still half built
+    const bool jogged = pendingJog_ != 0;
+    for (; pendingJog_ > 0; pendingJog_--) follower_->jog(1);
+    for (; pendingJog_ < 0; pendingJog_++) follower_->jog(-1);
+    if (!jogged && (follower_->blocks() == drawnBlocks_ || (uint32_t)(now - drawMs_) < kRefreshMs))
+        return;
+    // v0.4.3: what the view's last complete display list really took against its own estimate (the control notes both when it starts the
+    // next frame): the texts' estimate is an upper bound, the difference goes back into the budget; anything the estimate misses makes it smaller
+    if (data_.measured)
+    {
+        int32_t c = data_.lastRam - data_.lastEst;
+        c = c < -1500 ? -1500 : (c > 1500 ? 1500 : c);
+        corr_ = (int16_t)c;
+        data_.measured = false;
+    }
+    const uint32_t others = display.shownRamBytesExcept(control_);
+    drawMs_ = now;
+    drawnBlocks_ = follower_->blocks();
     ampview::Info& in = follower_->info;
     in.playing = sequencer.isPlay() ? 1 : 0;
     in.pattern = (uint8_t)mtProject.values.actualPattern;
     in.pos = (uint8_t)(sequencer.getActualPos() + 1);
     in.len = (uint8_t)sequencer.getPatternLength();
     in.bpm10 = (uint16_t)(sequencer.getCurrentTempo() * 10.0f + 0.5f);
-    // the display list of the view takes what the other shown controls (title bar, labels, the mixer page under it) leave of the frame
-    const uint32_t others = display.shownRamBytesExcept(control_);
-    int32_t room = (int32_t)kFrameLimit - (int32_t)others;
-    room = room < 2600 ? 2600 : (room > 5800 ? 5800 : room);
-    follower_->budget = (uint16_t)room;
+    // the display list of the view takes what the other shown controls (title bar, labels; the mixer page under the panel is hidden while
+    // the view is open, cMasterParams::showMixerDelayReverbScreen) leave of the frame; the lines fit it exactly (seqAmpViewLogic.h)
+    follower_->budget = (uint16_t)ampview::frameBudget((int)others, corr_);
     display.refreshControl(control_);
     display.synchronizeRefresh();
 }

@@ -14,6 +14,7 @@
 
 #include "plinky_voice.h"
 #include "seqAmpViewLogic.h"
+#include "seqPalette.h"
 #include "seqPitchTraceLogic.h"
 #include "seqTraceStages.h"
 
@@ -32,14 +33,20 @@ static int g_fail = 0, g_checks = 0;
 // ---- the FT81x side -------------------------------------------------------------------------------------------------------------
 // The device context of traceControl.cpp, as the FIFO sees it: every call is a list of 32 bit words (FT812.cpp), recorded as text so the
 // stages can be compared with the single stage drawing. Strips keep their points for the drawing checks.
+// v0.4.3: also the DISPLAY LIST bytes the co-processor writes (what display.cpp step3 appends to the 8172 byte frame): the same as the FIFO
+// for every command but CMD_TEXT, which becomes a few setup words and a cell + vertex per character on the FT81x (the right column is past
+// x 511, where VERTEX2II cannot be used); g_textDlPerChar models that (8 = the estimate of the drawing, 4 = VERTEX2II everywhere)
+static int g_textDlPerChar = 8;
 struct DevCtx
 {
     std::vector<std::string> cmds;
     int bytes = 0;
+    int dl = 0;       // display list bytes
+    bool sub = false; // strips in 1/16 px (subpixel)
     uint32_t col = 0;
     struct Strip { uint32_t col; std::vector<int> x, y; };
     std::vector<Strip> strips;
-    void add(const std::string& s, int b) { cmds.push_back(s); bytes += b; }
+    void add(const std::string& s, int b) { cmds.push_back(s); bytes += b; dl += b; }
     void color(uint32_t rgb) { col = rgb; add("C" + std::to_string(rgb), 4); }
     void width(int w) { add("W" + std::to_string(w), 4); }
     void rect(int x0, int y0, int x1, int y1)
@@ -57,21 +64,24 @@ struct DevCtx
         std::string t = "S";
         Strip st;
         st.col = col;
+        const int d = sub ? (int)ampview::kSub : 1; // the drawing checks in whole pixels (rounded)
         for (int i = 0; i < n; i++)
         {
             t += std::to_string(xy[i * 2]) + "," + std::to_string(xy[i * 2 + 1]) + ";";
-            st.x.push_back(xy[i * 2]);
-            st.y.push_back(xy[i * 2 + 1]);
+            st.x.push_back((xy[i * 2] + d / 2) / d);
+            st.y.push_back((xy[i * 2 + 1] + d / 2) / d);
         }
         strips.push_back(st);
         add(t, 4 + 4 * n + 4);
     }
+    void subpixel(bool on) { sub = on; add(on ? "V4" : "V0", 4); }
     void textPhase() { add("B", 4); }
     void text(int x, int y, int font, int opt, const char* s)
     {
         // CMD_TEXT, x | y, font | options, the string with its zero padded to 4 (API_SendString)
         add("T" + std::to_string(x) + "," + std::to_string(y) + "," + std::to_string(font) + "," + std::to_string(opt) + s,
             12 + (int)((strlen(s) + 1 + 3) / 4 * 4));
+        dl += 16 + g_textDlPerChar * (int)strlen(s) - (12 + (int)((strlen(s) + 1 + 3) / 4 * 4));
     }
     void finish() {}
 };
@@ -98,6 +108,7 @@ struct Frame
 {
     DevCtx all;      // stage 0 commands followed by the stage 1 commands
     int bytes[2] = { 0, 0 };
+    int dl = 0;      // display list of both stages (the control's RAM_G size): + the blend calls and VERTEX_FORMAT(0) of the control
     int dropped = 0;
     bool fifoOk = true;
 };
@@ -105,10 +116,12 @@ template <class DrawFn, class BetweenFn> static Frame refresh(Fifo& fifo, DrawFn
 {
     Frame f;
     uint32_t col = 0;
+    bool sub = false;
     for (int st = 0; st < tracestage::kStages; st++)
     {
         DevCtx d;
         d.col = col; // the stage DLs are concatenated: the colour of the end of stage 0 is still set at the start of stage 1
+        d.sub = sub; // ... and the vertex format
         tracestage::Split<DevCtx> c(d, st);
         draw(c);
         const int burst = d.bytes + tracestage::kOwnBytes; // + CMD_DLSTART and the control's blend function call
@@ -118,7 +131,9 @@ template <class DrawFn, class BetweenFn> static Frame refresh(Fifo& fifo, DrawFn
         for (auto& s : d.cmds) f.all.cmds.push_back(s);
         for (auto& s : d.strips) f.all.strips.push_back(s);
         f.all.bytes += d.bytes;
+        f.dl += d.dl + (st == 0 ? 4 : 8);
         col = d.col;
+        sub = d.sub;
         if (st == 0) between();
     }
     return f;
@@ -137,6 +152,7 @@ struct Device
     ampview::Follower* f;
     uint16_t last[kRings];
     double audMs = 0;
+    bool gate = false;   // v0.4.3: tracks silent between their hits (many strips: the worst case for the display list)
     uint32_t busyMs = 0; // TraceViewData::busyMs
     uint32_t lastMs = 0;
     int tracks;
@@ -157,7 +173,8 @@ struct Device
             for (int t = 0; t < ampview::kTracks; t++)
             {
                 const double per = (t + 2) * 0.125;
-                const double v = t < tracks ? 14000.0 * exp(-fmod(s + t * 0.03, per) / per * 5.0) : 0.0;
+                const double ph = fmod(s + t * 0.03, per) / per;
+                const double v = t < tracks && !(gate && ph > 0.3) ? 14000.0 * exp(-ph * 5.0) : 0.0;
                 mix += v;
                 for (int ch = 0; ch < 2; ch++)
                 {
@@ -237,22 +254,40 @@ static int minStripX(const DevCtx& d)
     return m;
 }
 
+// colour -> the leftmost x of its strips
+static int minXOf(const DevCtx& d, uint32_t col)
+{
+    int m = 99999;
+    for (auto& s : d.strips)
+        if (s.col == col)
+            for (int x : s.x) m = x < m ? x : m;
+    return m;
+}
+
 static void test_amp_device_path()
 {
     const int kXLow = ampview::kX0;
-    // the Global Mixer 3/3 page under the view uses little of the frame: the budget clamps at its maximum (the worst case for the FIFO)
-    const int scenarios[3][2] = { { 3, 5800 }, { 8, 5800 }, { 2, 4400 } };
+    // v0.4.3: the budget comes from the frame as on the device: frameBudget(what the other shown controls take, the measured correction of
+    // the view's own estimate). The Global Mixer 3/3 page while the view is open: the stock title bar (600) and the label strip (1720, the
+    // frame model of plan 015 V); the bars and names under the view are hidden. Scenarios: tracks, others, text display list per character
+    // (8 = the estimate holds, 4 = the device writes less: the correction gives it back to the lines), gated tracks (silence between the hits:
+    // many strips). 8 tracks with 1200 others: the budget clamps at kMaxBudget, the worst case for the FIFO.
+    const int scenarios[5][4] = { { 3, 2320, 8, 0 }, { 8, 2320, 4, 0 }, { 8, 1200, 4, 1 }, { 2, 3500, 8, 0 }, { 8, 2320, 8, 1 } };
     for (auto& sc : scenarios)
     {
         ampsim::Device dev(sc[0]);
-        dev.f->budget = (uint16_t)sc[1];
+        dev.gate = sc[3] != 0;
+        g_textDlPerChar = sc[2];
+        const int others = sc[1];
+        int corr = 0, maxFrame = 0, maxBudget = 0, minBudget = 99999;
+        bool frameOk = true;
         Fifo fifo;
         unsigned rnd = 12345;
         double now = 1000.0; // ms of the main loop
         dev.audMs = now;
         bool fifoOk = true, same = true, inHistory = true, frozen = true;
         int maxOld = 0, maxStage = 0, dropped = 0, x5 = 99999, x10 = 99999, x20 = 99999, x29 = 99999, xEnd = 99999;
-        int framesAfter = 0, misaligned = 0, notRight = 0, leftOfAxis = 0, framesRight = 0;
+        int framesAfter = 0, misaligned = 0, notRight = 0, leftOfAxis = 0, framesRight = 0, linesShort = 0, linesChecked = 0;
         const double t0 = now;
         while (now - t0 < 130000.0)
         {
@@ -260,6 +295,10 @@ static void test_amp_device_path()
             now += 5 + (rnd >> 24) % 12; // a main loop pass every 5 .. 16 ms
             dev.audioUntil(now);
             if (!dev.update((uint32_t)now)) continue;
+            const int budget = ampview::frameBudget(others, corr); // AmpView::update
+            dev.f->budget = (uint16_t)budget;
+            maxBudget = budget > maxBudget ? budget : maxBudget;
+            minBudget = budget < minBudget ? budget : minBudget;
             // the refresh the update asked for: two stages, the main loop runs in between (another update attempt, refused)
             const uint32_t blocksBefore = dev.f->blocks();
             Frame fr = refresh(fifo, [&](tracestage::Split<DevCtx>& c) {
@@ -275,18 +314,22 @@ static void test_amp_device_path()
             dropped += fr.dropped;
             maxStage = fr.bytes[0] > maxStage ? fr.bytes[0] : maxStage;
             maxStage = fr.bytes[1] > maxStage ? fr.bytes[1] : maxStage;
+            // the frame: the view's display list next to the others stays under 8172 (else step3 would not draw the view at all)
+            maxFrame = others + fr.dl > maxFrame ? others + fr.dl : maxFrame;
+            frameOk = frameOk && others + fr.dl < ampview::kFrameBytes;
+            corr = fr.dl - dev.f->cache.bytes; // what the control notes at the start of the next frame
             // the single stage drawing of v0.3.7 / v0.3.8 (what the FIFO got before), the same frozen data
             DevCtx one;
             ampview::draw(one, *dev.f, "Track levels, dB", "Amp: Close");
             const int oldBurst = one.bytes + 8;
             maxOld = oldBurst > maxOld ? oldBurst : maxOld;
             same = same && one.cmds == fr.all.cmds;
-            // only the real history: no point older than what the cascade holds (+ one column of slack)
+            // only the real history: no point older than what the cascade holds (+ one dense column of slack: a column is drawn when its centre
+            // is inside the history)
             const float histMs = (float)dev.f->blocks() * ampview::kBlockMs;
             const int mx = minStripX(fr.all);
-            int colW = 0; // the column width at the left end of the lines (one column of slack: a column is drawn when it starts inside the history)
-            for (auto& s : fr.all.strips)
-                if (s.x.size() >= 2 && s.x[0] == mx) colW = s.x[1] - s.x[0];
+            const ampview::LineCache& L = dev.f->cache;
+            const int colW = (ampview::kX1 - ampview::kX0 + L.cols - 2) / (L.cols - 1);
             if (mx < 99999) inHistory = inHistory && mx >= (int)ampview::xOfAge(histMs) - colW - 2;
             const double el = now - t0;
             if (el < 5200 && el > 4800) x5 = mx < x5 ? mx : x5;
@@ -295,12 +338,21 @@ static void test_amp_device_path()
             if (el < 29000 && el > 28800) x29 = mx < x29 ? mx : x29;
             if (el > 125000) xEnd = mx < xEnd ? mx : xEnd;
             // v0.4.1: once the max age (30 s) has passed the lines start exactly on the y axis and stay there; nothing is ever left of it,
-            // and the newest value is always at the right edge
+            // and the newest value is always at the right edge. v0.4.3: for EVERY line whose oldest column is on a strip (not below the floor),
+            // in every frame: the thinning never takes the left end away
             if (mx < kXLow) leftOfAxis++;
             if (el > 31000)
             {
                 framesAfter++;
                 if (mx != ampview::kX0) misaligned++;
+                for (int i = 0; i < L.count; i++)
+                {
+                    if (L.first != 0 || L.y[i][0] < 0) continue;
+                    const int ln = L.lane[i];
+                    const uint32_t c = ln == ampview::kTracks ? seqpal::kTitle : seqpal::trackColor(ln);
+                    linesChecked++;
+                    if (minXOf(fr.all, L.pass[i] == 0 ? seqpal::faint(c) : c) != ampview::kX0) linesShort++;
+                }
             }
             if (el > 1000)
             {
@@ -311,12 +363,15 @@ static void test_amp_device_path()
                 if (rx != ampview::kX1) notRight++;
             }
         }
-        printf("  amp device path, %d tracks, budget %d: single stage up to %d FIFO bytes (FIFO %d), now stages <= %d; left end of the "
-               "lines after 5 s x=%d, 10 s x=%d, 20 s x=%d, 29 s x=%d, 125 s x=%d (axis %d); %d frames after 31 s, %d misaligned\n",
-               sc[0], sc[1], maxOld, (int)tracestage::kFifoBytes, maxStage, x5, x10, x20, x29, xEnd, (int)ampview::kX0, framesAfter, misaligned);
-        if (sc[1] == 5800) CHECK(maxOld > tracestage::kFifoBytes - 4); // what broke on the device: the single stage overran the FIFO
+        printf("  amp device path, %d tracks%s, others %d, text %d B/char: budget %d .. %d, frame up to %d (limit %d), single stage up to %d FIFO "
+               "bytes, stages <= %d; left end after 5 s x=%d, 10 s x=%d, 20 s x=%d, 29 s x=%d, 125 s x=%d (axis %d); %d frames after 31 s, %d "
+               "misaligned, %d of %d lines short\n",
+               sc[0], sc[3] ? " gated" : "", others, sc[2], minBudget, maxBudget, maxFrame, (int)ampview::kFrameBytes, maxOld, maxStage, x5, x10, x20,
+               x29, xEnd, (int)ampview::kX0, framesAfter, misaligned, linesShort, linesChecked);
+        if (maxBudget >= 5800) CHECK(maxOld > tracestage::kFifoBytes - 4); // what broke on the device in v0.3.8: the single stage overran the FIFO
         CHECK(fifoOk);           // every burst is executed completely
         CHECK(dropped == 0);     // nothing had to be dropped
+        CHECK(frameOk);          // v0.4.3: the frame never overflows (the view would vanish)
         CHECK(same);             // stage 0 + stage 1 == the single stage drawing
         CHECK(frozen);           // no history pushed while a frame was half built
         CHECK(inHistory);        // no fake fill: the lines span the real history only
@@ -325,6 +380,7 @@ static void test_amp_device_path()
         CHECK(x10 < x5 && x20 < x10 && x29 < x20 && x29 <= ampview::kX0 + 12); // the line moves on to the left, nearly at the axis after 29 s
         CHECK(xEnd == ampview::kX0);                                           // the left axis
         CHECK(framesAfter > 100 && misaligned == 0);                           // after the max age (30 s): aligned at the y axis in EVERY frame
+        CHECK(linesChecked > framesAfter && linesShort == 0);                  // v0.4.3: every line that is on a strip there, in every frame
         CHECK(leftOfAxis == 0);                                                // the cut: nothing is drawn left of the axis
         CHECK(notRight == 0 && framesRight > 100);                             // the newest value sits at the right edge in every frame
     }
@@ -426,7 +482,7 @@ static void test_stage_capacity()
 {
     CHECK(tracestage::kStageBytes < tracestage::kFifoBytes - 4);
     CHECK(2 * (tracestage::kStageBytes - tracestage::kOwnBytes) >= ampview::kDefaultBudget + 400 + 808);
-    CHECK(2 * (tracestage::kStageBytes - tracestage::kOwnBytes) >= 5800 + 808); // the amp budget clamp (ampView.cpp) + the largest strip
+    CHECK(2 * (tracestage::kStageBytes - tracestage::kOwnBytes) >= ampview::kMaxBudget + 808); // the amp budget clamp (frameBudget) + the largest strip
     CHECK(2 * (tracestage::kStageBytes - tracestage::kOwnBytes) >= pitchtrace::kDisplayBudget + 808);
     // a drawing that is too big for both stages is cut, never overruns the FIFO
     DevCtx d0, d1;

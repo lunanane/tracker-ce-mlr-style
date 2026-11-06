@@ -1018,6 +1018,21 @@ Host tests: `core/seqtest/test_sampmem.cpp` (the refusal of the old rule is repr
 
 **P3 - speed.** Compare "Samples resident / streamed" and the ISR average with v0.4.1 on the same project: streamed voices about 2 % each cheaper, resident about 0.1-0.2 % each. Sound must be identical (the changes are bit-exact): play a project with one-shot and looped samples at several pitches and compare with v0.4.1 by ear / recording.
 
+## 11q. v0.4.3: amp view always full, smooth curves (plan 015 V, Original Tracker only)
+Host-checked (`make test`): history replay, frame and FIFO budget with the page model, left end on the axis for every line in every frame, smoothing
+and thinning bounds. Nothing below is device-tested yet. Replaces the rows "Leave the Master module and come back" and the CPU row of 11k (v0.4.1).
+
+| Do | Look at | Expected |
+|---|---|---|
+| Play a loop in the pattern view for at least 30 s, then Master, page 3 "Global Mixer 3/3", **Amp view** | The graph | Full at once: every line that is not silent at that time **touches the y axis** on the left; no empty part. |
+| Go to another module and back, open the view again | The graph | Still full (the history keeps running in every module, also with the view closed). |
+| Keep the view open while playing | The lines | **Smooth curves** (rounded humps per beat, antialiased slopes), no zigzag teeth; the left end stays on the axis in every frame; no flicker, no frame without the view. |
+| Eight tracks playing | The lines | All eight + master drawn, smoother (simpler curves) than with two tracks, nothing missing (labels, header, lines). |
+| Jog wheel | Time scale | As in 11k; each detent one step, none lost. |
+| Close the view | The page | Bars, names and meters of Global Mixer 3/3 back as before. |
+| Config > Info > CPU monitor, eight tracks playing, view closed vs. v0.4.2 | ISR | About 1 % more while playing (the taps now run everywhere); idle tracks cost nothing. |
+| Same with the view open | Main loop | A bit more than v0.4.2 while open (host: about 1.7 x the drawing time with 8 tracks), nothing when closed. |
+
 ## 12. Stock behaviour (never enter Play mode, Session or the fader page)
 | Press | Expected |
 |---|---|

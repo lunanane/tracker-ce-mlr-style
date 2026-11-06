@@ -26,7 +26,7 @@ enum
     kStages = 2,
     kFifoBytes = 4096,  // FT81x RAM_CMD
     kStageBytes = 3840, // per stage, incl. the CMD_DLSTART of display.cpp and the blend calls of the control: well under 4092
-    kOwnBytes = 8       // CMD_DLSTART (display.cpp) + one blend function call of the control per stage
+    kOwnBytes = 12      // CMD_DLSTART (display.cpp) + one blend function call of the control per stage (+ VERTEX_FORMAT(0) in the last, v0.4.3)
 };
 
 // FIFO bytes of the commands the trace context issues (FT812.cpp): one word per DL command, CMD_TEXT 12 + the string with its zero
@@ -62,6 +62,7 @@ template <class C> struct Split
     void rect(int x0, int y0, int x1, int y1) { if (take(20)) out.rect(x0, y0, x1, y1); }
     void lines(const int16_t* s, int n) { if (take(8 + 8 * n)) out.lines(s, n); }
     void strip(const int16_t* xy, int n) { if (take(8 + 4 * n)) out.strip(xy, n); }
+    void subpixel(bool on) { if (take(4)) out.subpixel(on); } // v0.4.3: VERTEX_FORMAT
     void textPhase() { if (take(4)) out.textPhase(); }
     void text(int x, int y, int font, int opt, const char* s) { if (take(textBytes(s))) out.text(x, y, font, opt, s); }
     void finish() {}

@@ -115,6 +115,60 @@ axis after 2 minutes (and the exponential histogram blurred what was left of 4.4
   device replay expectations (centre / 2 minutes replaced by the 30 s left axis), the jog scale count, the preview scenes. Previews (`make amp-preview`):
   `core/seqtest/build/preview/amp1 .. amp8`.
 
+**V always full + smooth curves (v0.4.3, branch v043-amp from seq-tracks 8ecf4dd = v0.4.2; Original Tracker only).** Owner on the device (v0.4.1):
+"it's still somehow not touching the axis on the left side, so this visualisation doesn't look so interesting after all" and "would it be possible
+to increase the amp viz resolution or interpolate so it looks like smooth curves?"
+- **Root cause of the left gap.** Checked with a host replay of the device path (`test_stages.cpp`: `AmpView::update` cadence, 64 value rings, uint16
+  heads, the FT81x FIFO model, the frame model of the real Global Mixer 3/3 page, 2 .. 8 tracks, gated worst case): (1) the FIFO split does not cut
+  the left end: the strips are drawn oldest -> newest (left -> right) and the split drops whole commands from the END of the list (the averages /
+  labels drawn last), and with the v0.4.1 budgets nothing was dropped at all; (2) the budget only changed the number of columns, the oldest column
+  was always at x = kX0. (3) The cause is the history itself: it started when the Master module was entered (`begin()` reset the follower,
+  `forget()` detached the taps on every module exit) and the view draws only the real history (by design since v0.4.1). So after opening the view
+  the lines end where "time since the Master module was entered" lies on the axis (10 s: x = 179, 20 s: x = 102 of 56 .. 716), they reach the axis
+  only after 30 s (60 s at the largest jog scale) of staying in the module, and every trip to another module (e.g. to the pattern to change
+  something) starts it again; silence before the transport started inside that window is drawn as no line (below the floor) too. On the host
+  everything was replayed from the module entry, so the tests passed. A second, device-only risk found on the way: the budget was computed from
+  FIFO-sized estimates (CMD_TEXT is 12 bytes + the string in the FIFO but a cell and a vertex per character in the display list) against
+  `shownRamBytesExcept` of a page whose bars and names (about 3-4 KB of display list, estimated) stay shown under the opaque panel: when the sum
+  passes 8172 bytes display.cpp step3 does not draw the view at all in that frame.
+- **History always running.** `AmpView::tick()` from `TrackerImpl::update` (every main loop pass, all modules) attaches the taps once and feeds
+  the history every 40 ms; `forget()` (module exit) only drops the control. The view is full whenever it is opened (after the first 30 s after
+  boot). Cost: the track taps are a pass over the 128 samples of a block that a track really sends (idle tracks send no block: one store),
+  about 4 cycles per sample on the MK66: about 1 % of the block with eight sounding tracks, 0.2 % for the two master channels; this was paid
+  inside the Master module before and is now paid everywhere (while playing the tracks would sound anyway, so the run-while-playing variant
+  would cost the same). Drain: about 14 blocks x 9 lanes every 40 ms (host 4-5 us per pass, the same as before).
+- **Frame.** While the view is open the mixer bars, names and covers under the panel are hidden (`hideControlUnderMenu` at the end of
+  `showMixerDelayReverbScreen`, the meter refresh skipped), so the frame is title bar + label strip + view. `frameBudget(others, corr)` =
+  8172 - 400 - others - corr, clamped 2600 .. 6800 (6800 + the largest strip fits the two stages for sure). The drawing counts itself in
+  display-list bytes (`CountCtx`, texts 16 + 8 per character, an upper bound), and the control notes the real size of the last complete frame
+  (its `ramSize` when the next frame starts) next to that estimate: `corr` = real - estimate (usually negative: the text bytes go back to the lines).
+- **Lines.** Dense columns (200 = 3.3 px; 133 = 5 px with five tracks or more), each read in amplitude (as the buckets), smoothed in amplitude
+  (`smoothLine`: averages a box of radius r twice = a triangle of +-2 r; maxima held +-2 r first and never below the raw maximum), converted to dB.
+  Radius from time: level 0 = 110 ms (averages) / 55 ms (maxima), at least one column, neighbours differ by one at most (monotone windows).
+  Then thinned: Douglas-Peucker importance per point (vertical deviation in 1/16 px, inherited from the split), ONE threshold for all lines =
+  the lowest that fits the budget exactly, strip ends always kept (so the left end stays on the y axis in every frame once the history covers the
+  total age). If that threshold drops more than about 2.7 px of detail, the next smoothing level (110 / 110, 220 / 220, 330 / 330 ms) is used,
+  so many lines on a small budget become simpler curves instead of angular ones (hysteresis: a lower level is tried again after 50 frames when
+  the lines fit easily). Drawn with VERTEX_FORMAT(4) (1/16 px, antialiased strips); VERTEX_FORMAT(0) before the texts and at the end of the last
+  stage. All lines are computed once per frame (stage 0) into a cache in the follower (`LineCache`, 19.9 KB, EXTERNAL_RAM), stage 1 draws the same.
+  The values of all lanes are read in one pass over the columns (`denseAll`: the buckets and weights of a column once).
+- **Numbers.** Host, per frame (both stages): 8 tracks 179 us (v0.4.2: 105 us), 4 tracks 154 us (125), 2 tracks 101 us; only while the view is open,
+  25 fps at most. `make original` (after `make clean`): FLASH 970412 B (+3.7 KB), RAM 231840 B (88.44 %, +36 B), EXTERNAL_RAM 16726096 B
+  (99.70 %, about 50 KB free; +19.9 KB), image end 0xEE014 < 0xFC000, `check_sdram_ctors.sh` ok. Stack of the drawing about 1.2 KB (was about 3.6 KB).
+- **Tests** (all equally strict or stricter; changed only as consequences, stated): `test_amp.cpp` new `test_smooth_and_thin` (smoothing bounds /
+  upper contour / monotone / constant, radii, rank monotone, `denseAll` == per lane `colLevel`, for 15 budgets x 3 histories the drawing is exactly
+  the counted bytes and never above the budget, every strip keeps its ends, every thinned point lies within the threshold's deviation of the drawn
+  line, one threshold for all lines, `frameBudget`, smoothing levels); the test contexts got `subpixel()` (strips recorded in px, plus the raw
+  1/16 px); `test_scroll` measures the speed over the blocks in which the edge is seen and requires the edge within 60 blocks plus the reach of the
+  smoothing (was: 600 blocks with a 4 % tolerance that absorbed the detection delay). `test_stages.cpp`: the budget comes from `frameBudget` with
+  the real page model (others 1200 / 2320 / 3500 B, text 4 or 8 B per character, gated tracks) and the measured correction; new checks: the frame
+  (others + the view's display list) stays under 8172 in every frame, and EVERY line whose oldest column is on a strip starts at x = kX0 in every
+  frame after 31 s (2184 frames, up to 37128 lines per scenario); the capacity check uses `kMaxBudget` (6800) instead of 5800. `kOwnBytes` 8 -> 12
+  (VERTEX_FORMAT(0) in the last stage). `devstub/FT812.h`: `API_VERTEX_FORMAT`.
+- **Previews** (`make amp-preview`, 4x supersampled like the FT81x antialiasing): `core/seqtest/build/preview/amp1 .. amp9` (amp9: eight gated tracks
+  on the real page budget), before (v0.4.2 drawing, same renderer): `core/seqtest/build/preview_v042/`, side by side: `build/preview/cmp_*.png`.
+- **Not verified on a device**: the look, the real display list sizes of the page and of CMD_TEXT (the correction measures them), the main loop time.
+
 ## W as built (2026-11-06, branch v037-wt, from seq-tracks 018dd73 = v0.3.6; original Tracker MK66 only)
 
 **How Plinky does it (plinky_public, MIT, read only).** Plinky has no separate "wavetable mode": its one **Shape** parameter (`P_PWM`, "Shape" in the
