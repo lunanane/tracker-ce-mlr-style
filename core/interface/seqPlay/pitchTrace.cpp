@@ -1,5 +1,7 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
-// PolySynth pitch trace view (plan 013 V): feeds the follower from the engine ring and refreshes the control (see pitchTrace.h).
+// PolySynth pitch trace view (plan 013 V): feeds the follower from the live pool voices and refreshes the control (see pitchTrace.h).
+// v0.4.1: the live read (seqPitchTraceLogic.h LiveSampler) replaces the engine trace ring: no dependency on what the audio interrupt
+// latched, every voice of every instance whatever played it.
 #include "seqPlay/pitchTrace.h"
 
 #include <new>
@@ -72,6 +74,7 @@ void PitchTraceView::show(bool on, const char* hint)
     if (!was)
     {
         follower_->reset();
+        sampler_.reset();
         range_ = pitchtrace::Range();
         lastMs_ = 0;
         display.setControlShow(control_);
@@ -85,19 +88,20 @@ void PitchTraceView::update()
     if (data_.kind != TraceViewData::PITCH || control_ < 0 || follower_ == nullptr)
         return;
     const uint32_t now = seqNowMs();
+    // v0.3.9: between its two display stages the control must draw the same samples (seqTraceStages.h): the follower stays frozen
+    const bool frozen = data_.busyMs != 0 && (uint32_t)(now - data_.busyMs) < 200u;
+#ifdef FEATURE_PLINKY
+    static_assert(pitchtrace::kVoices == plinkyvoice::kPool, "voices");
+    pitchtrace::LiveVoice lv[pitchtrace::kVoices];
+    for (int v = 0; v < pitchtrace::kVoices; v++)
+        seqPlinkyLiveVoice(v, &lv[v].on, &lv[v].inst, &lv[v].pitch, &lv[v].env, &lv[v].serial);
+    sampler_.sample(lv, now, *follower_, frozen); // every pass: one column per 5.8 ms of time
+#endif
+    if (frozen)
+        return;
     if (lastMs_ != 0 && (uint32_t)(now - lastMs_) < kRefreshMs)
         return;
-    if (data_.busyMs != 0 && (uint32_t)(now - data_.busyMs) < 200u)
-        return; // v0.3.9: the control is between its two display stages, both must draw the same samples (seqTraceStages.h)
     lastMs_ = now ? now : 1;
-#ifdef FEATURE_PLINKY
-    static_assert(sizeof(pitchtrace::Sample) == sizeof(plinkyvoice::TraceSample), "ring layout");
-    static_assert(pitchtrace::kVoices == plinkyvoice::kPool, "voices");
-    const pitchtrace::Sample* rings[pitchtrace::kVoices];
-    for (int v = 0; v < pitchtrace::kVoices; v++)
-        rings[v] = (const pitchtrace::Sample*)seqPlinkyTraceRing(v);
-    follower_->sync(rings, (int)seqPlinkyTraceLen(), seqPlinkyTraceHead(), now);
-#endif
     range_.follow(*follower_);
     display.refreshControl(control_);
     display.synchronizeRefresh();

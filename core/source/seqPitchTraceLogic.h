@@ -80,6 +80,8 @@ class Follower
             lastOn_[v] = Sample();
         }
         head_ = 0;
+        fed_ = 0;
+        sounding_ = 0;
         have_ = false;
         last_ = 0;
         lastMs_ = 0;
@@ -138,6 +140,7 @@ class Follower
     // envelope falling off) until it is kMinRun long. Longer runs end exactly where the engine says.
     void push(const Sample* col)
     {
+        int sounding = 0;
         for (int v = 0; v < kVoices; v++)
         {
             Sample s = col[v];
@@ -157,9 +160,14 @@ class Follower
             else
                 run_[v] = 0;
             s_[v][head_] = s;
+            sounding += (s.on & 1);
         }
         head_ = (uint16_t)((head_ + 1) % kWin);
+        fed_++;
+        sounding_ = (uint8_t)sounding;
     }
+    uint32_t fed() const { return fed_; }               // DEBUG readout: columns pushed since the reset
+    int soundingNow() const { return sounding_; }       // ... voices "on" in the newest column
     // age 0 = newest .. kWin - 1 = oldest
     const Sample& at(int v, int age) const { return s_[v][(head_ + kWin - 1 - age) % kWin]; }
 
@@ -169,10 +177,86 @@ class Follower
     uint8_t hold_[kVoices];
     Sample lastOn_[kVoices];
     uint16_t head_;
+    uint32_t fed_;
+    uint8_t sounding_;
     bool have_;
     uint16_t last_;
     uint32_t lastMs_;
     uint32_t remUs_;
+};
+
+// ---- v0.4.1: the live read of the engine's pool voices -------------------------------------------------------------------
+// The device view (interface/seqPlay/pitchTrace.cpp) no longer depends on the trace ring the audio interrupt writes: every main loop
+// pass it reads the voices themselves (Engine::liveVoice: sounding, instance, pitch incl. glide + LFO / bend, envelope, note serial) and
+// pushes one column per kSampleUs of elapsed time into the follower. Whatever played the note (pattern, Play mode sequencer, pads,
+// launcher, external MIDI) it is a pool voice, so it is shown. A note that began and ended between two reads (a stab shorter than a
+// main loop pass) is caught by its serial and gets one sounding column; the follower's minimum run keeps it visible.
+struct LiveVoice
+{
+    bool on;
+    uint8_t inst;
+    float pitch; // semitones
+    float env;   // 0 .. 1
+    uint32_t serial;
+};
+class LiveSampler
+{
+  public:
+    LiveSampler() { reset(); }
+    void reset()
+    {
+        have_ = false;
+        lastMs_ = 0;
+        remUs_ = 0;
+        for (int v = 0; v < kVoices; v++) serial_[v] = 0;
+    }
+    // frozen: the follower must not change now (the control is between its two display stages); the time is caught up afterwards.
+    // Returns the columns pushed.
+    int sample(const LiveVoice* lv, uint32_t nowMs, Follower& f, bool frozen)
+    {
+        if (!have_)
+        {
+            have_ = true;
+            lastMs_ = nowMs;
+            remUs_ = 0;
+            for (int v = 0; v < kVoices; v++) serial_[v] = lv[v].serial;
+            return 0;
+        }
+        if (frozen) return 0;
+        const uint32_t us = (nowMs - lastMs_) * 1000u + remUs_;
+        uint32_t steps = us / kSampleUs;
+        if (steps == 0) return 0;
+        remUs_ = us % kSampleUs;
+        lastMs_ = nowMs;
+        if (steps > (uint32_t)kWin) steps = kWin;
+        Sample col[kVoices];
+        for (int v = 0; v < kVoices; v++)
+        {
+            const bool fresh = lv[v].serial != serial_[v];
+            serial_[v] = lv[v].serial;
+            if (!lv[v].on && !fresh)
+            {
+                col[v].pitch = 0;
+                col[v].env = 0;
+                col[v].on = 0;
+                continue;
+            }
+            float p = lv[v].pitch * 32.0f;
+            p = p > 32000.0f ? 32000.0f : (p < -32000.0f ? -32000.0f : p);
+            float e = lv[v].env * 255.0f;
+            e = e > 255.0f ? 255.0f : (e < 0.0f ? 0.0f : e);
+            col[v].pitch = (int16_t)(p < 0 ? p - 0.5f : p + 0.5f);
+            col[v].env = (uint8_t)e;
+            col[v].on = (uint8_t)(1 | ((lv[v].inst & 3) << 1));
+        }
+        for (uint32_t k = 0; k < steps; k++) f.push(col);
+        return (int)steps;
+    }
+
+  private:
+    bool have_;
+    uint32_t lastMs_, remUs_;
+    uint32_t serial_[kVoices];
 };
 
 // The window of one voice, oldest first, reduced to at most maxPts points (the last sample of each bucket). Returns the count.

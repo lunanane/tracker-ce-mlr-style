@@ -42,10 +42,8 @@ int seqPlinkyVoicesActive();
 // page; the caller sets sec / idx / track (0 = the instrument page, no track)
 namespace seqplinky { struct Model; }
 void seqPlinkyFillModel(seqplinky::Model& m);
-// pitch trace ring of the engine (plan 013 V; read only, any context): sample k of a voice is ring[k & (len - 1)], head = next index
-const void* seqPlinkyTraceRing(int voice);
-unsigned seqPlinkyTraceLen();
-uint16_t seqPlinkyTraceHead();
+// v0.4.1 pitch view (any context, plain reads): the live state of pool voice 0 .. 7 (plinkyvoice::Engine::liveVoice)
+void seqPlinkyLiveVoice(int voice, bool* on, uint8_t* inst, float* pitch, float* env, uint32_t* serial);
 
 // ---- plan 012: snapshots per pattern and the timed morph ----
 // Parameter number kPlinkyMorphParam (= the engine parameter count) is the project morph time in half seconds (0 = jump .. 60 = 30 s);

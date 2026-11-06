@@ -87,8 +87,12 @@ void cSeqTraceControl::drawStage(int stage)
 #ifdef DEBUG
     if (stage == tracestage::kStages - 1) // FIFO bytes of the two stages and what was dropped (0 = nothing)
     {
-        char buf[32];
-        snprintf(buf, sizeof buf, "%d+%d-%d", c.used[0], c.used[1], c.dropped);
+        char buf[48];
+        if (view->kind == TraceViewData::PITCH && view->pitch) // v0.4.1: + columns read from the live voices, voices sounding now
+            snprintf(buf, sizeof buf, "%d+%d-%d s%lu v%d", c.used[0], c.used[1], c.dropped, (unsigned long)view->pitch->fed(),
+                     view->pitch->soundingNow());
+        else
+            snprintf(buf, sizeof buf, "%d+%d-%d", c.used[0], c.used[1], c.dropped);
         API_COLOR(0x808080);
         API_CMD_TEXT(4, 470, fonts[0].handle, OPT_CENTERY, buf);
     }
