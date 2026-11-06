@@ -32,10 +32,12 @@ struct Ctx
     int textMinX = 9999, textMaxX = -9999, textMinY = 9999, textMaxY = -9999;
     int strips = 0, maxStripPts = 0, texts = 0;
     std::vector<std::vector<int>> stripX, stripY;
+    std::vector<std::vector<int>> stripRX, stripRY; // v0.4.3: as given (1/16 px between subpixel(true) and subpixel(false))
     std::vector<uint32_t> stripColor;
     std::vector<int> stripWidth;
     uint32_t col = 0;
     int w = 0;
+    bool sub = false; // v0.4.3: strips between subpixel(true) and subpixel(false) come in 1/16 px; recorded in px (rounded)
     void vtx(int x, int y, bool line)
     {
         if (x < minX) minX = x;
@@ -56,13 +58,25 @@ struct Ctx
         bytes += 8 + 8 * n;
         for (int i = 0; i < n; i++) { vtx(s[i * 4], s[i * 4 + 1], true); vtx(s[i * 4 + 2], s[i * 4 + 3], true); }
     }
+    void subpixel(bool on) { bytes += 4; sub = on; }
     void strip(const int16_t* xy, int n)
     {
         bytes += 8 + 4 * n;
         strips++;
         if (n > maxStripPts) maxStripPts = n;
-        std::vector<int> xs, ys;
-        for (int i = 0; i < n; i++) { vtx(xy[i * 2], xy[i * 2 + 1], true); xs.push_back(xy[i * 2]); ys.push_back(xy[i * 2 + 1]); }
+        std::vector<int> xs, ys, rx, ry;
+        const int d = sub ? (int)ampview::kSub : 1;
+        for (int i = 0; i < n; i++)
+        {
+            const int x = (xy[i * 2] + d / 2) / d, y = (xy[i * 2 + 1] + d / 2) / d;
+            vtx(x, y, true);
+            xs.push_back(x);
+            ys.push_back(y);
+            rx.push_back(xy[i * 2]);
+            ry.push_back(xy[i * 2 + 1]);
+        }
+        stripRX.push_back(rx);
+        stripRY.push_back(ry);
         stripX.push_back(xs);
         stripY.push_back(ys);
         stripColor.push_back(col);
@@ -306,6 +320,7 @@ static void test_scroll()
         const float a = (float)kLinMs[kDefaultScale] / (float)kLinPx; // ms per px
         int16_t o[(2 * kMaxCols + 2) * 2];
         float firstEdge = -1, prevEdge = -1, maxStep = 0, lastEdge = 0;
+        int firstStep = -1, lastStep = -1;
         const int steps = 600; // 1.7 s
         for (int s = 0; s < steps; s++)
         {
@@ -322,19 +337,28 @@ static void test_scroll()
                 }
             if (edge >= 0)
             {
-                if (firstEdge < 0) firstEdge = edge;
+                if (firstEdge < 0) { firstEdge = edge; firstStep = s; }
                 else if (edge - prevEdge > maxStep) maxStep = edge - prevEdge;
                 if (prevEdge >= 0 && edge > prevEdge + 0.8f) maxStep = 99;
                 prevEdge = edge;
                 lastEdge = edge;
+                lastStep = s;
             }
             c.push(0);
         }
-        // expected: 600 blocks x 2.9025 ms / (16.16 ms per px) = 107.8 px to the left
-        const float moved = firstEdge - lastEdge, expect = steps * kBlockMs / a;
-        printf("  scroll (%s): the pulse edge moves %.1f px in %d blocks (expected %.1f), largest step to the right %.2f px\n", which ? "averages" : "maxima", moved,
-               steps, expect, maxStep);
+        // expected: 600 blocks x 2.9025 ms / (16.16 ms per px) = 107.8 px to the left. v0.4.3: measured over the blocks in which the edge is
+        // seen; the edge must be seen within 60 blocks (0.17 s) plus the reach of the smoothing (the lines are smoothed in amplitude over
+        // two boxes of radius r, so in dB the fall to silence shows at the end of the 2 r window; the maxima line is held 2 r columns
+        // before that so that it stays an upper contour), and up to the last block
+        const float moved = firstEdge - lastEdge, expect = (float)(lastStep - firstStep) * kBlockMs / a;
+        const float colMs = a * (float)(kX1 - kX0) / 199.0f;
+        const float rMs = (float)(which ? kAvgMs[0] : kPeakMs[0]);
+        const int r = (int)(rMs / colMs + 0.5f) < 1 ? 1 : (int)(rMs / colMs + 0.5f);
+        const int seenBy = 60 + (int)((which ? 2 * r : 4 * r) * colMs / kBlockMs + 0.5f);
+        printf("  scroll (%s): the pulse edge moves %.1f px in %d blocks (expected %.1f, seen from block %d), largest step to the right %.2f px\n",
+               which ? "averages" : "maxima", moved, lastStep - firstStep, expect, firstStep, maxStep);
         CHECK(firstEdge > 0 && fabsf(moved - expect) < 0.04f * expect + 2.0f);
+        CHECK(firstStep >= 0 && firstStep <= seenBy && lastStep == steps - 1);
         CHECK(maxStep < 0.8f); // never jumps back
     }
 }
@@ -543,6 +567,202 @@ static void test_layout_and_budget()
     CHECK(l.strips == 2);
 }
 
+// v0.4.3: smoothing, thinning, fitting and the frame budget
+static void test_smooth_and_thin()
+{
+    // smoothing: random lines with constant and with varying radii (as in the compressed part of the axis)
+    unsigned rnd = 4711;
+    bool boundsAvg = true, boundsMax = true, upper = true, mono = true, flat = true, radOk = true;
+    for (int trial = 0; trial < 400; trial++)
+    {
+        const int n = 20 + trial % 180;
+        Col m[kMaxCols];
+        for (int i = 0; i < n; i++) m[i].ms = trial % 2 ? 53.6f : 30.0f + 400.0f * (float)(n - 1 - i) / (float)n; // wider to the left
+        uint8_t rad[kMaxCols];
+        const float ms = (float)kAvgMs[trial % kLevels];
+        radii(m, n, ms, 1, rad);
+        for (int i = 0; i < n; i++) radOk = radOk && rad[i] >= 1 && rad[i] <= kMaxRadius && (i == 0 || abs(rad[i] - rad[i - 1]) <= 1);
+        float v[kMaxCols], raw[kMaxCols], tmp[kMaxCols], pre[kMaxCols + 1], keep[kMaxCols];
+        for (int which = 0; which < 2; which++)
+        {
+            for (int i = 0; i < n; i++)
+            {
+                rnd = rnd * 1664525u + 1013904223u;
+                v[i] = -3000.0f + (float)((rnd >> 16) % 3000);
+                keep[i] = v[i];
+            }
+            smoothLine(v, tmp, pre, raw, rad, n, which);
+            for (int i = 0; i < n; i++)
+            {
+                // the window the value may come from: 2 r (averages: two boxes of r), 4 r (maxima: held 2 r, then the boxes); the radii of the
+                // neighbours are at most r + distance, so the reach is bounded by twice that
+                const int reach = (which ? 2 : 4) * rad[i] + (which ? 2 : 8);
+                float lo = 1e9f, hi = -1e9f;
+                for (int k = i - reach; k <= i + reach; k++)
+                    if (k >= 0 && k < n) { lo = keep[k] < lo ? keep[k] : lo; hi = keep[k] > hi ? keep[k] : hi; }
+                if (which) boundsAvg = boundsAvg && v[i] >= lo - 0.01f && v[i] <= hi + 0.01f;
+                else boundsMax = boundsMax && v[i] <= hi + 0.01f;
+                if (!which) upper = upper && v[i] >= keep[i]; // the peak line never below the raw maximum
+            }
+            // a monotone line stays monotone, a constant one constant
+            for (int i = 0; i < n; i++) v[i] = keep[i] = -3000.0f + 2.5f * (float)i + (float)((i * 7919) % 13);
+            for (int i = 1; i < n; i++) v[i] = keep[i] = v[i] > v[i - 1] ? v[i] : v[i - 1];
+            smoothLine(v, tmp, pre, raw, rad, n, which);
+            for (int i = 1; i < n; i++) mono = mono && v[i] >= v[i - 1] - 0.01f;
+            for (int i = 0; i < n; i++) v[i] = -1234.0f;
+            smoothLine(v, tmp, pre, raw, rad, n, which);
+            for (int i = 0; i < n; i++) flat = flat && fabsf(v[i] + 1234.0f) < 0.01f;
+        }
+    }
+    CHECK(radOk);
+    CHECK(boundsAvg); // averages: between the smallest and the largest raw value nearby
+    CHECK(boundsMax && upper); // maxima: never below the raw maximum, never above the largest value nearby
+    CHECK(mono && flat);
+    // the importance is monotone in the deviation
+    bool rankMono = true;
+    for (int d = 1; d < 7000; d++) rankMono = rankMono && rankOf(d) >= rankOf(d - 1) && rankOf(d) < kRankMax;
+    CHECK(rankMono && rankOf(0) == 0);
+
+    // the values of all lines in one pass (denseAll) are the per lane values (colLevel), halved and rounded the same way
+    Follower busy = busyFollower(40, 0.45);
+    for (int sc = 0; sc < kScales; sc++)
+    {
+        busy.scale = (uint8_t)sc;
+        Ctx c;
+        ampview::draw(c, busy, "t", "h");
+        const LineCache& L = busy.cache;
+        LineCache* M = new LineCache(L);
+        denseAll(busy, *M, M->first, M->cols);
+        bool same = true;
+        for (int i = 0; i < M->count; i++)
+            for (int j = M->first; j < M->cols; j++)
+            {
+                same = same && M->y[i][j] == halfLevel(colLevel(busy.lane(M->lane[i]), M->col[j], M->pass[i]));
+            }
+        CHECK(same && M->count == 17);
+        delete M;
+    }
+    busy.scale = kDefaultScale;
+
+    // fitting: for every budget the drawing is EXACTLY what the cache says (counted with the display list sizes of the device), never above
+    // the budget; the threshold is one for all lines (even degradation); the strip ends are always drawn; every dropped point lies within the
+    // deviation of the threshold from the drawn polyline
+    Follower gated;
+    {
+        uint16_t lv[kLanes];
+        for (int n = 0; n < (int)(70000 / kBlockMs); n++)
+        {
+            const double sec = n * kBlockMs / 1000.0;
+            double mix = 0;
+            for (int t = 0; t < kTracks; t++)
+            {
+                const double per = 0.125 * (1 + t % 4), ph = fmod(sec + t * 0.037, per) / per;
+                const double v = ph < 0.3 ? 20000.0 * exp(-ph * 10.0) : 0.0;
+                lv[t] = (uint16_t)v;
+                mix += v;
+            }
+            lv[kTracks] = (uint16_t)(mix * 0.3);
+            gated.push(lv);
+        }
+    }
+    const Follower* fs[3] = { &busy, &gated, nullptr };
+    Follower two = busyFollower(40, 0.45);
+    {
+        // only tracks 1 and 2 (and the master)
+        Follower t2;
+        uint16_t lv[kLanes];
+        for (int n = 0; n < (int)(40000 / kBlockMs); n++)
+        {
+            const double sec = n * kBlockMs / 1000.0;
+            for (int t = 0; t < kLanes; t++) lv[t] = 0;
+            lv[0] = (uint16_t)(16000.0 * exp(-fmod(sec, 0.5) * 6.0));
+            lv[1] = (uint16_t)(9000.0 * exp(-fmod(sec + 0.2, 0.75) * 3.0));
+            lv[kTracks] = (uint16_t)(lv[0] / 2 + lv[1] / 2);
+            t2.push(lv);
+        }
+        two = t2;
+    }
+    fs[2] = &two;
+    bool exact = true, under = true, ends = true, within = true, oneThr = true;
+    int worstDev = 0, cases = 0;
+    for (int k = 0; k < 3; k++)
+        for (int budget = kMinBudget; budget <= kMaxBudget; budget += 300)
+        {
+            Follower f = *fs[k];
+            f.budget = (uint16_t)budget;
+            CountCtx cc;
+            ampview::draw(cc, f, "Track levels, dB", "Amp: Close");
+            Ctx c;
+            ampview::draw(c, f, "Track levels, dB", "Amp: Close");
+            const LineCache& L = f.cache;
+            cases++;
+            exact = exact && cc.bytes == L.bytes;
+            under = under && L.bytes <= budget - kLineSafety && c.bytes <= budget;
+            // per line: the drawn strips against the dense columns
+            int si = 0, pts = 0;
+            for (int i = 0; i < L.count; i++)
+            {
+                const int16_t* y = L.y[i];
+                const uint8_t* rf = L.rf[i];
+                int bound = 0; // the smallest deviation (1/16 px) that is kept at this threshold
+                while (rankOf(bound) < L.thr && bound < 30000) bound++;
+                for (int j = L.first; j < L.cols; j++)
+                {
+                    if (y[j] < 0 || !(rf[j] & kStart)) continue;
+                    int e = j + 1;
+                    while (e < L.cols && !(rf[e] & kEnd)) e++;
+                    if (e >= L.cols) { ends = false; break; }
+                    // the strip of the drawing that belongs to it (the strips come in the same order)
+                    if (si >= (int)c.stripX.size()) { ends = false; break; }
+                    const std::vector<int>& X = c.stripRX[si]; // 1/16 px, as drawn
+                    const std::vector<int>& Y = c.stripRY[si];
+                    si++;
+                    pts += (int)X.size();
+                    ends = ends && X.front() == x16Of(j, L.cols) && X.back() == x16Of(e, L.cols) && Y.front() == y[j] && Y.back() == y[e];
+                    for (int q = j; q <= e; q++)
+                    {
+                        const int xq = x16Of(q, L.cols);
+                        // the drawn polyline at xq
+                        size_t a = 0;
+                        while (a + 1 < X.size() && X[a + 1] < xq) a++;
+                        float yd = (float)Y[a];
+                        if (a + 1 < X.size() && X[a + 1] != X[a])
+                            yd = (float)Y[a] + (float)(Y[a + 1] - Y[a]) * (float)(xq - X[a]) / (float)(X[a + 1] - X[a]);
+                        const int dev = (int)(fabsf(yd - (float)y[q]) + 0.5f);
+                        worstDev = dev - bound > worstDev ? dev - bound : worstDev;
+                        within = within && dev <= bound + 1;
+                    }
+                    if (rf[e] & kStart) j = e - 1; // a floor column between two runs starts the next strip
+                    else j = e;
+                }
+            }
+            oneThr = oneThr && si == (int)c.stripX.size() && si == L.strips && pts == L.points;
+        }
+    printf("  fitting: %d budgets x 3 histories, drawn bytes == estimate, strips and points as counted; worst deviation beyond the threshold %d/16 px\n",
+           cases / 3, worstDev);
+    CHECK(exact);  // the counting is exact
+    CHECK(under);  // never above the budget
+    CHECK(ends);   // every strip keeps its two ends
+    CHECK(within); // what was thinned out lies within the threshold of the drawn line
+    CHECK(oneThr); // one threshold for all lines: the drawn strips / points are exactly the counted ones
+
+    // the frame budget: what the others leave less the margin, the measured correction (signed), clamped
+    CHECK(frameBudget(2320, 0) == kFrameBytes - kFrameMargin - 2320);
+    CHECK(frameBudget(2320, -500) == kFrameBytes - kFrameMargin - 2320 + 500 && frameBudget(2320, 300) == kFrameBytes - kFrameMargin - 2320 - 300);
+    CHECK(frameBudget(0, -1500) == kMaxBudget && frameBudget(7000, 0) == kMinBudget);
+    CHECK(kMaxBudget + 808 <= 2 * (3840 - 12)); // the two display stages take the largest budget for sure (+ the largest strip)
+
+    // smoothing levels: many lines on a small budget get smoother lines (a higher level), few lines keep the finest one
+    Follower many = busyFollower(40, 0.45), few = two;
+    many.budget = few.budget = kDefaultBudget;
+    Ctx cm, cf;
+    ampview::draw(cm, many, "t", "h");
+    ampview::draw(cf, few, "t", "h");
+    printf("  smoothing level: 8 tracks %d (threshold %d), 2 tracks %d (threshold %d)\n", many.cache.level, many.cache.thr, few.cache.level, few.cache.thr);
+    CHECK(few.cache.level == 0 && many.cache.level > 0);
+    CHECK(many.cache.thr <= kThrSmooth || many.cache.level == kLevels - 1);
+}
+
 // `make preview`: dump the draw ops of the scenes for amp_preview.py (SEQ_AMP_PREVIEW=<dir>)
 struct DumpCtx
 {
@@ -562,6 +782,7 @@ struct DumpCtx
         for (int i = 0; i < n * 2; i++) fprintf(f, " %d", xy[i]);
         fprintf(f, "\n");
     }
+    void subpixel(bool on) { fprintf(f, "V %d\n", on ? 1 : 0); } // v0.4.3: strip coordinates in 1/16 px while on
     void textPhase() {}
     void text(int x, int y, int font, int opt, const char* s) { fprintf(f, "T %d %d %d %d %s\n", x, y, font, opt, s); }
     void finish() {}
@@ -700,6 +921,28 @@ static void dumpPreviews(const char* dir)
         }
     }
     dumpScene(dir, "amp8_four_tracks_after_20s", early);
+    // v0.4.3: eight gated tracks (silent between the hits: many strips) on the budget of the real page (title bar + label strip, frameBudget)
+    Follower gated;
+    {
+        uint16_t lv[kLanes];
+        for (int n = 0; n < (int)(70000 / kBlockMs); n++)
+        {
+            const double sec = n * kBlockMs / 1000.0;
+            double mix = 0;
+            for (int t = 0; t < kTracks; t++)
+            {
+                const double per = 0.125 * (1 + t % 4) * (t < 4 ? 2 : 3), ph = fmod(sec + t * 0.037, per) / per;
+                const double v = ph < 0.3 ? 20000.0 * exp(-ph * 10.0) * (0.4 + 0.08 * t) : 0.0;
+                lv[t] = (uint16_t)v;
+                mix += v;
+            }
+            lv[kTracks] = (uint16_t)(mix * 0.3);
+            gated.push(lv);
+        }
+    }
+    gated.info = busy.info;
+    gated.budget = (uint16_t)frameBudget(600 + 1720, 0);
+    dumpScene(dir, "amp9_eight_gated_tracks", gated);
 }
 
 int main()
@@ -716,6 +959,7 @@ int main()
     test_scroll();
     test_follower_and_colours();
     test_layout_and_budget();
+    test_smooth_and_thin();
     printf("%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

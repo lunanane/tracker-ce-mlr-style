@@ -39,6 +39,7 @@ struct TraceCtx
             API_VERTEX2F(xy[i * 2], xy[i * 2 + 1]);
         API_END();
     }
+    void subpixel(bool on) { API_VERTEX_FORMAT(on ? 4 : 0); } // v0.4.3: the amp lines in 1/16 px (the frame uses whole pixels)
     void textPhase() { API_BLEND_FUNC(SRC_ALPHA, ONE_MINUS_SRC_ALPHA); } // antialiased lines and texts blend normally
     void text(int x, int y, int font, int opt, const char* s)
     {
@@ -69,15 +70,30 @@ void cSeqTraceControl::drawStage(int stage)
 {
     if (view == nullptr)
         return;
-    if (view->kind == TraceViewData::NONE) // closed between the stages: nothing more to draw, the blend function back to normal
+    if (view->kind == TraceViewData::NONE) // closed between the stages: nothing more to draw, the blend function and whole pixels back
     {
         if (stage == tracestage::kStages - 1)
+        {
+            API_VERTEX_FORMAT(0);
             API_BLEND_FUNC(SRC_ALPHA, ONE_MINUS_SRC_ALPHA);
+        }
         view->busyMs = 0;
+        view->lastComplete = false;
         return;
     }
     if (stage == 0)
+    {
+        // v0.4.3: ramSize still holds the display list of the last frame (display.cpp resets it after this stage): with the estimate of that
+        // frame it tells the view how good its estimate is
+        if (view->kind == TraceViewData::AMP && view->amp && view->lastComplete && view->amp->cache.valid)
+        {
+            view->lastRam = (int32_t)ramSize;
+            view->lastEst = view->amp->cache.bytes;
+            view->measured = true;
+        }
+        view->lastComplete = false;
         API_BLEND_FUNC(SRC_ALPHA, ZERO); // the opaque panel: what is below must not shine through
+    }
     TraceCtx out;
     tracestage::Split<TraceCtx> c(out, stage);
     if (view->kind == TraceViewData::PITCH && view->pitch && view->range)
@@ -98,7 +114,11 @@ void cSeqTraceControl::drawStage(int stage)
     }
 #endif
     if (stage == tracestage::kStages - 1)
+    {
+        API_VERTEX_FORMAT(0); // v0.4.3: whole pixels again for the controls after this one (the drawing switches back too; never left on)
         API_BLEND_FUNC(SRC_ALPHA, ONE_MINUS_SRC_ALPHA);
+        view->lastComplete = c.dropped == 0;
+    }
     view->busyMs = stage == 0 ? (seqNowMs() | 1u) : 0u;
 }
 

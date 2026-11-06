@@ -8,6 +8,7 @@
 #include "seqTracks.h"
 #include "seqLauncher.h"
 #include "seqPlinky.h"
+#include "masterParams/ampView.h" // v0.4.3: the amplitude history runs in every module
 #include "fileManager.h"
 #include "mtAudioEngine.h"
 #include "mtAudioExport.h"
@@ -179,6 +180,7 @@ void TrackerImpl::update()
     sequencer.update();
     seqTracksUpdate();
     seqSessionUpdate();
+    ampView.tick(); // v0.4.3: the amplitude history of the Master amp view, always (cheap; nothing drawn unless the view is open)
     Profiler::getInstance()->sampleHeap(); // plan 010: lowest free heap (shown on the Config page)
     seqcpu::passEnd(seqcpu::cyc() - perfT0);
 }

@@ -195,7 +195,7 @@ void cMasterParams::update()
         display.synchronizeRefresh();
     }
     else if (displayType == displayMode::mixerDelayReverb && !keyboardManager.getState() &&
-             !mtMenuPopup.isPopupVisible())
+             !mtMenuPopup.isPopupVisible() && !ampView.visible()) // v0.4.3: the meters are hidden under the open amp view
     {
         for (uint8_t i = 0; i < 2; i++)
         {
@@ -253,9 +253,9 @@ void cMasterParams::update()
     {
         refreshAllTracksMixerVolume();
     }
-    else if (displayType == displayMode::mixerDelayReverb && !keyboardManager.getState())
+    else if (displayType == displayMode::mixerDelayReverb && !keyboardManager.getState() && !ampView.visible())
     {
-        refreshOtherMixerVolume();
+        refreshOtherMixerVolume(); // v0.4.3: kept for when the amp view closes (its bars are hidden under the view)
     }
 
     shiftHandler();
