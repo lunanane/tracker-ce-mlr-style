@@ -127,6 +127,12 @@ class ClipModes
             p[i] = bits_[i];
         for (size_t i = 0; i < sizeof(scene_); i++)
             p[sizeof(bits_) + i] = scene_[i];
+        // the OLDEST version that can hold the data: without a scene colour the file is a version 2 file, byte-identical to v0.3.7's
+        bool anyColor = false;
+        for (size_t i = 0; i < sizeof(color_); i++)
+            anyColor = anyColor || color_[i] != 0;
+        if (!anyColor)
+            return seqsidecar::frameWrite(buf, cap, kMagic, kVersionV2, p, kPayloadV2);
         for (size_t i = 0; i < sizeof(color_); i++)
             p[sizeof(bits_) + sizeof(scene_) + i] = color_[i];
         return seqsidecar::frameWrite(buf, cap, kMagic, kVersion, p, kPayloadV3);

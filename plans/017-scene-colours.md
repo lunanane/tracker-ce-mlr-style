@@ -19,7 +19,7 @@ red 0xFF4D6A, green 0x6EE06A, white 0xE6E6E6 (all clearly brighter than the 0x05
 
 **Storage.** `seqclips.bin` version 3 = 1020 byte clip modes + 32 byte scene flags + **128 bytes of colours** (4 bits per pattern, low nibble =
 the odd pattern number; the unused nibble of pattern 256 is dropped on load). Version 1 and 2 files still load (flags / colours default),
-and are written as version 3 at the next save; a newer version is left alone as before. `ClipModes::color / setColor`, `seqClipSceneColor /
+and are written back as they were (version 2) until a scene gets a colour; **a file is written as the oldest version that holds its data**: no colour = version 2, byte-identical to v0.3.7's file, at least one colour = version 3; a newer version is left alone as before. `ClipModes::color / setColor`, `seqClipSceneColor /
 seqClipSetSceneColor` (a stored value outside this palette reads as None; the table keeps the number). The colour is part of the hash, the dirty
 gate and `anyNonDefault`, so a project that only has colours still writes the sidecar; nothing is written while the transport plays (same
 deferred path as the play-next flag). `seqClipsLogic.h` kFileMax grew to 1180 + overhead; the sidecar io buffer is derived from it.
@@ -48,11 +48,11 @@ the plan is 5132 of 5500 bytes (before: 5124), marks 1196 of 1600 unchanged. Hos
 `preview_grid.cpp`) and writes `build/preview/grid_plain.png` / `grid_colors.png` (needs Pillow; `grid_preview.py`).
 
 **Tests.** `test_mod.cpp` `test_scene_colors`: accessor bounds / nibble neighbours / independence from modes and flags, round trip, bad CRC,
-version 1 and 2 files load with no colours (also over set colours), re-save as version 3, unused nibble, later-palette values, newer version, palette
+version 1 and 2 files load with no colours (also over set colours), re-save as version 2 (byte-identical to a hand-built v2 file; version 3 only with a colour, and back to 2 when the last colour is cleared), unused nibble, later-palette values, newer version, palette
 (distinct, bright enough, distinct fills, names), stepping (wrap both ways, any value = one step), slot-mark packing. `test_trace.cpp`
 `test_launcher_budgets`: colours in the budget (12 rows x 8 colours, exact cost, no cost without colours, mandatory part leaves the optional parts room).
 **Test changes (consequences of version 3, equally strict).** `test_scene_flags`: version expectations `kVersion == 2` -> `== 3` (+ `kVersionV2`, `kPayloadV3`),
-saved frame byte `buf[4] == 2` -> `3` (three places), the two hand-built "version 2" frames now use `kVersionV2` (they are version 2 files; their
+saved version byte and size of colourless saves stay version 2 (`kFileMax` -> `kPayloadV2 + kOverhead`), the two hand-built "version 2" frames now use `kVersionV2` (they are version 2 files; their
 length expectation `kFileMax` -> `kPayloadV2 + kOverhead`), the refusal case "version 2 frame with a v1 length" now says version 3 and one more
 refusal (version 3 with the v2 length) was added. `test_session.cpp` `sizeof(View)` expectation `+ 2 * kVisRows` -> `+ 3 * kVisRows` (the new byte array, still
 "no padding"). Nothing was removed or loosened.

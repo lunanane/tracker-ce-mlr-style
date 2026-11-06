@@ -213,7 +213,7 @@ static void test_clip_modes()
     // save / load round trip
     uint8_t buf[kFileMax + 16];
     size_t n = m.save(buf, sizeof(buf));
-    CHECK(n == (size_t)kFileMax);
+    CHECK(n == (size_t)kPayloadV2 + seqsidecar::kOverhead && buf[4] == 2); // plan 017: no colour = the v2 file of v0.3.7
     CHECK(m.save(buf, kFileMax - 1) == 0);
     ClipModes r;
     bool newer = true;
@@ -282,7 +282,7 @@ static void test_scene_flags()
     m.setMode(4, 2, CLIP_PLAY1X);
     uint8_t buf[kFileMax + 8];
     size_t n = m.save(buf, sizeof(buf));
-    CHECK(n == (size_t)kFileMax && buf[4] == 3);
+    CHECK(n == (size_t)kPayloadV2 + seqsidecar::kOverhead && buf[4] == 2); // no colour: still written as version 2
     CHECK(m.save(buf, kFileMax - 1) == 0);
     ClipModes r;
     bool newer = true;
@@ -309,9 +309,9 @@ static void test_scene_flags()
     CHECK(v1.load(fb, sn) && v1.mode(1, 0) == CLIP_PLAY1X);
     for (int p = 0; p <= 255; p++)
         CHECK(!v1.playNext((uint8_t)p));
-    // ... and saves as version 3 from then on
+    // ... and saves as version 2 while no colour is set (version 3 only with a colour)
     n = v1.save(buf, sizeof(buf));
-    CHECK(n == (size_t)kFileMax && buf[4] == 3 && r.load(buf, n) && r.mode(1, 0) == CLIP_PLAY1X && !r.playNext(3));
+    CHECK(n == (size_t)kPayloadV2 + seqsidecar::kOverhead && buf[4] == 2 && r.load(buf, n) && r.mode(1, 0) == CLIP_PLAY1X && !r.playNext(3));
     // reserved mode values in a version 2 frame are cleaned to Loop too, the scene flags beside them survive
     memset(payload, 0, sizeof(payload));
     payload[0] = 0x0E;                 // clip (1,0) = 2, clip (1,1) = 3 (reserved)
@@ -359,6 +359,26 @@ static void test_scene_colors()
     CHECK(m.setColor(2, 0) && m.setColor(255, 0) && m.playNext(2) && m.mode(2, 0) == CLIP_PLAY1X);
     m.clear();
     CHECK(!m.anyNonDefault() && m.hash() == h0);
+
+    // no colour: the file is byte-identical to a hand-built version 2 file (the layout of v0.3.7); a colour makes it version 3, clearing it goes back
+    {
+        ClipModes o;
+        o.setMode(4, 2, CLIP_PLAY1X);
+        o.setPlayNext(7, true);
+        uint8_t ob[kFileMax], ref[kFileMax], pl[kPayloadV2];
+        memset(pl, 0, sizeof(pl));
+        pl[12] = (uint8_t)(1u << 4);                   // clip (4,2): index 3 * 16 + 2 = 50 -> byte 12, shift 4
+        pl[kPayload + 0] = (uint8_t)(1u << 6);         // scene flag of pattern 7
+        size_t on = o.save(ob, sizeof(ob));
+        size_t rn = seqsidecar::frameWrite(ref, sizeof(ref), kMagic, kVersionV2, pl, kPayloadV2);
+        CHECK(on == rn && on == (size_t)kPayloadV2 + seqsidecar::kOverhead && memcmp(ob, ref, on) == 0 && ob[4] == 2);
+        o.setColor(3, 5);
+        on = o.save(ob, sizeof(ob));
+        CHECK(on == (size_t)kFileMax && ob[4] == 3);
+        o.setColor(3, 0);
+        on = o.save(ob, sizeof(ob));
+        CHECK(on == rn && memcmp(ob, ref, on) == 0);
+    }
 
     // round trip
     m.setColor(1, 1);

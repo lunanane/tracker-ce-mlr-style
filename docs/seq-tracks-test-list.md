@@ -361,7 +361,7 @@ The song no longer runs away: **at the pattern end the playing slot plays again*
 | Performance page with per-track patterns changed, leave it while the song plays | At the pattern end the pattern is reloaded (the changed tracks are put back), also in song mode; a slot flagged play next then plays one more time before it advances. |
 
 ### 9f. Scene colours (plan 017, v0.3.8)
-Each scene (pattern) can carry one of nine colours: **None** (default, the plain look), the four tracker key colours (**Teal, Yellow, Purple, Blue**) and **Orange, Red, Green, White**. Set on the Song page, shown there and on the launcher. Saved in `seqclips.bin` (version 3: + 128 bytes, 4 bits per pattern); a version 1 or 2 file loads with no colours; nothing is written to the SD card while the transport plays (the usual deferred save).
+Each scene (pattern) can carry one of nine colours: **None** (default, the plain look), the four tracker key colours (**Teal, Yellow, Purple, Blue**) and **Orange, Red, Green, White**. Set on the Song page, shown there and on the launcher. Saved in `seqclips.bin` (version 3: + 128 bytes, 4 bits per pattern); a file without any colour is still written as version 2 (identical to v0.3.7), version 3 only when a colour is set; a version 1 or 2 file loads with no colours; nothing is written to the SD card while the transport plays (the usual deferred save).
 
 | Press | Expected |
 |---|---|
