@@ -58,8 +58,16 @@ else
 $(error Invalid PRODUCT value $(PRODUCT))
 endif
 
-# plan 019 step 0: the platform (teensy core, FatFs, SDMMC, USB) is built for size; only the I2S audio streams stay -O2
-$(filter-out $(OBJ_DIR)/3rdparty/Audio/%,$(OBJS)): COMPILER_OPTIONS += -Os
+# plan 019 step 0 built the whole platform (teensy core, FatFs, SDMMC, USB, I2C / LED / pad drivers, DMA, interrupt handlers) for size.
+# v0.4.3 (performance regression since v0.4: UI lag, voice dropouts): the platform is -O2 again as in v0.3.x - the SD path (FatFs, SDHC),
+# USB, the MIDI UART, the pad / LED / display drivers and the interrupt handlers run in the audio interrupt or in every main loop pass.
+# Only genuinely cold code stays -Os: clock set-up, string / print helpers, EEPROM, ADC, battery gauge, radio, sleep, unused UARTs.
+PLATFORM_OS_SRCS := 3rdparty/SDRAM/fsl_clock 3rdparty/SD/teensyInit 3rdparty/teensy_core/WString 3rdparty/teensy_core/Print \
+	3rdparty/teensy_core/Stream 3rdparty/teensy_core/WMath 3rdparty/teensy_core/nonstd 3rdparty/teensy_core/eeprom \
+	3rdparty/teensy_core/analog 3rdparty/teensy_core/keylayouts 3rdparty/teensy_core/HardwareSerial2 3rdparty/teensy_core/HardwareSerial3 \
+	3rdparty/teensy_core/HardwareSerial4 3rdparty/teensy_core/HardwareSerial6 3rdparty/teensy_core/serial2 3rdparty/teensy_core/serial3 \
+	3rdparty/teensy_core/serial4 3rdparty/teensy_core/serial6 3rdparty/teensy_core/serial6_lpuart source/BatteryImpl
+$(addprefix $(OBJ_DIR)/,$(addsuffix .o,$(PLATFORM_OS_SRCS))) $(filter $(OBJ_DIR)/3rdparty/Battery/% $(OBJ_DIR)/3rdparty/radio/% $(OBJ_DIR)/3rdparty/Snooze/%,$(OBJS)): COMPILER_OPTIONS += -Os
 
 CPP_OPTIONS=-std=gnu++17 -felide-constructors -includecstdint -fno-rtti -fno-exceptions 
 CC_OPTIONS=

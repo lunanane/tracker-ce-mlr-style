@@ -79,6 +79,10 @@ endif
 # sequencer tracks mod: on MK66 the mod's screen/UI code (not the audio path) is built for size, so the image stays
 # below 0xF0000 (960 KB): v0.2 at 0xF04B0 was refused by the original Tracker's updater, v0.1 at 0xE73D8 flashed fine
 # plan 019 step 0: the image limit is now 0xFC000 (platforms/mk66/check_image_size.sh; the 0xF0000 rule was an old misreading, tracker-ff boots images to 0xFC2AC); more -Os for event-rate code: effector (offline sample editor), seqgen generators, seqTracks*, seqLauncher/Song/Clips/Cut, pad/keyboard/actions, mtTest
+# v0.4.3 (performance regression since v0.4): seqTracks / seqTracksCore (block tick), seqCut / seqLauncher (applied / drained in the audio
+# interrupt), seqSong, seqClips, seqSidecar, scales, the chordarp / mono / playhead generators (per clock pulse in the interrupt) and the
+# pad / keyboard / actions / pad backlight / wavetable envelope sources are -O2 again (as in v0.3.x); only effector (offline sample editor)
+# and mtTest stay -Os from that step
 # v0.2.4 (plan 007): the stock Master page (interface/masterParams, configEditor, sampleImporter, projectEditor, instrumentEditor, sampleEditor: stock UI only, no audio path) is built for size too, to make room for the FX filters
 ifeq ($(PLATFORM), MK66)
 $(OBJ_DIR)/interface/seqPlay/%.o $(OBJ_DIR)/interface/seqSession/%.o $(OBJ_DIR)/interface/seqPerform/%.o $(OBJ_DIR)/interface/masterParams/%.o $(OBJ_DIR)/interface/configEditor/%.o $(OBJ_DIR)/interface/sampleImporter/%.o $(OBJ_DIR)/interface/projectEditor/%.o $(OBJ_DIR)/interface/instrumentEditor/%.o $(OBJ_DIR)/interface/sampleEditor/%.o: COMPILER_OPTIONS += -Os
@@ -89,7 +93,7 @@ endif
 # (source/mtSequencer*, seq*), and the three UI files that hold AUDIO_CORE_RAM (interrupt/audio-timed) functions.
 ifeq ($(PLATFORM), MK66)
 OS_DIRS		:= interface FileManager Exporter libs/NewDisplay libs/fonts libs/images libs/FT812 effector
-OS_FILES	:= source/FileBrowser source/ThemeManager source/Themes source/mtRandomNameGenerator source/mtGridEditor source/mtConfig source/mtSliceDetector source/mtSliceManager source/seqPlinky source/mtTest source/mtActions source/mtKeyboardManager source/mtPadBoard source/mtPadsBacklight source/mtWavetableEnvelopes source/seqClips source/seqCut source/seqLauncher source/seqSong source/seqTracks source/seqTracksCore source/seqSidecar source/scales
+OS_FILES	:= source/FileBrowser source/ThemeManager source/Themes source/mtRandomNameGenerator source/mtGridEditor source/mtConfig source/mtSliceDetector source/mtSliceManager source/seqPlinky source/mtTest
 OS_KEEP_O2	:= interface/core/songTimer interface/performanceMode/fPerformance FileManager/fileManagerSong
 OS_OBJS		:= $(filter $(addprefix $(OBJ_DIR)/,$(addsuffix /%,$(OS_DIRS)) $(addsuffix .o,$(OS_FILES))),$(OBJS))
 OS_OBJS		:= $(filter-out $(addprefix $(OBJ_DIR)/,$(addsuffix .o,$(OS_KEEP_O2))),$(OS_OBJS))
@@ -102,7 +106,7 @@ $(OBJ_DIR)/%.o: %.cpp
 	$(TOOLCHAIN)c++ $(DEFINES) $(INCLUDES) $(CPP_OPTIONS) $(COMPILER_OPTIONS) -o "$@" "$<"
 
 # the HYPER_RASP script ports run per clock pulse / pad press, never per sample: -Os
-$(OBJ_DIR)/seqgen/hr%.o $(OBJ_DIR)/seqgen/chordarp.o $(OBJ_DIR)/seqgen/mono.o $(OBJ_DIR)/seqgen/playhead.o: COMPILER_OPTIONS += -Os
+$(OBJ_DIR)/seqgen/hr%.o: COMPILER_OPTIONS += -Os
 
 $(OBJ_DIR)/seqgen/%.o: $(SEQGEN_DIR)/%.cpp
 	$(TOOLCHAIN)c++ $(DEFINES) $(INCLUDES) $(CPP_OPTIONS) $(COMPILER_OPTIONS) -o "$@" "$<"

@@ -70,3 +70,28 @@ Image after P3: FLASH 964 988 B, RAM 231 804 B (88.43 %), EXTERNAL_RAM 16 706 00
 3. "Samples ... resident" with 8 voices: expect about 0.1-0.2 % lower than v0.4.1.
 4. "other" in the ISR lines: if it is above ~10 % something is not accounted for.
 5. Idle: all stage lines near 0, ISR avg of a few percent.
+
+## v0.4.3 regression fix (branch v043-regress, from seq-tracks 8ecf4dd = v0.4.2)
+Owner (device): v0.3.x played PolySynth with lots of sends smoothly and the UI was responsive; since v0.4 the same actions drop PolySynth
+voices and "the interface is mostly lagging", even without MLR. Causes found (v0.3.10 .. v0.4.2) and fixes, ranked by estimated cost:
+| # | Cause | Est. cost (v0.4.2) | Fix |
+| :-: | :--- | :--- | :--- |
+| 1 | PolySynth: the v0.4 sub / SVF / ladder branches and their state inside the one per-sample voice loop (more branches, register spills), and a per-instance mix loop with per-sample chorus / send switches and branchy saturation | 1 instance, 4 voices, sends: 125.5k cycles/block (24.0 %) vs 106.4k in v0.3.10; 3 instances 8 voices + sends: 268k (51.3 %) | voice loop compiled per oscillator kind and width for the default path (no sub, LPG), shared set-up / write-back; mix loop per chorus / reverb / delay combination; `ssat` saturation. Bit-exact (same ARM hashes, host golden tests). Now 98.8k (18.9 %, below v0.3.10) and 208k (39.9 %); chorus 309k -> 246k; mono 190k -> 125k; flash +8 KB |
+| 2 | Plan 019 step 0: the whole MK66 platform at -Os (FatFs / SDHC, SPI, I2C pads, LED driver, FT812 display transfer, USB, MIDI UART, DMA, interrupt handlers) and the sequencer sources that run in the audio interrupt (seqTracks / seqTracksCore block tick, seqCut apply, seqLauncher drain, chordarp / mono / playhead per pulse, seqSong, seqClips, seqSidecar, scales) plus pad / keyboard / actions / pad backlight / wavetable envelopes | not measurable on the host (needs the device); typical -Os penalty 10-30 % on loops | -O2 again as in v0.3.x; -Os only for genuinely cold code: effector, mtTest, clock set-up, string / print helpers, EEPROM, ADC, battery, radio, sleep, unused UARTs (Serial5 = MIDI stays -O2). Cost 15 KB of flash |
+| 3 | Governor (new in v0.4): cut at an average >= 80 % / 88 % and on two blocks >= 95 % within 1 s - a high but safe load dropped voices; restore 0.67 s per voice | voices lost at 80-95 % load where v0.3.x played fine | cuts only on a block >= 97 % (one voice, floor 4) or an overrun >= 100 % (down to sounding - 1, floor 1); restore one voice per 0.25 s of blocks < 93 % while the predicted average with one more voice is < 90 %; a block >= 96 % restarts the count |
+| 4 | Instrument page (v0.4.1 fix: the update runs every pass): the PolySynth view redrew 20 times a second while voices sound (voice meters, CPU in the model) | display / main loop load on that page | 10 per second, as the Play-mode view |
+
+Checked and not a cause: fastmem.S (correct: aligned 16-byte ldm / stm, unaligned byte loop = the old nano behaviour); CPU monitor counters (a few cycles per block / pass when closed); live pitch sampler (8 plain reads per pass, refresh <= 25 fps only while visible); instrument-order mapping (event-driven only); plinky.bin state hash (only when the dirty flag is taken after a stop, not per pass); morph controllers x3 (~300 cycles each per pass); pad LEDs (no change since v0.3.10); beat repeat bypassed (no processing).
+Governor test changes (direct consequences of the owner-driven rule, same strictness): 86 % sustained -> all 8 voices stay (was 5..7); "a high average >= 88 % cuts" -> never cuts (also 96 % sustained); risk rule "two blocks >= 95 %" -> one block >= 97 % (two 96 % blocks cut nothing); the 96 % block after an overrun restarts the count but cuts nothing (was: second risk block, one more voice); the "delays by a quarter" block is 94 % (91 % is now a quiet block); restore time comments 0.67 s -> 0.25 s. All other checks unchanged.
+Measurement tool: `core/seqtest/armbench` (unicorn + capstone, approximate M4 cycles of the real ARM code; not part of `make test`).
+Image: end 0xF3A18 (margin 34 280 B; v0.4.2 0xED174, margin 61 068 B), RAM 231 868 B (88.45 %), `check_sdram_ctors.sh` ok.
+
+### For the owner: CPU monitor (Config > Info > CPU monitor), same project and actions on v0.3.10 (where readable), v0.4.2 and this build
+1. Idle, nothing playing: ISR avg a few percent; main loop passes per second (note the number) - expect clearly more than v0.4.2.
+2. PolySynth 1 alone, 4-note chords, Reverb / Delay sends up (the v0.3.x case): "PolySynth" stage % - expect about 20 % lower than v0.4.2 (host: 24.0 % -> 18.9 % of the block for the synth alone); cap stays 8, no dropout.
+3. PolySynth 1 + 2 + 3, 8 voices, sends: PolySynth % (host: 51 % -> 40 %), ISR avg / peak; cap must stay at 8 unless the ISR peak reaches ~97 %.
+4. Same with Chorus Mix > 0 on all three: PolySynth % (host: 59 % -> 47 %).
+5. Push the load (add sample tracks / reverb) until a voice drops: the cap must only fall when ISR peak >= ~97 % and come back within ~0.25 s per voice once the load is lower.
+6. UI responsiveness with the PolySynth playing: open / scroll the instrument page, pattern editor, file browser (SD listing speed), pad response; compare with v0.4.2 by feel and "main loop pass" avg / peak.
+7. MLR streaming loop: "Samples ... streamed", "ring misses" (expect 0), blocking reads ms - SD path is -O2 again.
+8. Sub oscillator + SVF / ladder on 8 voices is still expensive (host: 74 % / 93 % of the block for the synth alone): expect the governor to act there.
