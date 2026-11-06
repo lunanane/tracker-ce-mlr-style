@@ -1,5 +1,6 @@
 #include "Audio.h"
 #include "play_memory.h"
+#include "play_memory_kernel.h"
 #include "utility/dspinst.h"
 #include "seqMlrCue.h"
 
@@ -138,7 +139,21 @@ AUDIO_CORE_RAM audio_block_t* AudioPlayMemory::updateSingleShotNormal()
         else
             interpolationCondition = 1;
 
-        for (int i = 0; i < AUDIO_BLOCK_SAMPLES; i++)
+        // plan 022 P3: a resident sample without glide in this block runs in the register kernel (bit-identical, play_memory_kernel.h)
+        bool kernelDone = false;
+        if (!currentIsStreamed && constrainsInSamples.pitchSmoothing == 0)
+        {
+            pmkernel::Fwd ks = { iPitchCounter, currentFractionPitchCounter, playing, currentSampelValue, interpolationDif };
+            pmkernel::renderForward<false>(ks, in, out, AUDIO_BLOCK_SAMPLES, (int32_t)length, (int32_t)constrainsInSamples.endPoint, 0, 0u,
+                                           castPitchControl, currentFractionPitchControl, interpolationCondition != 0);
+            iPitchCounter = ks.ipc;
+            currentFractionPitchCounter = ks.frac;
+            playing = ks.playing;
+            currentSampelValue = ks.sample;
+            interpolationDif = ks.dif;
+            kernelDone = true;
+        }
+        for (int i = 0; !kernelDone && i < AUDIO_BLOCK_SAMPLES; i++)
         {
             if ((int32_t)length > iPitchCounter)
             {

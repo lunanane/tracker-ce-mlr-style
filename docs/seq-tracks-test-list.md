@@ -993,6 +993,10 @@ Host tests: `core/seqtest/test_plinky4.inc` (defaults = old sound, subs and thei
 | 6 | Leave the monitor (Close) and use the page normally | No extra load: with the monitor closed only the ISR total, the main loop pass time and the stream counters are touched |
 | 7 | **Report to the owner** (same rehearsal as before): the screen of the MLR streaming case and of the synth case, before/after each later build | See the per item list at the end of plan 022 |
 
+**P2 - dropouts.** MLR with a streamed long loop (jump with the pads, also quickly): ring misses stay 0, "blocking reads" are short (longest well under 3 ms), the display and pads stay responsive. PolySynth under load (chords on all three synths with reverb and an MLR loop): when the "cap" falls (dropout), it climbs back by one voice about every 0.7 s as soon as the load allows; it never stays at 0 (minimum 1). After the pads were pressed after SYNC ALL / RSYNC the jump lands on the section shown on the screen.
+
+**P3 - speed.** Compare "Samples resident / streamed" and the ISR average with v0.4.1 on the same project: streamed voices about 2 % each cheaper, resident about 0.1-0.2 % each. Sound must be identical (the changes are bit-exact): play a project with one-shot and looped samples at several pitches and compare with v0.4.1 by ear / recording.
+
 ## 12. Stock behaviour (never enter Play mode, Session or the fader page)
 | Press | Expected |
 |---|---|

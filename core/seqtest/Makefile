@@ -8,7 +8,7 @@ GLUE = ../source/seqTracksCore.cpp ../source/seqCut.cpp ../interface/seqSession/
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
 
 .PHONY: test clean preview amp-preview pitch-preview grid-preview
-test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE) build/seq_plinky_tests$(EXE) build/seq_trace_tests$(EXE) build/seq_amp_tests$(EXE) build/seq_warp_tests$(EXE) build/seq_stage_tests$(EXE) build/seq_gridstage_tests$(EXE) build/seq_br_tests$(EXE) build/seq_pitchdevice_tests$(EXE) build/seq_cpumon_tests$(EXE)
+test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE) build/seq_plinky_tests$(EXE) build/seq_trace_tests$(EXE) build/seq_amp_tests$(EXE) build/seq_warp_tests$(EXE) build/seq_stage_tests$(EXE) build/seq_gridstage_tests$(EXE) build/seq_br_tests$(EXE) build/seq_pitchdevice_tests$(EXE) build/seq_cpumon_tests$(EXE) build/seq_kernel_tests$(EXE)
 	build/seq_cpu_tests$(EXE)
 	build/seq_glue_tests$(EXE)
 	build/seq_perform_tests$(EXE)
@@ -24,6 +24,11 @@ test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tes
 	build/seq_warp_tests$(EXE)
 	build/seq_br_tests$(EXE)
 	build/seq_cpumon_tests$(EXE)
+	build/seq_kernel_tests$(EXE)
+
+build/seq_kernel_tests$(EXE): test_kernel.cpp ../libs/Audio/play_memory_kernel.h
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) -I../libs/Audio test_kernel.cpp -o $@
 
 build/seq_cpumon_tests$(EXE): test_cpu_monitor.cpp ../source/seqCpuLogic.h ../source/seqTraceStages.h
 	mkdir -p build

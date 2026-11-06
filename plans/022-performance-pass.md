@@ -49,3 +49,24 @@ anything P1 shows as hot. Each change measured (host cycle counts + device reado
 - *Priority*: the cue cache fill and the waveform probes (blocking SD reads in the main loop) run only when no voice needs a refill, **not within 40 ms of a note-on of a streamed voice**, and **at most once per 6 ms**; a cue is now read in pieces of 1024 frames (2 KB; one piece per call, restart from the top if the entry went stale) instead of 3072 frames (6 KB) in one call, the waveform probes one column per call instead of two. A voice's refill never waits behind more than one 2 KB read. Cost: the cache of a section is complete after about 0.3 s instead of 0.1 s.
 - *Per sample*: `VoiceStreamManager::getSampleFast` (inline: RAM pre-cache hit, or ring hit once the fade-in is over; everything else calls `getSample`) replaces the out-of-line call for every streamed sample read in `readSampleAtRel`; value identical by construction (same compares, same ring index; the fade-in, loop-wrap cache and miss bookkeeping stay in `getSample`). Estimated: ~40 cycles x 2 reads x 128 samples = ~10k cycles per streamed voice per block (about 1.9 %, plan 009 P #15). Not host-tested (the class needs the SD/sample memory); verify with the monitor "streamed" stage before/after (v0.4.1 vs this build).
 - Ring buffers became a class member (`VoiceStreamManager::ring_`, same `__NOINIT(EXTERNAL_RAM)` raw storage, no constructor; `check_sdram_ctors.sh` ok).
+
+## P3 as built
+Only changes that are bit-exact or already covered by a host test were made; the rest is listed as not done with the reason.
+| # | Item | Status | Estimated saving per block | Test |
+| :-: | :--- | :--- | :--- | :--- |
+| 1 | Streamed sample read inline (`getSampleFast`), plan 009 #15 | **done in P2** | ~10k cycles per streamed voice (1.9 %) | identical by construction; verify with the monitor "streamed" stage |
+| 2 | Sample playback fast path (#3) for resident samples, single shot and loop forward (normal direction): state in locals (`play_memory_kernel.h`), no per-sample streamed / bound test, used when no glide runs in the block | **done (partly)** | 0.5-1k cycles per resident voice (ARM -O2 instruction count of a model of the loop: 28 -> ~22 instructions per sample, 6 fewer member stores/loads); 8 voices ~0.1-0.2 % | `test_kernel.cpp`: 45 000 random blocks bit-identical (output, counter, fraction, last samples, playing), single shot and loop, interpolation on/off, pitch 0.2-4.2 |
+| 3 | Burst read of the sample window into an SRAM scratch (the SDRAM reads of #3) and the backward / ping-pong / reverse / slice / granular variants | **not done** | ~8-10k per voice (plan 009 estimate) | needs a scratch of 128 x pitch + 2 samples per voice (up to 1 KB) and six more loops; the monitor's "resident" stage on the device decides whether it is worth it |
+| 4 | Remaining amp / pan fusion, PolySynth voice loop and warp loop micro-optimisations | **not done** | - | no measurement yet; the PolySynth / warp stages of the monitor show what is hot |
+| 5 | Line-in chain gating | **not done** | ~3-5k (0.6-1 %) | needs the recording / monitoring state of the input; the "Line in/out" stage of the monitor shows the cost |
+| 6 | Beat repeat idle path | **nothing to do** | - | already 0 cost when idle (plan 021 test: idle = 0) |
+| 7 | AUDIO_CORE_RAM hot loops into RAM | **not done, measured** | 0-4 % (plan 009 #14) | RAM is 231 804 of 262 144 B (88.4 %): 30 340 B are left for heap AND stack together; the audio code section is about 36 KB (does not fit); the ~12 KB glue would leave ~18 KB without a stack reading. Read "stack N, headroom M" on the Config page (dev mode) in a long session first |
+
+Image after P3: FLASH 964 988 B, RAM 231 804 B (88.43 %), EXTERNAL_RAM 16 706 008 B (99.58 %, unchanged), image end 0xECAE4 (limit 0xFC000, margin 62 748 B). Baseline v0.4.1 + plan: FLASH 961 996, RAM 230 304, image end 0xEBF1C.
+
+### For the owner: verify with the CPU monitor (Config > Info > CPU monitor), same rehearsal as before, v0.4.1 vs this build
+1. MLR streaming loop, pads jumping: "Samples ... streamed" % (expect lower by ~2 % per streamed voice), "ring misses" (expect 0), "Blocking reads" total ms and longest (cue cache pieces are 1/3 as long), "jumps: restarted / reused / from cue" (how often the stream is restarted), "SD stream jobs/s".
+2. PolySynth chords + sample voices + reverb: watch "PolySynth voices: cap N" - after a dropout it must climb back by one voice per ~0.7 s while the load stays under ~77 % with one more voice.
+3. "Samples ... resident" with 8 voices: expect about 0.1-0.2 % lower than v0.4.1.
+4. "other" in the ISR lines: if it is above ~10 % something is not accounted for.
+5. Idle: all stage lines near 0, ISR avg of a few percent.
