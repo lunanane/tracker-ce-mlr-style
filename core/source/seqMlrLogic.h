@@ -204,13 +204,13 @@ inline void waveFold(WaveCol& c, const int16_t* s, int n, int stride)
 inline int waveColStep(int j, int sectionLen) { return (j * sectionLen) / kWaveCols; }
 
 // ---- lane screen (geometry, models) ---------------------------------------------------------------------------------------------
-constexpr int kMlrLaneX = 96;     // x of the lane: 16 pads of 38 px
+constexpr int kMlrLaneX = 88;     // x of the lane: 16 pads of 38 px
 constexpr int kMlrPadW = 38;
 constexpr int kMlrLaneW = 16 * kMlrPadW; // 608
 constexpr int kMlrLaneTop = 70;
 constexpr int kMlrLaneH = 164;
 constexpr int kMlrLaneStride = 172;
-constexpr int kMlrBlockX = 712;   // names of the extra pads: 2 columns of 44 px
+constexpr int kMlrBlockX = 700;   // names of the extra pads: 2 columns of 49 px (cells 47 wide)
 constexpr int kMlrWaveMid = 120;  // y of the waveform centre inside a lane (offset from the lane top)
 
 struct SlotInfo

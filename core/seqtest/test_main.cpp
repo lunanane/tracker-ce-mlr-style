@@ -1450,6 +1450,14 @@ int main()
     test_lane_geometry();
     test_lane_palette();
     test_lane_draw_budget_and_bounds();
+    test_mlr_grid_helpers();
+    test_mlr_engine_sections();
+    test_mlr_leds();
+    test_mlr_legend_words();
+    test_cue_cache_logic();
+    test_cue_latency_model();
+    test_mlr_slots_layer();
+    test_mlr_screen_budget_and_bounds();
     test_r4_handback_retrigger_and_stock_phase();
     test_rec_toggle_logic();
     test_keys_driver_model();

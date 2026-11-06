@@ -243,7 +243,7 @@ void Cut::apply(uint8_t t, uint8_t arg)
     const uint8_t sub = argSub(arg);
     const bool down = argDown(arg);
     const uint8_t col = argCol(arg);
-    if (sub >= SUB_COUNT || (sub == SUB_PAD && col >= (secMode_ ? kMlrPads : kPosCols))) return;
+    if (sub >= SUB_COUNT || (sub == SUB_PAD && col >= (secMode_ ? (int)kMlrPads : (int)kPosCols))) return;
     const bool wasActive = ((activeMask_ >> t) & 1u) != 0;
     // releases, Rec up and Resync mean nothing to a track the playhead does not drive
     if (!wasActive && ((sub == SUB_PAD || sub == SUB_REC) && !down)) return;

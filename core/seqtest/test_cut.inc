@@ -1204,7 +1204,7 @@ struct CountCtx
         const int n = (int)strlen(s);
         words += n * 2 + 2; // glyphs beyond x 511 need CELL + VERTEX2F
         texts++;
-        const int w = n * 9, h = 17;
+        const int w = n * (font >= 5 ? 6 : 9), h = font >= 5 ? 13 : 17; // font 5 is the small one (12 px)
         const int x0 = (opt & seqcut::TX_CENTERX) ? x - w / 2 : ((opt & seqcut::TX_RIGHT) ? x - w : x);
         const int y0 = (opt & seqcut::TX_CENTERY) ? y - h / 2 : y;
         bound(x0, y0, x0 + w, y0 + h);
@@ -1496,4 +1496,688 @@ static void test_layer_handover_lifecycle()
     CHECK(g_laneCreate == 2);
     seqEngine.resetState();
     seqEngine.idleTick();
+}
+
+// ================================================================ plan 016 A: MLR slots on a musical grid, cue cache, lane screen
+#include "seqCueCache.h"
+#include "mlrDraw.h"
+
+// A Cut in section mode of its own (not the shared one), pattern of `steps` steps, grid `g` for track 0.
+static void secSetup(seqcut::Cut& c, FakePattern& f, uint8_t g)
+{
+    install(c, f);
+    c.setSectionMode(true);
+    c.apply(0, seqcut::packQuant(seqcut::Q_STEP));
+    c.apply(0, seqcut::packGrid(g));
+}
+
+static void test_mlr_grid_helpers()
+{
+    using namespace seqcut;
+    CHECK(gridSteps(GRID_4) == 4 && gridSteps(GRID_8) == 2 && strcmp(gridName(GRID_4), "1/4") == 0 && strcmp(gridName(GRID_8), "1/8") == 0);
+    CHECK(sectionSteps(4) == 64 && sectionSteps(2) == 32);
+    CHECK(sectionCount(64, 4) == 1 && sectionCount(65, 4) == 2 && sectionCount(128, 4) == 2 && sectionCount(128, 2) == 4 && sectionCount(1, 4) == 1);
+    CHECK(sectionOf(0, 4) == 0 && sectionOf(63, 4) == 0 && sectionOf(64, 4) == 1 && sectionOf(100, 2) == 3 && sectionOf(-5, 4) == 0);
+    // pattern lengths that are not a multiple of the section: the last section is short, its pads past the end are inactive
+    CHECK(padsIn(0, 70, 4) == 16 && padsIn(1, 70, 4) == 2 && padsIn(2, 70, 4) == 0);
+    CHECK(padsIn(0, 16, 4) == 4 && padsIn(0, 16, 2) == 8 && padsIn(0, 5, 2) == 3 && padsIn(0, 64, 4) == 16 && padsIn(1, 96, 2) == 16);
+    CHECK(padOfPos(70, 1, 4) == 1 && padOfPos(3, 1, 4) == 0xFF && padOfPos(64, 1, 4) == 0 && padOfPos(127, 1, 4) == 15 && padOfPos(128, 1, 4) == 0xFF);
+    // commands share the slot of SUB_RESET but are not RESET, SYNC ALL or quantise
+    for (uint8_t g = 0; g < GRID_COUNT; g++)
+    {
+        const uint8_t a = packGrid(g);
+        CHECK(argIsGrid(a) && argGrid(a) == g && !argIsHold(a) && !argIsSyncAll(a) && !argIsQuant(a) && argSub(a) < SUB_COUNT);
+    }
+    for (int on = 0; on < 2; on++)
+    {
+        const uint8_t a = packHold(on != 0);
+        CHECK(argIsHold(a) && argHold(a) == (on != 0) && !argIsGrid(a) && !argIsSyncAll(a) && !argIsQuant(a));
+    }
+    CHECK(!argIsGrid(packSyncAll()) && !argIsHold(packSyncAll()) && !argIsGrid(packQuant(Q_BAR)) && !argIsHold(packQuant(Q_BAR)));
+    // the 12 x 4 pad map: steps 1-16 on cols 1-8 of the slot's two rows, extras on cols 9-12
+    int steps = 0, ctl = 0;
+    for (uint8_t row = 0; row < kRows; row++)
+        for (uint8_t col = 0; col < kCols; col++)
+        {
+            const PadInfo p = padInfo(col, row);
+            CHECK(p.slot == row / 2);
+            if (p.role == PR_STEP) { steps++; CHECK(p.idx == (row & 1) * 8 + col && col < 8); }
+            else { ctl++; CHECK(col >= 8 && p.role != PR_NONE); }
+        }
+    CHECK(steps == 32 && ctl == 16);
+    CHECK(padInfo(8, 0).role == PR_STOP && padInfo(9, 0).role == PR_REV && padInfo(10, 0).role == PR_RATE && padInfo(11, 0).role == PR_RSYNC);
+    CHECK(padInfo(8, 1).role == PR_GRID && padInfo(9, 1).role == PR_HOLD && padInfo(10, 1).role == PR_REC && padInfo(11, 1).role == PR_MUTE);
+    CHECK(padInfo(8, 3).role == PR_GRID && padInfo(11, 2).role == PR_RSYNC && padInfo(12, 0).role == PR_NONE);
+    // screen buttons: Assign 1, Assign 2, Help, then Q and SYNC ALL as before; CLIPS (8) stays the host's
+    CHECK(kButtonAssign1 == 0 && kButtonAssign2 == 1 && kButtonHelp == 2 && kScreenButtonQuant == 4 && kScreenButtonSyncAll == 5);
+}
+
+// Pads address the 16 steps of the section the playhead is in: grid 1/4 and 1/8, a short last section, section advance.
+static void test_mlr_engine_sections()
+{
+    using namespace seqcut;
+    for (uint8_t g = 0; g < GRID_COUNT; g++)
+    {
+        const int spp = gridSteps(g), ss = sectionSteps(spp);
+        Cut c;
+        FakePattern f;
+        f.steps = 128;
+        secSetup(c, f, g);
+        CHECK(c.sectionMode() && c.grid(0) == g);
+        int gl = 0;
+        for (int i = 0; i < ss + 3; i++) stepOnce(c, f, gl);          // the playhead is in section 1 (stock runs on)
+        const View v = c.view(0);
+        CHECK(v.sec == 1 && v.nsec == 128 / ss && v.pads == 16 && ((v.flags2 & V2_GRID8) != 0) == (g == GRID_8));
+        c.apply(0, packArg(SUB_PAD, true, 5));
+        c.apply(0, packArg(SUB_PAD, false, 5));
+        StepPlan p = stepOnce(c, f, gl);
+        CHECK(p.override && p.pos == ss + 5 * spp);                    // pad 5 of the section the playhead is in
+        CHECK(c.view(0).col == 5 && c.view(0).sec == 1);
+    }
+    // a short last section: inactive pads do nothing and do not activate the track
+    {
+        Cut c;
+        FakePattern f;
+        f.steps = 70;
+        secSetup(c, f, GRID_4);
+        int gl = 0;
+        for (int i = 0; i < 66; i++) stepOnce(c, f, gl);
+        c.apply(0, packQuant(Q_STEP));
+        CHECK(c.view(0).sec == 1 && c.view(0).pads == 2 && c.view(0).nsec == 2);
+        c.apply(0, packArg(SUB_PAD, true, 9));                         // behind the end
+        CHECK(c.playhead(0).heldCount() == 0);
+        c.apply(0, packArg(SUB_PAD, false, 9));
+        c.apply(0, packArg(SUB_PAD, true, 1));                         // step 68
+        c.apply(0, packArg(SUB_PAD, false, 1));
+        StepPlan p = stepOnce(c, f, gl);
+        CHECK(p.override && p.pos == 68);
+        // a two-pad loop across the end of the pattern is clipped to the pattern
+        c.apply(0, packArg(SUB_PAD, true, 0));
+        c.apply(0, packArg(SUB_PAD, true, 1));
+        c.apply(0, packArg(SUB_PAD, false, 0));
+        c.apply(0, packArg(SUB_PAD, false, 1));
+        p = stepOnce(c, f, gl);
+        CHECK(c.view(0).loopLo == 0 && c.view(0).loopHi == 1);
+        for (int i = 0; i < 20; i++) { p = stepOnce(c, f, gl); CHECK(p.override && p.pos >= 64 && p.pos <= 69); }
+        CHECK(c.view(0).sec == 1);                                     // a loop keeps the playhead in its section
+        // an inactive pad press on a track that was not driven leaves it alone
+        c.apply(5, packArg(SUB_PAD, true, 15));
+        CHECK((c.activeMask() & (1u << 5)) == 0);
+    }
+    // resolution switch: ends a hold and a latched loop, the pads change meaning at once
+    {
+        Cut c;
+        FakePattern f;
+        f.steps = 128;
+        secSetup(c, f, GRID_4);
+        int gl = 0;
+        for (int i = 0; i < 70; i++) stepOnce(c, f, gl);
+        c.apply(0, packArg(SUB_PAD, true, 2));
+        c.apply(0, packArg(SUB_PAD, true, 4));
+        c.apply(0, packArg(SUB_PAD, false, 2));
+        c.apply(0, packArg(SUB_PAD, false, 4));
+        stepOnce(c, f, gl);
+        CHECK(c.playhead(0).looping() && c.view(0).loopLo == 2 && c.view(0).loopHi == 4);
+        c.apply(0, packGrid(GRID_8));
+        CHECK(!c.playhead(0).looping() && (c.view(0).flags2 & V2_GRID8) && c.view(0).nsec == 4);
+        c.apply(0, packArg(SUB_PAD, true, 3));
+        c.apply(0, packArg(SUB_PAD, false, 3));
+        StepPlan p = stepOnce(c, f, gl);
+        const int sec = c.view(0).sec;
+        CHECK(p.override && p.pos == sec * 32 + 6);
+    }
+    // section HOLD: the pads stay on the held section while the playhead moves on; FOLLOW lets go
+    {
+        Cut c;
+        FakePattern f;
+        f.steps = 128;
+        secSetup(c, f, GRID_8);
+        int gl = 0;
+        for (int i = 0; i < 40; i++) stepOnce(c, f, gl);               // section 1 (32..63)
+        c.apply(0, packHold(true));
+        CHECK((c.view(0).flags2 & V2_HOLD) && c.holdSection(0) == 1);
+        for (int i = 0; i < 40; i++) stepOnce(c, f, gl);               // the playhead is in section 2 now
+        CHECK(c.view(0).sec == 1 && c.view(0).col == 0xFF);           // shown: the held section, the playhead is elsewhere
+        c.apply(0, packArg(SUB_PAD, true, 2));
+        c.apply(0, packArg(SUB_PAD, false, 2));
+        StepPlan p = stepOnce(c, f, gl);
+        CHECK(p.override && p.pos == 32 + 4 && c.view(0).col == 2);
+        c.apply(0, packHold(false));
+        CHECK(!(c.view(0).flags2 & V2_HOLD) && c.holdSection(0) == -1);
+        // the hold of a track the playhead does not drive survives SYNC ALL (stock tracks show the held section too)
+        c.apply(0, packHold(true));
+        c.apply(0, packSyncAll());
+        CHECK(c.holdSection(0) >= 0);
+        c.apply(0, packHold(false));
+    }
+    // RESET (project load) puts grid and hold back to the defaults
+    {
+        Cut c;
+        FakePattern f;
+        secSetup(c, f, GRID_8);
+        c.apply(0, packHold(true));
+        c.apply(0, packArg(SUB_RESET, false, 0));
+        CHECK(c.grid(0) == GRID_4 && c.holdSection(0) == -1);
+    }
+    // legacy layout (section mode off) still answers with the old 8-column views
+    {
+        Cut c;
+        FakePattern f;
+        install(c, f);
+        c.apply(0, packArg(SUB_PAD, true, 3));
+        c.apply(0, packArg(SUB_PAD, true, 8));                         // column 8 is no position in the legacy layout
+        CHECK(c.playhead(0).heldCount() == 1 && c.view(0).pads == 0 && c.view(0).flags2 == 0);
+    }
+}
+
+static void test_mlr_leds()
+{
+    using namespace seqcut;
+    SlotLeds s[kSlots];
+    memset(s, 0, sizeof(s));
+    for (int k = 0; k < kSlots; k++)
+    {
+        s[k].track = (uint8_t)(k * 3);
+        s[k].v.col = 0xFF;
+        s[k].v.loopLo = 1;
+        s[k].v.loopHi = 0;
+        s[k].v.flags = (uint8_t)(1 << VF_RATE_SHIFT);
+        s[k].v.pads = 16;
+    }
+    s[0].v.col = 9;                                      // slot A: playhead on pad 10 (row 2 of the slot)
+    s[0].v.loopLo = 2;
+    s[0].v.loopHi = 4;
+    s[1].v.pads = 5;                                     // slot B: short section
+    s[1].v.col = 2;
+    s[1].v.flags |= VF_REVERSE | VF_ACTIVE;
+    s[1].v.flags2 = V2_GRID8 | V2_HOLD;
+    s[1].muted = 1;
+    uint8_t out[kCutPads];
+    fillMlrLeds(s, false, out);
+    CHECK(out[12 + 1] == LED_BRIGHT && out[0] == LED_DIM && out[2] == LED_LOOP && out[4] == LED_LOOP && out[5] == LED_DIM);   // slot A rows 0, 1
+    CHECK(out[2 * 12 + 2] == LED_BRIGHT && out[2 * 12 + 4] == LED_DIM && out[2 * 12 + 5] == LED_OFF && out[3 * 12 + 0] == LED_OFF);  // slot B: pads 6.. dark
+    CHECK(out[COL_REVERSE] == LED_DIM && out[2 * 12 + COL_REVERSE] == LED_BRIGHT);                                         // REV
+    CHECK(out[12 + 8] == LED_DIM && out[3 * 12 + 8] == LED_BRIGHT && out[3 * 12 + 9] == LED_BRIGHT);                       // GRID (slot B 1/8), HOLD
+    CHECK(out[3 * 12 + 11] == LED_BRIGHT && out[12 + 11] == LED_DIM);                                                      // MUTE
+    // the track picker: the 16 pads are tracks; lit = has notes, bright = the assigned track
+    s[0].picking = 1;
+    s[0].track = 6;
+    s[0].has = 0x00FF;
+    fillMlrLeds(s, false, out);
+    CHECK(out[6] == LED_BRIGHT && out[0] == LED_MID && out[7] == LED_MID && out[12 + 0] == LED_OFF && out[12 + 7] == LED_OFF);   // tracks 1-8 lit, 9-16 off
+    CHECK(out[2 * 12 + 2] == LED_BRIGHT);                                              // the other slot keeps meshing
+    for (int i = 0; i < kCutPads; i++) CHECK(out[i] <= 15);
+    // stopped: pads dark, STOP bright; recording blinks RSYNC
+    s[0].picking = 0;
+    s[0].v.flags |= VF_STOPPED | VF_REC;
+    fillMlrLeds(s, true, out);
+    CHECK(out[3] == LED_OFF && out[COL_STOP] == LED_BRIGHT && out[COL_RESYNC] == LED_BRIGHT);
+    fillMlrLeds(s, false, out);
+    CHECK(out[COL_RESYNC] == LED_OFF);
+}
+
+static void test_mlr_legend_words()
+{
+    using namespace seqcut;
+    SlotLeds sl;
+    memset(&sl, 0, sizeof(sl));
+    sl.v.pads = 10;
+    sl.v.col = 3;
+    sl.v.flags = (uint8_t)(1 << VF_RATE_SHIFT);
+    for (uint8_t row = 0; row < kRows; row++)
+        for (uint8_t col = 0; col < kCols; col++)
+        {
+            const LegendCell c = legendCell(col, row, sl);
+            CHECK(c.word[0] != 0 && strlen(c.word) <= 6);                   // real words, at most 6 characters
+        }
+    CHECK(strcmp(legendCell(0, 0, sl).word, "1") == 0 && strcmp(legendCell(7, 1, sl).word, "16") == 0 && legendCell(2, 1, sl).dim && !legendCell(2, 0, sl).dim);
+    CHECK(legendCell(3, 0, sl).on && !legendCell(4, 0, sl).on);             // the playhead pad is highlighted
+    CHECK(strcmp(legendCell(8, 0, sl).word, "STOP") == 0 && strcmp(legendCell(9, 0, sl).word, "REV") == 0 && strcmp(legendCell(10, 0, sl).word, "RATE") == 0 &&
+          strcmp(legendCell(11, 0, sl).word, "RSYNC") == 0);
+    CHECK(strcmp(legendCell(8, 1, sl).word, "GRID/4") == 0 && strcmp(legendCell(9, 1, sl).word, "FOLLOW") == 0 && strcmp(legendCell(10, 1, sl).word, "REC") == 0 &&
+          strcmp(legendCell(11, 1, sl).word, "MUTE") == 0);
+    // states highlighted
+    sl.v.flags2 = V2_GRID8 | V2_HOLD;
+    sl.v.flags |= VF_REVERSE | VF_STOPPED;
+    sl.v.flags = (uint8_t)((sl.v.flags & ~(3 << VF_RATE_SHIFT)) | (2 << VF_RATE_SHIFT));
+    sl.rec = 1;
+    sl.muted = 1;
+    CHECK(legendCell(8, 1, sl).on && strcmp(legendCell(8, 1, sl).word, "GRID/8") == 0 && legendCell(9, 1, sl).on && strcmp(legendCell(9, 1, sl).word, "HOLD") == 0);
+    CHECK(legendCell(10, 1, sl).on && legendCell(11, 1, sl).on && legendCell(9, 0, sl).on && legendCell(10, 0, sl).on && strcmp(legendCell(10, 0, sl).word, "RATEx2") == 0);
+    CHECK(legendCell(8, 0, sl).on && strcmp(legendCell(8, 0, sl).word, "START") == 0);
+    // the picker: T1..T16, the assigned track highlighted, tracks without notes dim
+    sl.picking = 1;
+    sl.track = 4;
+    sl.has = 0x0010 | 0x0001;
+    CHECK(strcmp(legendCell(0, 0, sl).word, "T1") == 0 && strcmp(legendCell(7, 1, sl).word, "T16") == 0);
+    CHECK(legendCell(4, 0, sl).on && !legendCell(0, 0, sl).on && !legendCell(0, 0, sl).dim && legendCell(1, 0, sl).dim);
+}
+
+// ---- the cue cache bookkeeping (pure parts) ----
+namespace
+{
+struct CueWorld
+{
+    uint32_t hash = 7;
+    uint32_t base = 40000;   // frames per step is 1000 from here
+    bool streamed = true;
+    int calls = 0;
+};
+bool cueFn(void* u, int pos, uint8_t& instr, uint32_t& frame, uint32_t& hash, uint8_t& stereo)
+{
+    CueWorld* w = (CueWorld*)u;
+    w->calls++;
+    if (pos % 17 == 16) return false; // a step without a sounding note
+    instr = 3;
+    frame = w->base + (uint32_t)pos * 1000;
+    hash = w->hash;
+    stereo = 1;
+    return w->streamed;
+}
+} // namespace
+
+static void test_cue_cache_logic()
+{
+    using namespace seqcue;
+    CueWorld w;
+    Want wa[kCues], wb[kCues];
+    // wants: 16 pads of section 0 at grid 1/4 (4 steps per pad), frames below `streamedFrom` need no cue, silent steps none
+    computeWants(cueFn, &w, 0, 4, 100, 0, wa);
+    for (int k = 0; k < kCues; k++) CHECK(wa[k].on == (k * 4 % 17 != 16 ? 1 : 0) && (!wa[k].on || (wa[k].frame == 40000u + k * 4000u && wa[k].instr == 3 && wa[k].stereo)));
+    computeWants(cueFn, &w, 0, 4, 100, 50000, wb);
+    CHECK(!wb[0].on && !wb[2].on && wb[3].on);                         // frame 40000, 48000 are inside the pre-cache; 52000 is not
+    computeWants(cueFn, &w, 1, 4, 70, 0, wb);                          // section 1 of a 70 step pattern: steps 64..69 -> pads 0, 1
+    CHECK(wb[0].on && wb[1].on && !wb[2].on && wb[0].frame == 40000u + 64u * 1000u);
+    w.streamed = false;
+    computeWants(cueFn, &w, 0, 4, 100, 0, wb);
+    for (int k = 0; k < kCues; k++) CHECK(!wb[k].on);                  // resident sample: nothing to cache
+    w.streamed = true;
+
+    Cache c;
+    c.reset();
+    c.want(0, 0, wa);
+    const uint8_t cur[kSlots] = { 0, 0 }, noPre[kSlots] = { 0, 0 }, from[kSlots] = { 0, 0 };
+    int idx, ch, loads = 0, wanted = 0;
+    for (int k = 0; k < kCues; k++) wanted += wa[k].on;
+    while (c.next(cur, noPre, from, idx, ch))
+    {
+        CHECK(idx >= Cache::index(0, 0, 0) && idx < Cache::index(0, 1, 0));    // slot 0, bank 0 only (no prefetch, slot 1 wants nothing)
+        c.loaded(idx, ch);
+        loads++;
+        CHECK(loads <= 40);
+    }
+    CHECK(loads == wanted * 2);                                         // stereo: two channel reads per cue
+    CHECK(c.readyMask(0, 0) != 0 && c.pending(0, 0) == 0);
+    // find: the start of a cue and anywhere inside its window; not outside, not for another instrument
+    int fi;
+    uint32_t delta;
+    CHECK(c.find(3, 40000u + 4000u, fi, delta) && delta == 0 && fi == Cache::index(0, 0, 1));
+    CHECK(c.find(3, 40000u + 4000u + kFrames - 1, fi, delta) && delta == (uint32_t)kFrames - 1);
+    CHECK(!c.find(3, 40000u + 4000u + kFrames, fi, delta) && !c.find(2, 44000u, fi, delta) && !c.find(3, 43999u, fi, delta));
+    // a cue that is not loaded yet is a miss (behave as before)
+    c.want(0, 0, wa);
+    CHECK(c.find(3, 44000u, fi, delta));                                // unchanged wants keep their data
+    w.hash = 8;                                                         // the sample changed: everything stale
+    computeWants(cueFn, &w, 0, 4, 100, 0, wb);
+    c.want(0, 0, wb);
+    CHECK(!c.find(3, 44000u, fi, delta) && c.readyMask(0, 0) == 0 && c.pending(0, 0) == wanted);
+    w.hash = 7;
+    // only the cues whose frame changed are loaded again (loop region / tempo move some of them)
+    c.want(0, 0, wa);
+    while (c.next(cur, noPre, from, idx, ch)) c.loaded(idx, ch);
+    Want moved[kCues];
+    memcpy(moved, wa, sizeof(moved));
+    moved[1].frame += 123;
+    c.want(0, 0, moved);
+    CHECK(c.pending(0, 0) == 1 && !c.find(3, 44000u, fi, delta) && c.find(3, 40000u + 8000u, fi, delta));
+    // order: the cues after the playhead pad first; the next section only when prefetching
+    c.reset();
+    c.want(0, 0, wa);
+    computeWants(cueFn, &w, 1, 4, 128, 0, wb);
+    c.want(0, 1, wb);
+    const uint8_t from9[kSlots] = { 9, 0 }, pre1[kSlots] = { 1, 0 };
+    CHECK(c.next(cur, noPre, from9, idx, ch) && idx == Cache::index(0, 0, 10));
+    for (int guard = 0; guard < 64 && c.next(cur, noPre, from9, idx, ch); guard++) c.loaded(idx, ch);
+    CHECK(c.pending(0, 0) == 0 && c.pending(0, 1) > 0 && !c.next(cur, noPre, from9, idx, ch));    // next section waits ...
+    CHECK(c.next(cur, pre1, from9, idx, ch) && idx >= Cache::index(0, 1, 0) && idx < Cache::index(1, 0, 0));  // ... until the playhead nears the end
+    // bank swap at the section change: the prefetched bank is the current one and its cues are found without any new read
+    for (int guard = 0; guard < 64 && c.next(cur, pre1, from9, idx, ch); guard++) c.loaded(idx, ch);
+    const uint8_t cur1[kSlots] = { 1, 0 };
+    CHECK(!c.next(cur1, noPre, from, idx, ch) && c.find(3, wb[1].frame, fi, delta) && fi == Cache::index(0, 1, 1));
+    // both slots are cached independently
+    c.want(1, 0, wa);
+    CHECK(c.next(cur1, noPre, from, idx, ch) && idx >= Cache::index(1, 0, 0) && idx < Cache::index(1, 1, 0));
+    CHECK(kEntries == 64 && kFrames == 3072 && (unsigned)kEntries * kChannels * kFrames * 2 == 786432u);
+}
+
+static void test_cue_latency_model()
+{
+    using namespace seqcue;
+    // press-to-sound of a jump in a streamed loop (quantise off: the next 1 ms engine tick; the grid wait is the same with and without)
+    LatencyIn l;
+    l.tickWaitMs = 1.0f;
+    l.mainLoopMs = 8.0f;     // worst gap between two VoiceStreamManager::update() passes (cooperative main loop)
+    l.sdFirstChunkMs = 6.0f; // seek + 8 KB ADMA read
+    l.blockMs = 128.0f / 44.1f;
+    const float before = latencyUncachedMs(l), after = latencyCachedMs(l);
+    printf("  jump latency, streamed loop (host model): before %.1f ms, after (cache hit) %.1f ms\n", before, after);
+    CHECK(before > 17.0f && before < 20.0f && after < 4.0f && after < before / 4);
+    // the window outlasts the stream at 4x playback speed, and not at absurd speeds
+    CHECK(windowCoversStream(l, 1.0f, 44100.0f) && windowCoversStream(l, 4.0f, 44100.0f) && !windowCoversStream(l, 8.0f, 44100.0f));
+    LatencyIn slow = l;
+    slow.sdFirstChunkMs = 60.0f; // a slow card
+    CHECK(windowCoversStream(slow, 1.0f, 44100.0f) && !windowCoversStream(slow, 2.0f, 44100.0f));
+}
+
+// ---- the slots through the layer: assign, picker, extras, buttons, legend ----
+static void test_mlr_slots_layer()
+{
+    using namespace seqcut;
+    FakePattern f;
+    f.steps = 128;
+    f.map[0] = 1;
+    seqcut::Cut* c = freshCut(f);
+    CHECK(c != 0);
+    if (!c)
+        return;
+    cutAssignSlot(0, 0);
+    cutAssignSlot(1, 1);
+    seqsession::CutSessionLayer a;
+    a.enter(0);
+    CHECK(a.groupSize() == 4 && strcmp(a.name(), "CUT") == 0);
+    // defaults A = track 1, B = track 2; a track belongs to one slot (taking the other slot's track swaps)
+    CHECK(cutSlotTrack(0) == 0 && cutSlotTrack(1) == 1);
+    cutAssignSlot(0, 1);
+    CHECK(cutSlotTrack(0) == 1 && cutSlotTrack(1) == 0);
+    cutAssignSlot(0, 7);
+    cutAssignSlot(1, 3);
+    CHECK(cutSlotTrack(0) == 7 && cutSlotTrack(1) == 3);
+    cutAssignSlot(0, 40);                                            // out of range: ignored
+    CHECK(cutSlotTrack(0) == 7);
+
+    // pads: slot A (rows 0-1) plays track 8, slot B (rows 2-3) track 4; step 9..16 are the second row
+    seqEngine.postCut(7, packGrid(GRID_4));
+    seqEngine.postCut(3, packGrid(GRID_4));
+    cutQuantSet(Q_STEP);
+    cutUpdate();
+    seqEngine.idleTick();
+    a.pad(2, 1, true);                                               // slot A, second row, col 3 = step 11 -> position 40
+    a.pad(2, 1, false);
+    a.pad(5, 2, true);                                               // slot B, first row, col 6 = step 6
+    a.pad(5, 2, false);
+    seqEngine.idleTick();
+    CHECK(c->activeMask() == ((1u << 7) | (1u << 3)));
+    c->setStock(7, 5);
+    StepPlan p = c->boundary(7, 128, 6);
+    CHECK(p.override && p.pos == 10 * 4);
+    c->setStock(3, 5);
+    p = c->boundary(3, 128, 6);
+    CHECK(p.override && p.pos == 5 * 4);
+
+    // the picker: "Assign 1" turns the rows 1-2 into a track picker, the other slot keeps meshing; again = cancel
+    char lab[12];
+    CHECK(a.buttonLabel(kButtonAssign1, lab) && strcmp(lab, "Assign 1") == 0 && a.buttonLabel(kButtonAssign2, lab) && strcmp(lab, "Assign 2") == 0);
+    CHECK(a.buttonLabel(kButtonHelp, lab) && strcmp(lab, "Help") == 0 && a.buttonLabel(3, lab) && lab[0] == 0);
+    CHECK(a.button(kButtonAssign1, true) && a.button(kButtonAssign1, false) && cutPickSlot() == 0);
+    CHECK(a.buttonLabel(kButtonAssign1, lab) && strcmp(lab, "[Assign 1]") == 0);
+    uint8_t leds[kCutPads];
+    cutLeds(leds);
+    CHECK(leds[7] == LED_BRIGHT && leds[0] == LED_MID && leds[12 + 7] == LED_OFF);   // track 8 is the assigned one; tracks 1-8 have notes (stub), 9-16 not
+    a.pad(5, 2, true);                                               // slot B keeps working while slot A picks
+    a.pad(5, 2, false);
+    CHECK(cutPickSlot() == 0 && cutSlotTrack(1) == 3);
+    a.pad(2, 0, true);                                               // pad 3 = track 3
+    a.pad(2, 0, false);
+    CHECK(cutPickSlot() == -1 && cutSlotTrack(0) == 2);
+    seqEngine.idleTick();
+    CHECK(((c->activeMask() >> 2) & 1u) == 0);                       // picking pressed no step
+    CHECK(a.button(kButtonAssign2, true) && cutPickSlot() == 1);
+    CHECK(a.button(kButtonAssign2, true) && cutPickSlot() == -1);    // again = cancel
+    CHECK(a.button(kButtonAssign2, true) && cutPickSlot() == 1);
+    a.pad(1, 3, true);                                               // second row of slot B: pad 10 of the picker = track 10
+    a.pad(1, 3, false);
+    CHECK(cutPickSlot() == -1 && cutSlotTrack(1) == 9);
+    CHECK(a.button(kButtonAssign1, true) && a.button(kButtonAssign2, true) && cutPickSlot() == 1);   // one picker at a time
+    a.button(kButtonAssign2, true);
+
+    // extras of slot A (track 3, rows 0-1): second row = GRID, SECT, REC, MUTE
+    cutAssignSlot(0, 2);
+    seqEngine.idleTick();
+    a.pad(8, 1, true);
+    a.pad(8, 1, false);
+    seqEngine.idleTick();
+    CHECK(c->grid(2) == GRID_8 && (c->view(2).flags2 & V2_GRID8));
+    a.pad(8, 1, true);
+    a.pad(8, 1, false);
+    seqEngine.idleTick();
+    CHECK(c->grid(2) == GRID_4);
+    a.pad(9, 1, true);
+    a.pad(9, 1, false);
+    seqEngine.idleTick();
+    CHECK(c->holdSection(2) >= 0 && (c->view(2).flags2 & V2_HOLD));
+    a.pad(9, 1, true);
+    a.pad(9, 1, false);
+    seqEngine.idleTick();
+    CHECK(c->holdSection(2) == -1);
+    CHECK(!seqCutTrackMuted(2));
+    a.pad(11, 1, true);
+    a.pad(11, 1, false);
+    CHECK(seqCutTrackMuted(2));
+    a.pad(11, 1, true);
+    a.pad(11, 1, false);
+    CHECK(!seqCutTrackMuted(2));
+    cutRec(false);                                                   // a take of this slot only: REC pad = start, again = close
+    a.pad(10, 1, true);
+    a.pad(10, 1, false);
+    CHECK(cutTrackRecArmed(2));
+    a.pad(10, 1, true);
+    a.pad(10, 1, false);
+    CHECK(!cutTrackRecArmed(2));
+    // first row extras are the stock ones; the second row of the extras of a slot belongs to its own track only
+    a.pad(9, 0, true);
+    a.pad(9, 0, false);
+    seqEngine.idleTick();
+    CHECK(c->view(2).flags & VF_REVERSE);
+
+    // Help toggles the legend, the pads keep working under it
+    CHECK(!cutLegendShown() && a.button(kButtonHelp, true) && cutLegendShown());
+    CHECK(a.buttonLabel(kButtonHelp, lab) && strcmp(lab, "[Help]") == 0);
+    a.pad(4, 0, true);
+    a.pad(4, 0, false);
+    seqEngine.idleTick();
+    CHECK(cutLegendShown() && c->playhead(2).heldCount() == 0);
+    CHECK(a.button(kButtonHelp, true) && !cutLegendShown());
+    // Q, SYNC ALL and CLIPS keep their places; the layer swallows Left / Right, no groups
+    CHECK(a.buttonLabel(kScreenButtonQuant, lab) && lab[0] == 'Q' && a.buttonLabel(kScreenButtonSyncAll, lab));
+    char lines[4][48];
+    a.info(lines);
+    CHECK(strstr(lines[0], "A: track 3") != 0);
+    a.leave();
+    seqEngine.resetState();
+    seqEngine.idleTick();
+    cutAssignSlot(0, 0);
+    cutAssignSlot(1, 1);
+}
+
+// ---- the lane screen: budget, bounds, preview ----
+namespace
+{
+seqcut::MlrModel mlrScene(int scene)
+{
+    using namespace seqcut;
+    MlrModel m;
+    memset(&m, 0, sizeof(m));
+    m.pickSlot = 0xFF;
+    m.legendPad[0] = m.legendPad[1] = 0xFF;
+    for (int k = 0; k < kSlots; k++)
+    {
+        SlotInfo& s = m.slot[k];
+        s.track = (uint8_t)(k * 6 + 1);
+        s.flags = (uint8_t)(VF_ACTIVE | (1 << VF_RATE_SHIFT));
+        s.spp = 4;
+        s.sec = (uint8_t)(2 + k);
+        s.nsec = 8;
+        s.pads = 16;
+        s.loopLo = 1;
+        s.loopHi = 0;
+        s.noteMask = (uint16_t)(0x5A5A >> k);
+        s.cacheMask = (uint16_t)(0x0FFF >> (k * 3));
+        s.waveOk = 1;
+        for (int j = 0; j < kWaveCols; j++)
+        {
+            int amp = (int)(60 + 50 * ((j * (7 + k)) % 23) / 23) - (j % 16 == 0 ? 40 : 0);
+            s.wave[j].hi = (int8_t)amp;
+            s.wave[j].lo = (int8_t)-amp;
+        }
+    }
+    if (scene == 1)                  // everything on: loop, rec, stopped, reverse, grid 1/8, hold, short section, mute, rec header
+    {
+        m.recHeld = 1;
+        for (int k = 0; k < kSlots; k++)
+        {
+            SlotInfo& s = m.slot[k];
+            s.flags = (uint8_t)(VF_ACTIVE | VF_STOPPED | VF_REVERSE | VF_REC | VF_RECORDED | (2 << VF_RATE_SHIFT));
+            s.flags2 = V2_GRID8 | V2_HOLD;
+            s.spp = 2;
+            s.loopLo = 2;
+            s.loopHi = 9;
+            s.pads = (uint8_t)(k ? 11 : 16);
+            s.muted = 1;
+            s.rec = 1;
+            s.noteMask = 0xFFFF;
+            s.cacheMask = 0xFFFF;
+            s.track = 15;
+        }
+    }
+    if (scene == 2)                  // slot A is the track picker
+    {
+        m.pickSlot = 0;
+        m.slot[0].picking = 1;
+        m.slot[0].has = 0x5F5F;
+        m.slot[0].track = 6;
+        m.slot[0].waveOk = 0;
+    }
+    if (scene == 3)                  // the legend
+    {
+        m.legend = 1;
+        m.legendPad[0] = 4;
+        m.legendPad[1] = 11;
+        m.slot[0].flags2 = V2_GRID8;
+        m.slot[1].flags2 = V2_HOLD;
+        m.slot[1].muted = 1;
+        m.slot[1].rec = 1;
+        m.slot[0].flags = (uint8_t)(VF_ACTIVE | VF_REVERSE | (2 << VF_RATE_SHIFT));
+    }
+    return m;
+}
+} // namespace
+
+static void test_mlr_screen_budget_and_bounds()
+{
+    using namespace seqcut;
+    CHECK(kMlrLaneX + kMlrLaneW < kMlrBlockX && kMlrBlockX + 2 * 49 <= 800 && kMlrLaneW == 16 * kMlrPadW && kMlrPadW * 4 == 152 && kWaveCols == 152);
+    CHECK(kMlrLaneTop >= kHeaderY1 + 4 && kMlrLaneStride >= kMlrLaneH + 2 && kMlrLaneTop + kMlrLaneStride + kMlrLaneH <= 424);
+    int worst = 0, worstHeads = 0;
+    for (int scene = 0; scene < 4; scene++)
+    {
+        const MlrModel m = mlrScene(scene);
+        CountCtx w;
+        drawMlr(w, m);
+        w.finish();
+        MlrHeadModel hm;
+        memset(&hm, 0, sizeof(hm));
+        for (int k = 0; k < kSlots; k++)
+        {
+            hm.h[k].x = (int16_t)(kMlrLaneW - 1);
+            hm.h[k].ghost = (int16_t)(kMlrLaneW - 1);
+            hm.h[k].pad = 15;
+            hm.h[k].flags = VF_ACTIVE;
+        }
+        hm.bar = 8;
+        hm.beat = 4;
+        hm.legend = m.legend;
+        CountCtx hw;
+        drawMlrHeads(hw, hm);
+        hw.finish();
+        printf("  MLR screen scene %d: %d bytes static (%d rects, %d discs, %d texts), %d bytes playheads\n", scene, w.bytes(), w.rects, w.discs, w.texts, hw.bytes());
+        if (!(w.minY >= 30 && w.maxY <= 424 && w.minX >= 0 && w.maxX <= 800)) printf("  bounds scene %d: x %d..%d y %d..%d\n", scene, w.minX, w.maxX, w.minY, w.maxY);
+        CHECK(w.minY >= 30 && w.maxY <= 424 && w.minX >= 0 && w.maxX <= 800);
+        CHECK(hw.minY >= 30 && hw.maxY <= 424 && hw.minX >= 0 && hw.maxX <= 800);
+        if (w.bytes() > worst) worst = w.bytes();
+        if (hw.bytes() > worstHeads) worstHeads = hw.bytes();
+    }
+    CHECK(worst <= 5400 && worstHeads <= 500 && worst + worstHeads <= 5800);   // the whole frame must stay below 8172 bytes of display list
+    // the legend replaces the lanes and is the cheapest of all; the playhead part is empty then (bar.beat only)
+    CountCtx lg;
+    drawMlr(lg, mlrScene(3));
+    lg.finish();
+    CountCtx ln;
+    drawMlr(ln, mlrScene(0));
+    ln.finish();
+    CHECK(lg.bytes() < ln.bytes());
+    // the head at the end of a lane stays on the screen; a head outside the shown section is not drawn
+    MlrHeadModel gone;
+    memset(&gone, 0, sizeof(gone));
+    gone.h[0].x = -1;
+    gone.h[1].x = -1;
+    CountCtx gc;
+    drawMlrHeads(gc, gone);
+    gc.finish();
+    CHECK(gc.rects == 0);
+    // head model from a view: pad, ghost
+    View v = {};
+    v.flags = VF_ACTIVE;
+    v.flags2 = 0;
+    v.sec = 1;
+    v.pads = 16;
+    MlrHead h = makeMlrHead(v, 70, 1, 70);
+    CHECK(h.pad == 1 && h.x == mlrOffset(70, 0, 1, 4) && h.ghost == -1);
+    h = makeMlrHead(v, 70, 24, 66);
+    CHECK(h.ghost == mlrOffset(66, 0, 1, 4) && h.ghost != h.x && h.x > 1 * kMlrPadW && h.x < 2 * kMlrPadW);
+    h = makeMlrHead(v, 10, 1, 10);                                  // the playhead is in another section
+    CHECK(h.x == -1 && h.pad == 0xFF);
+    v.flags2 = V2_GRID8;
+    h = makeMlrHead(v, 40, 1, 40);                                  // 1/8: section 1 starts at step 32, 2 steps per pad
+    CHECK(h.pad == 4 && h.x == 4 * kMlrPadW);
+    CHECK(mlrOffset(127, 47, 3, 2) < kMlrLaneW && mlrOffset(127, 47, 3, 2) >= 15 * kMlrPadW);
+    // waveform helpers
+    WaveCol col;
+    int16_t smp[4] = { -300, 12000, 32767, -32768 };
+    waveFold(col, smp, 4, 1);
+    CHECK(col.lo == -127 && col.hi == 127);
+    waveFold(col, smp, 0, 1);
+    CHECK(col.lo == 0 && col.hi == 0);
+    CHECK(waveColStep(0, 64) == 0 && waveColStep(kWaveCols - 1, 64) < 64 && waveColStep(kWaveCols, 64) == 64);
+
+    if (const char* dir = getenv("SEQ_LANE_PREVIEW")) // `make preview`: dump the draw ops of the scenes for lane_preview.py
+    {
+        char path[512];
+        for (int scene = 0; scene < 4; scene++)
+        {
+            snprintf(path, sizeof(path), "%s/mlr%d.ops", dir, scene);
+            FILE* fp = fopen(path, "w");
+            if (!fp) continue;
+            const MlrModel m = mlrScene(scene);
+            MlrHeadModel h;
+            memset(&h, 0, sizeof(h));
+            for (int k = 0; k < kSlots; k++)
+            {
+                View vv = {};
+                vv.flags = m.slot[k].flags;
+                vv.flags2 = m.slot[k].flags2;
+                vv.sec = m.slot[k].sec;
+                h.h[k] = makeMlrHead(vv, m.slot[k].sec * sectionSteps(m.slot[k].spp) + 6 + k * 21, 20, m.slot[k].sec * sectionSteps(m.slot[k].spp) + 2 + k * 9);
+            }
+            h.bar = 3;
+            h.beat = 2;
+            h.recHeld = m.recHeld;
+            h.legend = m.legend;
+            CountCtx d;
+            d.dump = fp;
+            drawMlr(d, m);
+            drawMlrHeads(d, h);
+            d.finish();
+            fclose(fp);
+        }
+    }
 }
