@@ -218,6 +218,7 @@ class audioEngine
     void applyPlinkySends();
     float getPlinkyCpuPercent() { return plinky.cpuPercent(); }
     float getPlinkyCpuPeakPercent() { return plinky.cpuPeakPercent(); }
+    float getTempoBpm() const { return currentTempo; } // plan 016 B: the tempo the audio blocks follow (Warp); 0 before the first block
 #endif
 
     friend class playerEngine;

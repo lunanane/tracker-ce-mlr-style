@@ -82,6 +82,8 @@ AUDIO_CORE_FLASH void AudioPlayMemory::playSingleShot(uint8_t instrIdx, int8_t n
                                         pitchControl);
     }
 
+    warpPrepare(instrIdx); // plan 016 B: Warp
+
     playing = 1;
 
     //	__enable_irq();

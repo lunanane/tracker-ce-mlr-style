@@ -139,6 +139,9 @@ AUDIO_CORE_RAM void AudioPlayMemory::update(void)
     }
 
     audio_block_t* block = nullptr;
+    if (warpV.active)
+        block = updateWarp(); // plan 016 B
+    else
     switch (currentPlayMode)
     {
         case playModeSingleShot: block = updateSingleShot(); break;
@@ -238,6 +241,7 @@ uint8_t AudioPlayMemory::playForPrev(int16_t* addr, uint32_t len, uint8_t type)
     uint32_t startPoint, endPoint;
     int8_t note = 60;
     playing = 0;
+    warpEnd();
     loopBackwardFlag = 0;
     iPitchCounter = 0;
     fPitchCounter = 0;
@@ -352,6 +356,7 @@ uint8_t AudioPlayMemory::playForPrev(int16_t* addr, uint32_t len, uint8_t n, uin
     uint32_t startPoint, endPoint;
     int8_t note = n;
     playing = 0;
+    warpEnd();
     loopBackwardFlag = 0;
     iPitchCounter = 0;
     fPitchCounter = 0;
@@ -468,6 +473,7 @@ void AudioPlayMemory::stop(void)
     //	__disable_irq();
     AudioNoInterrupts();
     playing = 0;
+    warpEnd();
     if (channel == 0 && voiceIndex >= 0)
     {
         voiceStreamManager.notifyNoteOff((uint8_t)voiceIndex);
@@ -1074,6 +1080,7 @@ void AudioPlayMemory::clean(void)
 {
     if (!playing)
     {
+        warpEnd();
         next = NULL;
         length = 0;
         pitchControl = 1;
@@ -1127,6 +1134,7 @@ void AudioPlayMemory::refreshStartParameters()
     if (playing == 1)
         needSmoothingFlag = 1;
     playing = 0;
+    warpEnd(); // plan 016 B
     loopBackwardFlag = 0;
     iPitchCounter = 0;
     fPitchCounter = 0;

@@ -365,6 +365,18 @@ class cInstrumentEditor : public ModuleBase
     bool isEffectsWindow;
     uint8_t selectedPlaceSends;
 
+    // plan 016 B: Warp (time-stretch to the project tempo) on the Effects page of a sample instrument: place 5 = Warp Off / On,
+    // place 6 = Bars (0 = Auto: the guess). The title shows the detected length and the CPU of the warped voices. instrWarpUi.cpp
+    void showWarpControls();
+    void changeWarp(int16_t value);
+    void changeWarpBars(int16_t value);
+    void setDefaultWarp();
+    void setDefaultWarpBars();
+    void warpRefresh();                // main loop: title (CPU) every 250 ms while the Effects page is open
+    bool warpTitleText(char* out, size_t cap); // false: Warp off for this instrument (the plain title is used)
+    uint32_t warpLastMs = 0;
+    char warpTitle[64];
+
     float calcInstrumentVolumeDecybelValue(uint8_t val);
     float calcInstrumentSendsDecybelValue(uint8_t val);
 

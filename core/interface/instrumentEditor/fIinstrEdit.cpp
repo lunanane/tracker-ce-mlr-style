@@ -66,6 +66,8 @@ static void functEffectSelectReverb();
 static void functEffectSelectDelay();
 static void functEffectSelectOverdrive();
 static void functEffectSelectBitDepth();
+static void functEffectSelectWarp();
+static void functEffectSelectWarpBars();
 static void functOpenInstrumentSynthesizer();
 static void functEffectBack();
 
@@ -87,6 +89,7 @@ void cInstrumentEditor::update()
 #ifdef FEATURE_PLINKY
     plinkyRefresh();
 #endif
+    warpRefresh();
 }
 
 void cInstrumentEditor::start(uint32_t options)
@@ -436,6 +439,8 @@ void cInstrumentEditor::setEffectScreenFunct()
     ip->setButtonObj(interfaceButton2, buttonPress, functEffectSelectReverb);
     ip->setButtonObj(interfaceButton3, buttonPress, functEffectSelectDelay);
     ip->setButtonObj(interfaceButton4, buttonPress, functOpenInstrumentSynthesizer);
+    ip->setButtonObj(interfaceButton5, buttonPress, functEffectSelectWarp);
+    ip->setButtonObj(interfaceButton6, buttonPress, functEffectSelectWarpBars);
 
     ip->setButtonObj(interfaceButton7, buttonPress, functEffectBack);
 }
@@ -452,6 +457,8 @@ void cInstrumentEditor::changeParamValue(int value, ValueChangeSource source)
             case 1: cInstrumentEditor::changeParamsBitDepth(value); break;
             case 2: cInstrumentEditor::changeParamsReverbSend(value); break;
             case 3: cInstrumentEditor::changeParamsDelaySend(value); break;
+            case 5: changeWarp((int16_t)value); break;
+            case 6: changeWarpBars((int16_t)value); break;
             default: break;
         }
         return;
@@ -879,7 +886,9 @@ static void functLeft()
 
     if ((IE->isEffectsWindow) && (IE->mode == mtInstEditModeParams))
     {
-        if (IE->selectedPlaceSends > 0)
+        if (IE->selectedPlaceSends == 5)
+            IE->selectedPlaceSends = 3; // plan 016 B: place 4 is the MIDI Mapping button, not a value
+        else if (IE->selectedPlaceSends > 0)
             IE->selectedPlaceSends--;
         IE->showSendScreenFrame();
         return;
@@ -915,7 +924,9 @@ static void functRight()
 
     if ((IE->isEffectsWindow) && (IE->mode == mtInstEditModeParams))
     {
-        if (IE->selectedPlaceSends < IE->frameData.placesCount - 1)
+        if (IE->selectedPlaceSends == 3)
+            IE->selectedPlaceSends = 5; // plan 016 B: Warp, Bars (place 4 is the MIDI Mapping button)
+        else if (IE->selectedPlaceSends < 6)
             IE->selectedPlaceSends++;
 
         IE->showSendScreenFrame();
@@ -1003,6 +1014,8 @@ static void functDelete(uint8_t state)
                 case 1: IE->setDefaultBitDepth(); break;
                 case 2: IE->setDefaultReverbSend(); break;
                 case 3: IE->setDefaultDelaySend(); break;
+                case 5: IE->setDefaultWarp(); break;
+                case 6: IE->setDefaultWarpBars(); break;
             }
 
             return;
@@ -3182,6 +3195,18 @@ static void functEffectSelectOverdrive()
 static void functEffectSelectBitDepth()
 {
     IE->selectedPlaceSends = 1;
+    IE->showSendScreenFrame();
+}
+
+static void functEffectSelectWarp()
+{
+    IE->selectedPlaceSends = 5;
+    IE->showSendScreenFrame();
+}
+
+static void functEffectSelectWarpBars()
+{
+    IE->selectedPlaceSends = 6;
     IE->showSendScreenFrame();
 }
 

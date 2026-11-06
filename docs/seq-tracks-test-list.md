@@ -776,6 +776,32 @@ sidecar range, morph across tables. Nothing below is device-tested yet.
 | WT mode, Width 0 (mono) and 100; Detune; Interval -12 / 0 / +12 | The sound | Mono = one oscillator; Interval / Detune shift the right / left oscillator like in Pulse. |
 | WT mode vs Saws, four held notes | The title `CPU n%` | About the same percentage (the estimate is -3 .. +15 %); write both numbers down. The level of the brightest tables is comparable to the Saws. |
 
+## 11l. v0.3.8: Warp, loops follow the project tempo (plan 016 B, Original Tracker only)
+Host-checked (`make test`, `test_warp.cpp`): the grain engine keeps the pitch of a steady tone to 0.1 Hz at stretch ratios 0.5 .. 2 and with tune on top (without the
+phase alignment it detunes by 11 Hz), a ratio of 1 gives the source bit for bit, the length of a one-shot = bars x 4 x 60 / BPM at 60 .. 160 BPM, no step at the grain
+joins (also across loop edges and at the end of a one-shot), the four play modes, the streamed read window (ring + loop-wrap cache), the tempo-change follower, the
+Bars guess, the sidecar `seqwarp.bin` (old / short / newer / corrupt files). **Nothing below is device-tested yet.** Write the CPU numbers down.
+
+| Do | Look at / listen to | Expected |
+|---|---|---|
+| Instrument Parameters key, then the screen button **Effects** (second page), sample instrument with a 2 or 4 bar drum loop (about 4 .. 8 s) | The right half of the page | Besides "Overdrive / Bit depth / Reverb send / Delay send / Instrument MIDI Mapping" two more buttons: **Warp** `Off` and **Bars** `Auto (n)`. Buttons 6 and 7 (or Left / Right, they skip the MIDI Mapping button) select them; the frame moves. Title "Instrument Effects" while Warp is off. |
+| Warp Off (default), play the loop | The sound, the Config CPU | Exactly as before (v0.3.7). |
+| Select Warp, turn the jog wheel right | The label, the title | `On`; the title becomes `Instrument Effects  Warp: sample = 3.9 bars @120` (your numbers) and, once a warped note plays, `CPU n% (1)`. Jog left / Delete = `Off`. |
+| Warp On, loop at 120 BPM that is exactly 4 bars; Bars Auto | The label | `Auto (4)`. Play the pattern: the loop sounds as before. |
+| Same, project tempo 100, then 140 (Song page tempo, or the Perform tempo) | The sound | The loop stays in time with a metronome / the other tracks at every tempo, **the pitch does not change** (a drum loop has no obvious pitch: use a sustained loop with a clear tone, or a sine loop, to hear it). Some smearing of the drum attacks at the extremes is expected. |
+| Tempo ramp (tempo FX, or turn the tempo while playing) | The sound | The loop follows smoothly; no clicks, no jumps in the loop position. |
+| Warp On, tune +5 semitones | The sound | The pitch goes up 5 semitones, the loop still fits the bars (the tempo is unchanged). Same with -12. Finetune and glide work. |
+| Bars: jog from Auto up and down; Delete | The label, the sound | `Auto (4)` -> `5` -> ... ; with `8` the loop plays at half speed (pitch unchanged), with `2` at double speed (heavily smeared). Delete = `Auto (n)` again. |
+| One-shot, Forward loop, Backward loop, Ping-pong with Warp On (loop points inside the sample) | The sound | One-shot: ends after `bars` bars (a few ms of fade-out). Forward: loops without a click at the loop edge. Backward / Ping-pong: forward to the loop end, then back; no click at the turns. |
+| A long loop (> 6 s, streamed from the SD card) with Warp On, play it through several loops, also at 100 and 140 BPM | The sound | No dropouts, no clicks at the loop edge; same as a short sample in memory. (If you hear dropouts only at the edge of a loop whose loop start is beyond 0.74 s, note the ratio: the loop-wrap cache holds 93 ms.) |
+| Warp On, MLR (Session CUT) on that track: jump between cue points | The sound | The new position starts at the cue point and the loop keeps its tempo (the stretch is that of the whole instrument). The first notes after a jump are not warped differently from the later ones. |
+| Clip launcher: launch a clip whose track plays the warped instrument | The sound | Plays warped at the project tempo; stopping / launching works as before. |
+| Play 3 warped instruments at once (3 tracks) | The sound, the title CPU | **Two** are warped, the third plays un-warped at the original speed (the cap). The title shows `(2)`. Write the CPU number of 1 and of 2 warped voices down (estimate: 4 .. 6 % per voice, see plan 016). |
+| Slice / Beat Slice / Granular / Wavetable instrument, Warp On | The label | `On (n/a)`; it plays as before. The R (reverse) step FX on a warped note plays un-warped. |
+| Warp On for instruments 1 and 3 with Bars 4 / Auto; Save the project, power off, load it | The Effects page | Warp and Bars come back as set. A project saved by v0.3.7 or earlier loads with Warp Off everywhere. Delete the file `seqwarp.bin` from the project folder: Warp Off, nothing else changes. |
+| Copy the project folder to another name (Save As) | The Effects page of the copy | Warp settings are in the copy. |
+| Edit the sample in the Sample Editor (trim, effect), go back and play | The sound | Still works; the Bars guess follows the new length (Auto). |
+
 ## 11f. CPU savings (plan 009 P, v0.2.7): compare with the previous build (v0.2.6) on the same project
 Use one project with 8 sample voices (some with the filter on), the delay and the stock reverb used, the limiter on, and play it. Open Master > Reverb (it resets the average when it opens) and write down "Rev / All CPU" after 30 s of the busiest part; also read Config > audio usage (min / max / avg / last) and "free heap" / "stack ... free ..." (bottom right of the Config page). Do it on v0.2.6 and on this build; the second number of the Master > Reverb item and the Config numbers are the comparison.
 | Press | Expected |

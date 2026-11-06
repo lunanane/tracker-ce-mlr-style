@@ -31,6 +31,7 @@
 #include "VoiceStreamManager.h"
 #include "amplifier.h"
 #include "mtStructs.h"
+#include "warp_core.h"
 
 class Timer;
 
@@ -219,6 +220,8 @@ class AudioPlayMemory : public AudioStream
 
     void setSlidePitch(bool upOrDown, uint8_t dstValue, float time);
     void setSamplePointsSource(AudioPlayMemory* sourceObject);
+    // plan 016 B: CPU of the warped voices (sum, % of the block period); *voices = how many are warping now
+    static float warpCpuPercent(uint8_t* voices);
     //******************************************************************ENVELOPE PUBLIC BLOCK
     // END****************************************************************************//
   private:
@@ -241,6 +244,15 @@ class AudioPlayMemory : public AudioStream
     void playGranular(uint8_t instrIdx, int8_t note);
     void playWavetable(uint8_t instrIdx, int8_t note);
     // UPDATE OBSLUGA OGÓLNA
+
+    // plan 016 B: Warp (time-stretch to the project tempo, play_memory_warp.cpp). warpPrepare() is called by the play*() of
+    // One-shot / Loop modes right before playing = 1; warpV.active then routes update() to updateWarp().
+    warp::Voice warpV = {};
+    float warpK = 0.0f; // stretch ratio = warpK * BPM
+    uint8_t warpCounted = 0;
+    void warpPrepare(uint8_t instrIdx);
+    void warpEnd();
+    audio_block_t* updateWarp();
 
     // UPDATE Z PODZIALEM NA TRYBY
     audio_block_t* updateSingleShot();
