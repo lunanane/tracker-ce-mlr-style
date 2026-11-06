@@ -21,8 +21,14 @@ constexpr const char kMagic[4] = { 'S', 'Q', 'C', 'L' };
 // clear (the default) = the slot loops. Bit (pattern - 1) of a 32 byte table behind the clip modes.
 enum { kScenePayload = (kPatterns + 7) / 8 };
 static_assert(kScenePayload == 32, "255 patterns x 1 bit");
+// Scene colours (plan 017): 4 bits per pattern (nibble (pattern - 1) & 1 of byte (pattern - 1) / 2; low nibble = the even pattern index),
+// a seqpal scene colour index, 0 = none. A table behind the scene flags.
+enum { kColorPayload = (kPatterns + 1) / 2, kColorMax = 15 };
+static_assert(kColorPayload == 128, "255 patterns x 4 bits");
 // Version 1 (v0.2): clip modes only. Version 2 (v0.2.3): clip modes + scene flags; a version 1 file loads with every flag = Loop.
-enum { kVersionV1 = 1, kVersion = 2, kPayloadV2 = kPayload + kScenePayload, kFileMax = kPayloadV2 + seqsidecar::kOverhead };
+// Version 3 (v0.3.8): + scene colours; older files load with every colour = none.
+enum { kVersionV1 = 1, kVersionV2 = 2, kVersion = 3, kPayloadV2 = kPayload + kScenePayload, kPayloadV3 = kPayloadV2 + kColorPayload,
+       kFileMax = kPayloadV3 + seqsidecar::kOverhead };
 
 class ClipModes
 {
@@ -34,6 +40,8 @@ class ClipModes
             bits_[i] = 0;
         for (size_t i = 0; i < sizeof(scene_); i++)
             scene_[i] = 0;
+        for (size_t i = 0; i < sizeof(color_); i++)
+            color_[i] = 0;
     }
     // pattern 1..255, track 0..15; anything else reads as LOOP and is ignored on write
     uint8_t mode(uint8_t pattern, uint8_t track) const
@@ -74,6 +82,23 @@ class ClipModes
             scene_[(pattern - 1) >> 3] = (uint8_t)(scene_[(pattern - 1) >> 3] & ~bit);
         return true;
     }
+    // ---- scene colour (plan 017): palette index 0..kColorMax, 0 = none
+    uint8_t color(uint8_t pattern) const
+    {
+        if (pattern < 1 || pattern > kPatterns)
+            return 0;
+        return (uint8_t)((color_[(pattern - 1) >> 1] >> (((pattern - 1) & 1) * 4)) & 15u);
+    }
+    // true: the stored colour changed
+    bool setColor(uint8_t pattern, uint8_t c)
+    {
+        if (pattern < 1 || pattern > kPatterns || c > kColorMax || color(pattern) == c)
+            return false;
+        uint8_t sh = (uint8_t)(((pattern - 1) & 1) * 4);
+        size_t b = (pattern - 1) >> 1;
+        color_[b] = (uint8_t)((color_[b] & ~(15u << sh)) | ((unsigned)c << sh));
+        return true;
+    }
     bool anyNonDefault() const
     {
         for (size_t i = 0; i < sizeof(bits_); i++)
@@ -82,9 +107,15 @@ class ClipModes
         for (size_t i = 0; i < sizeof(scene_); i++)
             if (scene_[i])
                 return true;
+        for (size_t i = 0; i < sizeof(color_); i++)
+            if (color_[i])
+                return true;
         return false;
     }
-    uint16_t hash() const { return seqsidecar::crc16Update(seqsidecar::crc16(bits_, sizeof(bits_)), scene_, sizeof(scene_)); }
+    uint16_t hash() const
+    {
+        return seqsidecar::crc16Update(seqsidecar::crc16Update(seqsidecar::crc16(bits_, sizeof(bits_)), scene_, sizeof(scene_)), color_, sizeof(color_));
+    }
 
     // frame -> buf (kFileMax bytes at most); 0 = buffer too small
     size_t save(uint8_t* buf, size_t cap) const
@@ -96,7 +127,15 @@ class ClipModes
             p[i] = bits_[i];
         for (size_t i = 0; i < sizeof(scene_); i++)
             p[sizeof(bits_) + i] = scene_[i];
-        return seqsidecar::frameWrite(buf, cap, kMagic, kVersion, p, kPayloadV2);
+        // the OLDEST version that can hold the data: without a scene colour the file is a version 2 file, byte-identical to v0.3.7's
+        bool anyColor = false;
+        for (size_t i = 0; i < sizeof(color_); i++)
+            anyColor = anyColor || color_[i] != 0;
+        if (!anyColor)
+            return seqsidecar::frameWrite(buf, cap, kMagic, kVersionV2, p, kPayloadV2);
+        for (size_t i = 0; i < sizeof(color_); i++)
+            p[sizeof(bits_) + sizeof(scene_) + i] = color_[i];
+        return seqsidecar::frameWrite(buf, cap, kMagic, kVersion, p, kPayloadV3);
     }
     // Missing / bad frame / wrong length: nothing changed and false is returned (the caller resets). A newer version is
     // reported through *newer so the file can be left alone. Reserved mode values are cleaned to LOOP per entry.
@@ -110,13 +149,16 @@ class ClipModes
             *newer = st == seqsidecar::FRAME_NEWER;
         if (st != seqsidecar::FRAME_OK)
             return false;
-        if (!((v == kVersionV1 && n == (size_t)kPayload) || (v == kVersion && n == (size_t)kPayloadV2)))
+        if (!((v == kVersionV1 && n == (size_t)kPayload) || (v == kVersionV2 && n == (size_t)kPayloadV2) || (v == kVersion && n == (size_t)kPayloadV3)))
             return false;
         for (size_t i = 0; i < sizeof(bits_); i++)
             bits_[i] = p[i];
         for (size_t i = 0; i < sizeof(scene_); i++)
-            scene_[i] = v == kVersion ? p[sizeof(bits_) + i] : (uint8_t)0; // version 1: every scene loops
+            scene_[i] = v >= kVersionV2 ? p[sizeof(bits_) + i] : (uint8_t)0; // version 1: every scene loops
         scene_[kScenePayload - 1] = (uint8_t)(scene_[kScenePayload - 1] & 0x7F); // bit 255 belongs to no pattern
+        for (size_t i = 0; i < sizeof(color_); i++)
+            color_[i] = v == kVersion ? p[sizeof(bits_) + sizeof(scene_) + i] : (uint8_t)0; // older files: no colours
+        color_[kColorPayload - 1] = (uint8_t)(color_[kColorPayload - 1] & 0x0F); // the high nibble of the last byte belongs to no pattern
         for (size_t i = 0; i < (size_t)kPatterns * kTracks; i++)
         {
             uint8_t sh = (uint8_t)((i % 4) * 2);
@@ -133,6 +175,7 @@ class ClipModes
     static uint8_t shiftOf(uint8_t pattern, uint8_t track) { return (uint8_t)((index(pattern, track) % 4) * 2); }
     uint8_t bits_[kPayload];
     uint8_t scene_[kScenePayload];
+    uint8_t color_[kColorPayload];
 };
 
 }  // namespace seqclips

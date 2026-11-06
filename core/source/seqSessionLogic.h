@@ -311,6 +311,7 @@ struct View
     uint8_t flags[kVisRows][kTracks];
     uint8_t scene[kVisRows];      // Cell of the scene cell
     uint8_t sceneFlags[kVisRows]; // F_ONEX: the scene is flagged "play next" (plan 006; before: every clip of the row plays once)
+    uint8_t sceneColor[kVisRows]; // seqpal scene colour index of the row (plan 017), 0 = none
 };
 
 // The animated part (small, redrawn at most once per step and for the blink).
@@ -350,6 +351,25 @@ inline uint16_t marksCost(const Marks& m)
     return (uint16_t)cost;
 }
 
+// Scene colours (plan 017), mandatory part: per colour in use a clip tint batch (colour + RECTS + END = kBatchCost), three scene cell
+// batches and the row underline batch; per coloured row one underline rect. The rects of the cells themselves are in the base count
+// (a tinted cell is drawn in its colour's batch instead of the grey one).
+inline uint16_t sceneColorCost(const View& v)
+{
+    uint16_t used = 0; // bit per palette index 1..15
+    uint32_t rows = 0;
+    for (uint8_t r = 0; r < kVisRows; r++)
+    {
+        if (v.sceneColor[r] == 0 || v.sceneColor[r] > 15) continue;
+        used = (uint16_t)(used | (1u << v.sceneColor[r]));
+        rows++;
+    }
+    uint32_t colors = 0;
+    for (uint8_t i = 1; i < 16; i++)
+        if ((used >> i) & 1u) colors++;
+    return (uint16_t)(colors * 5 * kBatchCost + rows * kRectCost);
+}
+
 struct GridPlan
 {
     bool outlines; // steady outlines of armed follow actions
@@ -369,6 +389,7 @@ inline GridPlan planGrid(const View& v)
     cost += textCost(14) + textCost(18) + textCost(18);                           // launch quantise, focus lines
     cost += textCost(22);                                                         // the scene line of the info column (plan 006)
     if (v.msg) cost += textCost(44);
+    cost += sceneColorCost(v);
     uint32_t follow = 0, one = 0, stop = 0;
     for (uint8_t r = 0; r < kVisRows; r++)
     {

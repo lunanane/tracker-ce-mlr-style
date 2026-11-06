@@ -819,7 +819,7 @@ static void test_grid_geometry()
             SCHECK(progressPx(pos, u, 128) <= kCellW);
 
     // the structs are compared with memcmp: no padding allowed
-    SCHECK(sizeof(View) == 11 + 2 * kVisRows * kTracks + 2 * kVisRows);
+    SCHECK(sizeof(View) == 11 + 2 * kVisRows * kTracks + 3 * kVisRows); // plan 017: + sceneColor[kVisRows]
     SCHECK(sizeof(Marks) == 4 * kTracks + 4);
     SCHECK(msgText(MSG_NONE)[0] == 0 && msgText(MSG_BUSY)[0] != 0 && msgText(MSG_UNDO_CLEARED)[0] != 0);
 }

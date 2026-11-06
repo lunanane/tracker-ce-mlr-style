@@ -19,6 +19,8 @@ Do these first (the full list below is the detail):
 9. R2: Song on the Song page opens the launcher (Song again returns); with the song playing launch a clip (the song keeps looping its slot, no freeze); a Play 1x clip chains into the next row; Stop = panic (section 9, 9b, 9c).
 10. Plan 006 (v0.2.3): play the song: the slot **loops** until its scene is flagged play next; queue another slot with Insert on the Song page; set the flag with screen button 1 + wheel (section 9e).
 
+11. Plan 017 (v0.3.8): scene colours: on the Song page hold screen button 1 + Shift and turn the wheel on a slot; look at the colour chip, then open the launcher (section 9f).
+
 Contents: 1-6 Play mode | 7 Record | 8 save / load | 9 Session CLIPS (9e live-set Song page) | 10 Session CUT (10c lane screen, SYNC ALL, panic) | 11 alt Performance page | 12 stock-behaviour checks.
 
 ## 1. Enter / leave Play mode (v0.2: Play mode is the 4th action-button page of the pattern editor)
@@ -357,6 +359,25 @@ The song no longer runs away: **at the pattern end the playing slot plays again*
 | Song page: use the stock "loop <-> song" toggle (button 1 tap / Shift + Play) | Stock: song mode off = the pattern loops with no flags; on = song mode with the loop-by-default rule. |
 | Pattern page: Pattern + Right / Left while the song plays | The pattern switches at its end; **the song mode goes on** (v0.2.3; stock ended it): it only ends when the new pattern is not in the song. |
 | Performance page with per-track patterns changed, leave it while the song plays | At the pattern end the pattern is reloaded (the changed tracks are put back), also in song mode; a slot flagged play next then plays one more time before it advances. |
+
+### 9f. Scene colours (plan 017, v0.3.8)
+Each scene (pattern) can carry one of nine colours: **None** (default, the plain look), the four tracker key colours (**Teal, Yellow, Purple, Blue**) and **Orange, Red, Green, White**. Set on the Song page, shown there and on the launcher. Saved in `seqclips.bin` (version 3: + 128 bytes, 4 bits per pattern); a file without any colour is still written as version 2 (identical to v0.3.7), version 3 only when a colour is set; a version 1 or 2 file loads with no colours; nothing is written to the SD card while the transport plays (the usual deferred save).
+
+| Press | Expected |
+|---|---|
+| Song page, hold screen button **1** | Its label changes to `Wheel:Next` / `Shift:Color` while it is held (back to the stock label on release). |
+| Hold button 1, hold **Shift**, turn the wheel one click clockwise on a slot with no colour | The label reads `Color:` and `Teal`; the slot shows a **teal chip** left of the right-end marks. Further clicks: Yellow, Purple, Blue, Orange, Red, Green, White, then None (chip gone), then Teal again. Anticlockwise goes backwards. The label keeps naming the colour until the button is released. |
+| Same, without Shift | Sets / clears the **play next** arrow as before (section 9e); no colour change. |
+| Release button 1 after a colour step | No song / pattern toggle (a wheel turn while held cancels the tap, as for the play-next flag). |
+| Give a pattern a colour that two slots hold | Both slots show the chip (the colour belongs to the pattern). |
+| Colour chip beside the play-next arrow and the red queue square | All three readable; a long pattern name can run under the marks (known). |
+| Open the launcher (Song button) | Every row of a coloured scene has a **tinted scene cell** (dim when the scene is empty, brighter with content, brightest playing), its **clips with content tinted** in the colour, and a **thin line in the colour** under the row. Rows with None look as before. |
+| Launch a clip in a coloured row / queue one | The playing clip keeps its **teal fill and teal outline** and progress line; a queued clip keeps the blinking yellow outline; the scene cell turns brighter while its scene plays. Nothing is hidden by the colour. |
+| Set a colour while the song plays | The Song page chip and the launcher update at once; the SD write waits for the stop (the project is marked changed). |
+| Stop, save, power off, load the project | The colours are back on the Song page and in the launcher. A project saved before v0.3.8 (no colours) loads plain. |
+| Save with colours on v0.3.8, load on v0.3.7 | v0.3.7 treats the version 3 file as from a newer mod: it leaves it alone (clip modes and flags of that file are not loaded there). Keep a backup before trying a rollback. |
+
+Known limits (plan 017): one colour per scene (no per-clip colours); the colour step needs the wheel and Shift (all eight screen buttons of the Song page are in use); the launcher grid has a fixed display list budget, so a screen with every row in a different colour costs about 700 bytes more of the 5500 byte grid budget (still within it; the optional marks drop first).
 
 Known limits (plan 006): the play-next flag and the queue use the cursor slot; marks of long pattern names can overlap the names. A slot queued at the very last step of a pattern is taken one pattern later (the stock scene arm rule).
 

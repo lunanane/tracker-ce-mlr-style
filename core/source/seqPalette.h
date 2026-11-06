@@ -54,6 +54,35 @@ inline uint32_t trackColor(int t)
     if (t & 8) c = mix(c, kBg, 90);
     return c;
 }
+
+// Scene colours (plan 017): what the Song page's "Color" step shows next to a slot and the launcher tints a row with. Index 0 = none (the
+// plain look of before), 1-4 the four tracker key colours, 5-8 four extras that read on the dark theme (orange, coral red, green, white).
+// Stored as 4 bits per pattern in seqclips.bin, so the index is stable: never reorder, only append (up to 15 colours).
+enum { kSceneColors = 9 };
+constexpr uint32_t kSceneRgb[kSceneColors] = { 0x000000, kNote, kInstr, kFx1, kFx2, 0xFF8A30, 0xFF4D6A, 0x6EE06A, 0xE6E6E6 };
+inline uint32_t sceneRgb(uint8_t idx) { return idx > 0 && idx < kSceneColors ? kSceneRgb[idx] : 0; }
+inline const char* sceneName(uint8_t idx)
+{
+    static const char* const n[kSceneColors] = { "None", "Teal", "Yellow", "Purple", "Blue", "Orange", "Red", "Green", "White" };
+    return n[idx < kSceneColors ? idx : 0];
+}
+// One step of the Color control: dir > 0 next, dir < 0 previous, wrapping through None.
+inline uint8_t sceneStep(uint8_t idx, int dir)
+{
+    int i = idx < kSceneColors ? idx : 0;
+    i += dir > 0 ? 1 : -1;
+    if (i < 0) i = kSceneColors - 1;
+    if (i >= kSceneColors) i = 0;
+    return (uint8_t)i;
+}
+// Launcher fills of a coloured scene cell by state (empty / notes / playing): the colour mixed into the dark scene ground
+inline uint32_t sceneCellFill(uint8_t idx, int cls)
+{
+    static const int lvl[3] = { 56, 110, 190 };
+    return mix(kSceneEmpty, sceneRgb(idx), lvl[cls < 0 ? 0 : (cls > 2 ? 2 : cls)]);
+}
+// Tint of a clip with content in a coloured row (the playing clip keeps the teal state fill, so playing stays readable)
+inline uint32_t sceneClipFill(uint8_t idx) { return mix(kCellNotes, sceneRgb(idx), 64); }
 } // namespace seqpal
 
 #endif
