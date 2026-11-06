@@ -12,6 +12,13 @@ the Model:Samples."
 Free flash (more -Os on control-rate audio code that isn't per-sample, dead code, data tables) and EXTERNAL_RAM
 (SAMPLE_MEMORY_SIZE, developer guide) before adding features; keep the image < 0xF0000 with ≥ 16 KB margin.
 
+### 0 as built (branch v039-room)
+- **Flash limit corrected (coordinator, plan 018)**: the 0xF0000 rule came from a misreading; the working limit is now **image end < 0xFC000** (1,032,192 B), enforced by `platforms/mk66/check_image_size.sh` in the post-build step (prints end + margin, fails at the limit, warns below 16 KB margin). Keep the build lean anyway.
+- **Freed 22,556 B of flash** (image end 0xEBFF8 = 961,912 B -> **0xE555C = 939,356 B**, margin to 0xFC000: **92,836 B**): (1) the whole MK66 platform (teensy core, FatFs, SDMMC, USB) at -Os except `3rdparty/Audio` (the I2S streams); (2) `effector` (offline sample editor), the seqgen generators (chordarp, mono, playhead), seqTracks / seqTracksCore / seqLauncher / seqSong / seqClips / seqCut / seqSidecar / scales and pad / keyboard / actions / mtTest at -Os (event-rate code, not per-sample; mtSequencer*, the audio engine, the DSP and seqFx stay -O2).
+- **Word-wise memcpy / memset** (`platforms/mk66/source/fastmem.S`, own code): newlib-nano links byte loops (about 6 cycles per byte) and the Teensy `memcpy-armv7m.S` is empty in this build (assembled without -mcpu); every 256 byte block copy / clear in the audio interrupt gets several times faster (aligned path: ldm / stm, 16 bytes per loop; other alignments take the byte loop). tracker-ff's fastmem.S was NOT copied (provenance unclear). Not measured on hardware.
+- **Not done, with reason**: the six double-to-float math call sites (sample-editor code, no CPU effect, small flash gain against 92 KB of room). **SAMPLE_MEMORY_SIZE is NOT reduced**: EXTERNAL_RAM is 98.27 % but 290 KB are free and plan 019 needs under 40 KB there (the chorus lines); lowering it would cut the resident sample pool (a project value, `max_memory`) for every user for nothing. If more is ever needed: 45 -> 41 * 256 KB frees 1 MB, see docs/developer_guide.md. Internal RAM unchanged (86.2 %); no big internal buffers are planned.
+- Numbers: FLASH 934,796 B (89.15 %), RAM 225,976 B (86.20 %), EXTERNAL_RAM 16,486,232 B (98.27 %). Host: core/seqtest `make test` 0 failures (plinky 28,119 checks), seqgen 103,346 checks 0 failures.
+
 ## A — three instances
 - Instrument list: **PolySynth 1 / 2 / 3** (three fixed slots, e.g. MIDI instruments 14/15/16 internally; v0.3.x
   projects with PolySynth on 16 keep it as instance 1 or as their slot — decide and migrate). Each instance: own
