@@ -384,6 +384,12 @@ void cInstrumentEditor::showTitleBar()
             {
                 label = "Instrument Parameters 1/2";
             }
+            if (isEffectsWindow)
+            {
+                label = "Instrument Effects";
+                if (isSampleInstrument(mtProject.values.lastUsedInstrument) && warpTitleText(warpTitle, sizeof(warpTitle)))
+                    label = warpTitle; // plan 016 B
+            }
             break;
         case mtInstEditModeEnv: label = "Instrument Automation 2/2"; break;
         case mtInstEditModeMidi:
@@ -710,7 +716,7 @@ void cInstrumentEditor::showEffectScreen()
 {
     showTitleBar();
     showSendScreenFrame();
-    frameData.placesCount = 4;
+    frameData.placesCount = 7; // places 0..3 values, 4 = the MIDI Mapping button (not selectable), 5, 6 = Warp, Bars (plan 016 B)
 
     for (uint8_t i = 0; i < 8; i++)
     {
@@ -794,6 +800,8 @@ void cInstrumentEditor::showEffectScreen()
                              controlStyleCenterX | controlStyleCenterY | controlStyleFont3);
     display.setControlColors(label[4], display.getTheme().activeButtonLabelsColors);
 
+    showWarpControls(); // plan 016 B: places 5 and 6
+
     display.setControlValue(bgLabel, 255); // 0b10111111
     display.setControlShow(bgLabel);
     display.refreshControl(bgLabel);
@@ -813,7 +821,7 @@ void cInstrumentEditor::showEffectScreen()
 
 void cInstrumentEditor::showSendScreenFrame()
 {
-    if (selectedPlaceSends > 3)
+    if (selectedPlaceSends > 6 || selectedPlaceSends == 4) // 4 = the MIDI Mapping button; 5, 6 = Warp, Bars (plan 016 B)
         return;
 
     display.setControlValue(frameControl, selectedPlaceSends);

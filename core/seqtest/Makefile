@@ -8,7 +8,7 @@ GLUE = ../source/seqTracksCore.cpp ../source/seqCut.cpp ../interface/seqSession/
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
 
 .PHONY: test clean preview amp-preview pitch-preview grid-preview
-test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE) build/seq_plinky_tests$(EXE) build/seq_trace_tests$(EXE) build/seq_amp_tests$(EXE)
+test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE) build/seq_plinky_tests$(EXE) build/seq_trace_tests$(EXE) build/seq_amp_tests$(EXE) build/seq_warp_tests$(EXE)
 	build/seq_cpu_tests$(EXE)
 	build/seq_glue_tests$(EXE)
 	build/seq_perform_tests$(EXE)
@@ -18,6 +18,7 @@ test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tes
 	build/seq_plinky_tests$(EXE)
 	build/seq_trace_tests$(EXE)
 	build/seq_amp_tests$(EXE)
+	build/seq_warp_tests$(EXE)
 
 build/seq_glue_tests$(EXE): test_main.cpp test_session.cpp test_cut.inc ../source/seqSessionLogic.h ../source/seqClipsLogic.h ../source/seqCut.h ../source/seqCutLogic.h ../interface/seqSession/cutLayer.h ../interface/seqSession/cutSessionLayer.h ../interface/seqSession/laneDraw.h ../interface/seqSession/mlrDraw.h ../source/seqMlrLogic.h ../source/seqCueCache.h ../source/seqPalette.h ../interface/seqSession/laneView.h ../source/seqTracksCore.h ../source/seqTracksLogic.h ../source/seqTracksRec.h ../source/seqRecLogic.h test_rec.inc test_hr.inc test_plinkyseq.inc ../source/seqPlinkySeqLogic.h ../source/seqPlinkyUiLogic.h $(GLUE) $(SEQ)
 	mkdir -p build
@@ -79,6 +80,11 @@ build/seq_trace_tests$(EXE): test_trace.cpp ../libs/Audio/PlinkyVoice/plinky_voi
 build/seq_amp_tests$(EXE): test_amp.cpp ../source/seqAmpViewLogic.h ../source/seqPalette.h
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -O2 test_amp.cpp -o $@
+
+# plan 016 B: Warp (time-stretch to the project tempo): grain engine (libs/Audio/warp_core.h, header only) + settings / sidecar. -O2: the cost lines are only meaningful optimised
+build/seq_warp_tests$(EXE): test_warp.cpp ../libs/Audio/warp_core.h ../source/seqWarpLogic.h ../source/seqSidecarLogic.h
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) -O2 -I../libs/Audio test_warp.cpp -o $@
 
 clean:
 	rm -rf build

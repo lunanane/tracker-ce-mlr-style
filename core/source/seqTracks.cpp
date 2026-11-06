@@ -14,6 +14,7 @@
 #include "seqSidecar.h"
 #include "seqClips.h"
 #include "seqFx.h"
+#include "seqWarp.h"
 #include "seqPlinky.h"
 #include "seqHooks.h"
 #include <math.h>
@@ -376,6 +377,7 @@ void Sequencer::seqCutRetrigger(uint8_t row, strPlayer::strPlayerTrack::strSendS
         base = (uint16_t)mapClamped<int>(step.fx[posSlot].value, getFxMin(fx.FX_TYPE_POSITION), getFxMax(fx.FX_TYPE_POSITION), 0, MAX_16BIT);
     float semis = (float)(step.note - 60) + (float)instr.tune + (float)instr.fineTune / 100.0f;
     uint32_t speed1000 = (uint32_t)(powf(2.0f, semis / 12.0f) * 1000.0f + 0.5f);
+    { float w = seqWarpTimelineSpeed(step.instrument); if (w > 0.0f) speed1000 = (uint32_t)(w * 1000.0f + 0.5f); } // plan 016 B: a warped voice moves along its timeline at the stretch ratio, not at the pitch speed
     uint16_t start;
     if (!seqcut::startPoint16(plan.elapsed, getStepPeriodMs(), instr.sample.length, 44100, speed1000, base,
                               instr.playMode != playModeSingleShot, instr.loopPoint1, instr.loopPoint2, instr.endPoint, start))
@@ -402,6 +404,7 @@ bool Sequencer::seqCutFrameForPos(uint8_t row, int pos, int steps, const uint8_t
             base = (uint16_t)mapClamped<int>(src.fx[i].value, getFxMin(fx.FX_TYPE_POSITION), getFxMax(fx.FX_TYPE_POSITION), 0, MAX_16BIT);
     float semis = (float)(src.note - 60) + (float)instr.tune + (float)instr.fineTune / 100.0f;
     uint32_t speed1000 = (uint32_t)(powf(2.0f, semis / 12.0f) * 1000.0f + 0.5f);
+    { float w = seqWarpTimelineSpeed(src.instrument); if (w > 0.0f) speed1000 = (uint32_t)(w * 1000.0f + 0.5f); } // plan 016 B (see above)
     uint16_t start;
     if (!seqcut::startPoint16((uint32_t)since, getStepPeriodMs(), instr.sample.length, 44100, speed1000, base, instr.playMode != playModeSingleShot,
                               instr.loopPoint1, instr.loopPoint2, instr.endPoint, start))
@@ -650,6 +653,7 @@ void seqTracksUpdate()
         newFileManager.autosaveProjectStruct_ASAP();
     seqClipsUpdate();
     seqFxUpdate();
+    seqWarpUpdate();
 #ifdef FEATURE_PLINKY
     seqPlinkyUpdate();
 #endif

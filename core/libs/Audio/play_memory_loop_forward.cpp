@@ -120,6 +120,8 @@ AUDIO_CORE_FLASH void AudioPlayMemory::playLoopForward(uint8_t instrIdx, int8_t 
                                         currentSliceCacheFrames);
     }
 
+    warpPrepare(instrIdx); // plan 016 B: Warp (this play function serves all loop modes)
+
     playing = 1;
     //	__enable_irq();
     AudioInterrupts();

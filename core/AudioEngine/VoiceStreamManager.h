@@ -19,7 +19,7 @@ class VoiceStreamManager
     static constexpr uint32_t kRingFrames = 16384; // 32 KB per channel (~371 ms ring buffer)
     static constexpr uint32_t kChunkFrames = 4096; // 8 KB (16 sectors) per async ADMA2 read
     static constexpr uint32_t kRingMask = kRingFrames - 1;
-    static constexpr uint32_t kLoopWrapFrames = 2048; // 4 KB per channel loop wrap pre-cache
+    static constexpr uint32_t kLoopWrapFrames = 4096; // 8 KB per channel loop wrap pre-cache (plan 016 B: was 2048; a warped loop reads ~2 grains past the loop start at once)
     static constexpr uint32_t kLookbehindFrames = 512;
 
     void init(FileSystem* fileSystem = nullptr);
