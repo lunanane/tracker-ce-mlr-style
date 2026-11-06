@@ -89,7 +89,7 @@ void PitchTraceView::update()
     lastMs_ = now ? now : 1;
 #ifdef FEATURE_PLINKY
     static_assert(sizeof(pitchtrace::Sample) == sizeof(plinkyvoice::TraceSample), "ring layout");
-    static_assert(pitchtrace::kVoices == plinkyvoice::kMaxVoices, "voices");
+    static_assert(pitchtrace::kVoices == plinkyvoice::kPool, "voices");
     const pitchtrace::Sample* rings[pitchtrace::kVoices];
     for (int v = 0; v < pitchtrace::kVoices; v++)
         rings[v] = (const pitchtrace::Sample*)seqPlinkyTraceRing(v);

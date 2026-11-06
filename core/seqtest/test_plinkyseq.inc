@@ -514,8 +514,10 @@ static void test_plinky_overlay_draw_budget()
     PlCtx z;
     draw(z, m, pal);
     printf("  PolySynth overlay display list: worst %d bytes, empty bars %d bytes, %d rects, %d texts\n", worst, z.bytes(), z.rects, z.texts);
-    // the frame holds the pattern editor under the overlay as well: the overlay keeps to a share of the 8172 bytes
-    CHECK(worst <= 3600);
+    // the overlay keeps to a share of the 8172 byte frame. Plan 019 (tabs SYNTH 1 | 2 | 3, ALL tag, voice cap): the limit goes from 3600 to
+    // 4200 bytes. Since v0.3.6 A1 the pattern control is hidden while the view is open, so the frame is page + title bar (600) + strip
+    // (1720) + 400 margin: the view may use as much as the pitch view (5400); 4200 keeps 1200 bytes of that margin free.
+    CHECK(worst <= 4200);
     // cells and rows do not overlap and fit: 7 cells in the widest row (the Voice row, plan 012)
     CHECK(kCellX0 + 6 * kCellStep + kCellW <= kBoxX1 && kCellW <= kCellStep);
     CHECK(kRowY0 + (kSections - 1) * kRowStep + kRowH <= 396);

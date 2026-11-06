@@ -285,7 +285,7 @@ inline void timeText(int halfSec, char* out, size_t n)
 
 // ---------------------------------------------------------------- plinky.bin
 constexpr char kTrailerMagic[4] = { 'P', 'L', 'V', 'M' };
-enum { kTrailerVersion = 1, kEntry = 1 + (P_COUNT - 1), kTrailerMax = 2 + (kPatterns - 1) * kEntry };
+enum { kTrailerVersion = 1, kEntry = 1 + (kLegacyCount - 1), kTrailerMax = 2 + (kPatterns - 1) * kEntry };
 enum { kFileMaxAll = seqsidecar::kOverhead + kPayload + seqsidecar::kOverhead + kTrailerMax };
 
 inline bool needsTrailer(const Store& st, int halfSec) { return st.count() > 0 || halfSec != kHalfSecDefault; }
@@ -306,7 +306,7 @@ inline size_t saveFile(uint8_t* buf, size_t cap, const Params& cur, const Store&
         if (!st.has(pat))
             continue;
         p[o++] = (uint8_t)pat;
-        for (int i = 1; i < P_COUNT; i++)
+        for (int i = 1; i < kLegacyCount; i++)
             p[o++] = st.v[pat][i];
         cnt++;
     }
@@ -351,10 +351,178 @@ inline bool loadFile(const uint8_t* buf, size_t len, Params& base, Store& st, ui
     {
         const uint8_t* q = p + 2 + e * kEntry;
         uint8_t vals[P_COUNT];
-        vals[P_CHANNEL] = paramInfo(P_CHANNEL).def;
-        memcpy(vals + 1, q + 1, P_COUNT - 1);
+        for (int i = 0; i < P_COUNT; i++)
+            vals[i] = paramInfo(i).def;
+        memcpy(vals + 1, q + 1, kLegacyCount - 1);
         st.set(q[0], vals); // pattern 0 / out of range values are dropped / defaulted by set()
     }
+    return true;
+}
+
+// ---------------------------------------------------------------- plan 019: three instances in plinky.bin
+// plinky.bin keeps the version 1 frame and the PLVM trailer of instance 0 first (an older mod reads exactly that and ignores the rest),
+// then one "PLVI" frame per further instance (and for instance 0 whenever it has parameters the older frames cannot hold):
+//   payload = instance, nParams, values[nParams], morph half seconds, count, count * (pattern, values[1 .. nParams - 1])
+// A file without PLVI frames (every v0.3.x file) gives instances 1 and 2 their defaults. nParams is stored so that later versions can
+// add parameters: a shorter frame leaves the missing ones at their defaults, a longer one is read as far as it is known.
+constexpr char kInstMagic[4] = { 'P', 'L', 'V', 'I' };
+enum { kInstVersion = 1, kInstFrameMax = seqsidecar::kOverhead + 4 + P_COUNT + (kPatterns - 1) * P_COUNT,
+       kFileMaxBank = kFileMaxAll + kInstances * kInstFrameMax };
+
+inline Params instDefaults(int inst)
+{
+    Params p;
+    p.v[P_CHANNEL] = defaultChannel(inst);
+    return p;
+}
+// Distinct, non-zero channels: instance 0 keeps its (migrated) channel, the others take their default or, when that is taken, the highest free one.
+inline void fixChannels(Params* cur)
+{
+    for (int k = 0; k < kInstances; k++)
+    {
+        auto taken = [&](int c) {
+            for (int j = 0; j < k; j++)
+                if (cur[j].v[P_CHANNEL] == c)
+                    return true;
+            return false;
+        };
+        int c = cur[k].v[P_CHANNEL];
+        if (c >= 1 && c <= 16 && !taken(c))
+            continue;
+        c = defaultChannel(k);
+        for (; c > 1 && taken(c); c--) {}
+        cur[k].v[P_CHANNEL] = (uint8_t)c;
+    }
+}
+inline bool instExtrasNonDefault(const Params& p, const Store& st)
+{
+    for (int i = kLegacyCount; i < P_COUNT; i++)
+        if (p.v[i] != paramInfo(i).def)
+            return true;
+    for (int pat = 1; pat < kPatterns; pat++)
+        if (st.has(pat))
+            for (int i = kLegacyCount; i < P_COUNT; i++)
+                if (st.v[pat][i] != paramInfo(i).def)
+                    return true;
+    return false;
+}
+inline bool instNeedsFrame(int inst, const Params& p, const Store& st, int halfSec)
+{
+    if (inst == 0)
+        return instExtrasNonDefault(p, st);
+    return !(p == instDefaults(inst)) || st.count() > 0 || halfSec != kHalfSecDefault;
+}
+
+// cur / st / halfSec: arrays of kInstances. Returns the size (0: buffer too small).
+inline size_t saveBank(uint8_t* buf, size_t cap, const Params* cur, const Store* const* st, const uint8_t* halfSec)
+{
+    size_t n = saveFile(buf, cap, cur[0], *st[0], halfSec[0]);
+    if (!n)
+        return 0;
+    for (int k = 0; k < kInstances; k++)
+    {
+        if (!instNeedsFrame(k, cur[k], *st[k], halfSec[k]))
+            continue;
+        if (cap < n + kInstFrameMax)
+            return 0;
+        uint8_t* p = buf + n + seqsidecar::kHeader;
+        size_t o = 0;
+        p[o++] = (uint8_t)k;
+        p[o++] = (uint8_t)P_COUNT;
+        for (int i = 0; i < P_COUNT; i++)
+            p[o++] = cur[k].v[i];
+        p[o++] = halfSec[k] > kHalfSecMax ? (uint8_t)kHalfSecMax : halfSec[k];
+        const size_t cntAt = o++;
+        uint8_t cnt = 0;
+        for (int pat = 1; pat < kPatterns; pat++)
+        {
+            if (!st[k]->has(pat))
+                continue;
+            p[o++] = (uint8_t)pat;
+            for (int i = 1; i < P_COUNT; i++)
+                p[o++] = st[k]->v[pat][i];
+            cnt++;
+        }
+        p[cntAt] = cnt;
+        const size_t t = seqsidecar::frameWrite(buf + n, cap - n, kInstMagic, kInstVersion, p, o);
+        if (!t)
+            return 0;
+        n += t;
+    }
+    return n;
+}
+
+inline void instApply(const uint8_t* p, size_t pn, Params* cur, Store** st, uint8_t* halfSec)
+{
+    if (pn < 2 || p[0] >= kInstances)
+        return;
+    const int k = p[0], nP = p[1];
+    if (nP < kLegacyCount || pn < (size_t)(2 + nP + 2))
+        return;
+    Params q = instDefaults(k);
+    for (int i = 0; i < P_COUNT && i < nP; i++)
+    {
+        const ParamInfo& pi = paramInfo(i);
+        q.v[i] = (p[2 + i] >= pi.min && p[2 + i] <= pi.max) ? p[2 + i] : q.v[i];
+    }
+    cur[k] = q;
+    st[k]->clear();
+    memcpy(st[k]->base, q.v, P_COUNT);
+    halfSec[k] = p[2 + nP] > kHalfSecMax ? (uint8_t)kHalfSecDefault : p[2 + nP];
+    const size_t cnt = p[3 + nP], entry = (size_t)nP; // pattern + (nP - 1) values
+    for (size_t e = 0; e < cnt && 4 + nP + (e + 1) * entry <= pn; e++)
+    {
+        const uint8_t* s = p + 4 + nP + e * entry;
+        uint8_t vals[P_COUNT];
+        for (int i = 0; i < P_COUNT; i++)
+            vals[i] = paramInfo(i).def;
+        for (int i = 1; i < P_COUNT && i < nP; i++)
+            vals[i] = s[i];
+        st[k]->set(s[0], vals);
+    }
+}
+
+// false: the first frame is missing / bad / short (nothing changed). *newer: a later mod version wrote a frame (leave the file alone).
+// Instances without a PLVI frame get their defaults (channels 16, 15, 14 unless taken); instance 0 as plinky.bin version 1 has it.
+inline bool loadBank(const uint8_t* buf, size_t len, Params* cur, Store** st, uint8_t* halfSec, bool* newer = nullptr)
+{
+    bool nw = false;
+    if (!loadFile(buf, len, cur[0], *st[0], halfSec[0], &nw))
+    {
+        if (newer)
+            *newer = nw;
+        return false;
+    }
+    for (int k = 1; k < kInstances; k++)
+    {
+        cur[k] = instDefaults(k);
+        st[k]->clear();
+        halfSec[k] = kHalfSecDefault;
+    }
+    if (cur[0].v[P_CHANNEL] == 0)
+        cur[0].v[P_CHANNEL] = paramInfo(P_CHANNEL).def; // a v0.3 file with the voice off
+    size_t pos = seqsidecar::kHeader + ((size_t)buf[6] | ((size_t)buf[7] << 8)) + seqsidecar::kCrc;
+    while (pos + seqsidecar::kOverhead <= len)
+    {
+        const size_t fl = seqsidecar::kHeader + ((size_t)buf[pos + 6] | ((size_t)buf[pos + 7] << 8)) + seqsidecar::kCrc;
+        if (pos + fl > len)
+            break;
+        if (memcmp(buf + pos, kInstMagic, 4) == 0)
+        {
+            const uint8_t* p = nullptr;
+            size_t pn = 0;
+            uint8_t ver = 0;
+            const seqsidecar::FrameStatus fs = seqsidecar::frameRead(buf + pos, fl, kInstMagic, kInstVersion, &p, &pn, &ver);
+            if (fs == seqsidecar::FRAME_NEWER)
+                nw = true;
+            else if (fs == seqsidecar::FRAME_OK)
+                instApply(p, pn, cur, st, halfSec);
+        }
+        pos += fl;
+    }
+    fixChannels(cur);
+    if (newer)
+        *newer = nw;
     return true;
 }
 

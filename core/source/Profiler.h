@@ -36,6 +36,7 @@ class Profiler
     size_t headroomBytes();     // v0.3.1 M3: highest heap end .. deepest stack use (MK66; 0 on IMX); replaces minFreeStackBytes
     void getAudioProcessingUsageUs(AudioProcessorUsage& usage, bool resetTempMaximum = false);
     void getAudioProcessingUsagePercent(AudioProcessorUsage& usage, bool resetTempMaximum = false);
+    int lastAudioUs() const { return lastSampleUs; } // plan 019: the previous audio block (the voice governor), no division
     void startMeasuringAudio();
     void stopMeasuringAudio();
     void resetMeasuringAudio();

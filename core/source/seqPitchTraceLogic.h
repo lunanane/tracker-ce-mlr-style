@@ -23,7 +23,7 @@ namespace pitchtrace
 {
 enum
 {
-    kVoices = 4,
+    kVoices = 8,      // plan 019: the pool voices of the three PolySynth instances (was 4)
     kWin = 672,       // samples kept (the engine writes one per 2 blocks = 5.805 ms: 3.9 s)
     kSampleUs = 5805,
     kIdleMs = 18,     // no new sample for this long: the engine is idle, the follower keeps the time axis running with silence
@@ -49,10 +49,15 @@ struct Sample // identical layout to plinkyvoice::TraceSample (checked in pitchT
     uint8_t on;
 };
 
-inline uint32_t voiceColor(int v)
+// plan 019: one colour per PolySynth instance (also the colour of its tab): 1 Note teal, 2 Instrument yellow, 3 FX1 pink / violet.
+// Sample.on bit 0 = sounds, bits 1 and 2 = the instance.
+inline uint32_t instColor(int inst)
 {
-    return v == 0 ? seqpal::kNote : v == 1 ? seqpal::kInstr : v == 2 ? seqpal::kFx1 : seqpal::kFx2;
+    return inst == 0 ? seqpal::kNote : inst == 1 ? seqpal::kInstr : seqpal::kFx1;
 }
+inline int instOfSample(const Sample& s) { return (s.on >> 1) & 3; }
+// the line colour of the rank-th (0 .. 3) voice of an instance: the instance colour, each further simultaneous voice a little lighter
+inline uint32_t lineColor(int inst, int rank) { return seqpal::mix(instColor(inst), 0xFFFFFF, (uint8_t)(rank < 0 ? 0 : (rank > 3 ? 3 : rank) * 36)); }
 
 // ---- follower: engine ring -> own window (also advances while the engine is idle) -------------------------------------
 class Follower
@@ -307,17 +312,38 @@ template <class C> void draw(C& c, const Follower& f, const Range& r, const char
     const int npe = kEnvPts < kMaxPts ? kEnvPts : kMaxPts;
     int nowY[kVoices];
     int nowNote[kVoices];
+    int vInst[kVoices], vRank[kVoices];
+    bool vData[kVoices];
+    // plan 019: up to 8 voices instead of 4 share the display list: the points per line shrink with the number of voices that drew
+    // anything in the window (4 or fewer: as before)
+    int act = 0;
     for (int v = 0; v < kVoices; v++)
     {
         nowY[v] = -1;
         nowNote[v] = 0;
+        vInst[v] = vRank[v] = 0;
+        vData[v] = false;
+        for (int a = 0; a < kWin; a++)
+            if (f.at(v, a).on)
+            {
+                vInst[v] = instOfSample(f.at(v, a)); // the instance of the voice's newest sounding sample
+                vData[v] = true;
+                act++;
+                break;
+            }
+        if (vData[v])
+            for (int u = 0; u < v; u++)
+                vRank[v] += vData[u] && vInst[u] == vInst[v];
     }
+    const int scale = act > 4 ? act : 4;
+    const int ptsMax = kMaxPts * 4 / scale < 16 ? 16 : kMaxPts * 4 / scale;
+    const int ptsEnv = npe * 4 / scale < 8 ? 8 : npe * 4 / scale;
     for (int v = 0; v < kVoices; v++)
     {
         for (int curve = 0; curve < 2; curve++) // 0 = envelope (behind), 1 = pitch
         {
-            const int n = decimate(f, v, pts, curve == 0 ? npe : kMaxPts);
-            c.color(curve == 0 ? seqpal::dim(voiceColor(v)) : voiceColor(v));
+            const int n = decimate(f, v, pts, curve == 0 ? ptsEnv : ptsMax);
+            c.color(curve == 0 ? seqpal::dim(lineColor(vInst[v], vRank[v])) : lineColor(vInst[v], vRank[v]));
             c.width(curve == 0 ? 12 : 20);
             int cnt = 0;
             for (int i = 0; i <= n; i++)
@@ -370,7 +396,7 @@ template <class C> void draw(C& c, const Follower& f, const Range& r, const char
     }
     for (int k = 0; k < cnt; k++)
     {
-        c.color(voiceColor(order[k]));
+        c.color(lineColor(vInst[order[k]], vRank[order[k]]));
         c.text(kX1 + 12, ly[k], 3, 2, noteName(nowNote[order[k]], nb));
     }
 

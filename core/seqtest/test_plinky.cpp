@@ -1505,6 +1505,8 @@ static void test_cost()
     CHECK(!e.render(l, r));
 }
 
+#include "test_plinky3.inc"
+
 int main()
 {
     test_params_and_sidecar();
@@ -1529,6 +1531,7 @@ int main()
     test_wt_sound();
     test_wt_no_clicks();
     test_wt_cpu();
+    test_x3_all();
     test_cost();
     printf("plinky: %d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;

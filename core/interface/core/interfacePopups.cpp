@@ -15,6 +15,7 @@
 #include "config.h"
 #ifdef FEATURE_PLINKY
 #include "seqPlinky.h"
+#include "seqInstOrderLogic.h"
 #endif
 #include "patternEditor/patternEditor.h"
 #include "string.h"
@@ -432,6 +433,10 @@ int InterfacePopups::convertInstrumentIdxToPopupListPos(enumStepPopups stepPopup
 #if GUI_HANDLE_SYNTH
         listPos = instrIdx < SYNTH_INSTRUMENTS_START_IDX ? instrIdx + kSynthInstrumentsCount
                                                          : instrIdx - SYNTH_INSTRUMENTS_START_IDX;
+#elif defined(FEATURE_PLINKY)
+        instorder::Layout L;
+        seqPlinkyFillLayout(L);
+        listPos = instorder::popupPos(L, instrIdx); // plan 019 A: PolySynth 1 / 2 / 3 first
 #else
         listPos = instrIdx;
 #endif
@@ -695,6 +700,12 @@ void InterfacePopups::setStepPopupValue(int16_t value)
             {
                 mtProject.values.lastUsedInstrument = value - kSynthInstrumentsCount;
             }
+#elif defined(FEATURE_PLINKY)
+            {
+                instorder::Layout L;
+                seqPlinkyFillLayout(L);
+                mtProject.values.lastUsedInstrument = instorder::popupIdx(L, value);
+            }
 #else
             mtProject.values.lastUsedInstrument = value;
 #endif
@@ -824,6 +835,12 @@ void InterfacePopups::changeStepPopupValue(int16_t value, InterfacePopups::Popup
             else
             {
                 mtProject.values.lastUsedInstrument = selectedActualItem - kSynthInstrumentsCount;
+            }
+#elif defined(FEATURE_PLINKY)
+            {
+                instorder::Layout L;
+                seqPlinkyFillLayout(L);
+                mtProject.values.lastUsedInstrument = instorder::popupIdx(L, selectedActualItem);
             }
 #else
             mtProject.values.lastUsedInstrument = selectedActualItem;
@@ -983,6 +1000,18 @@ int InterfacePopups::listInstruments(enumStepPopups mode)
     }
 #endif
 
+#ifdef FEATURE_PLINKY
+    if (mode == stepPopupInstr) // plan 019 A: PolySynth 1 / 2 / 3 on top of the list
+    {
+        for (uint8_t k = 0; k < 3; k++)
+            if (seqPlinkyInstrumentOf(k) >= 0)
+            {
+                sprintf(&interfaceGlobals.intrumentsNames[instrIdx][0], "PolySynth %d", k + 1);
+                interfaceGlobals.ptrIntrumentsNames[instrIdx] = &interfaceGlobals.intrumentsNames[instrIdx][0];
+                instrIdx++;
+            }
+    }
+#endif
     if (mode != stepPopupOnlyMidiInstr && mode != stepPopupOnlySynthAndMidiInstr)
     {
         for (uint8_t i = 0; i < kSampleInstrumentsCount; i++)
@@ -1005,13 +1034,17 @@ int InterfacePopups::listInstruments(enumStepPopups mode)
 
     for (uint8_t i = 0; i < kMidiInstrumentsCount; i++)
     {
+#ifdef FEATURE_PLINKY
+        if (mode == stepPopupInstr && seqPlinkyIsVoiceInstrument(kSampleInstrumentsCount + i))
+            continue; // listed on top
+#endif
         sprintf(&interfaceGlobals.intrumentsNames[instrIdx][0],
                 "%d. MIDI Channel %d",
                 kSampleInstrumentsCount + i + 3,
                 i + 1);
 #ifdef FEATURE_PLINKY
         if (seqPlinkyIsVoiceInstrument(kSampleInstrumentsCount + i)) // v0.3.2: the synth voice has its own name
-            sprintf(&interfaceGlobals.intrumentsNames[instrIdx][0], "%d. PolySynth", kSampleInstrumentsCount + i + 3);
+            sprintf(&interfaceGlobals.intrumentsNames[instrIdx][0], "%d. PolySynth %d", kSampleInstrumentsCount + i + 3, seqPlinkyInstanceOf(kSampleInstrumentsCount + i) + 1);
 #endif
         interfaceGlobals.ptrIntrumentsNames[instrIdx] =
           &interfaceGlobals.intrumentsNames[instrIdx][0];

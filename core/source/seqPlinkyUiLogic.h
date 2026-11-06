@@ -16,6 +16,7 @@
 
 #include "PlinkyVoice/plinky_params.h"
 #include "seqNotesViewLogic.h"
+#include "seqPalette.h"
 #include "seqPlinkyMorphLogic.h"
 
 namespace seqplinky {
@@ -104,6 +105,14 @@ inline int jogValue(int param, int cur, int delta, bool fine)
     return (uint8_t)(v < pi.min ? pi.min : (v > pi.max ? pi.max : v));
 }
 
+// Shift + dial (plan 019 A): the value one instance gets when the delta is added to ALL of them, clamped to its own range
+inline int allValue(int param, int cur, int delta)
+{
+    const ParamInfo& pi = uiInfo(param);
+    const int v = cur + delta;
+    return v < pi.min ? pi.min : (v > pi.max ? pi.max : v);
+}
+
 inline void valueText(int p, int v, char* out, size_t n)
 {
     static const char* const kDest[3] = { "Pitch", "Shape", "Cutoff" };
@@ -139,6 +148,9 @@ struct Model
     uint8_t channel; // P_CHANNEL (not shown since v0.3.2)
     uint8_t cpu, peak;
     uint8_t newer;   // plinky.bin of a newer mod version: edits are not saved
+    uint8_t inst;    // plan 019: the instance shown (0 .. 2)
+    uint8_t all;     // plan 019: Shift is held: a dial edit goes to ALL instances
+    uint8_t cap;     // plan 019: voices the pool may sound now (the governor), 0 .. kPool
     Model() { memset(this, 0, sizeof(*this)); for (int i = 0; i < seqnotes::kVoices; i++) voice[i].note = 0xFF; }
 };
 
@@ -146,6 +158,13 @@ struct Palette
 {
     uint32_t bg, panel, bar, text, section, accent, onAccent, fill;
 };
+
+// plan 019 A: tabs "SYNTH 1 | SYNTH 2 | SYNTH 3" at the top, each in the colour of its instance (also its lines in the pitch view)
+enum { kTabY0 = 31, kTabY1 = 53, kTabX0 = 8, kTabStep = 120, kTabW = 114, kAllX0 = 722, kAllX1 = 792 };
+inline uint32_t tabColor(int inst)
+{
+    return inst == 0 ? seqpal::kNote : inst == 1 ? seqpal::kInstr : seqpal::kFx1;
+}
 
 enum { kPanelY0 = 30, kPanelY1 = 424, kRowY0 = 56, kRowH = 62, kRowStep = 66, kBoxX0 = 8, kBoxX1 = 792, kCellX0 = 112, kCellStep = 96,
        kCellW = 92, kBarW = 80 }; // seven cells in the Voice row (plan 012: Morph)
@@ -157,6 +176,23 @@ template <class C> void draw(C& c, const Model& m, const Palette& p)
     // ---- shapes ----
     c.color(p.bg);
     c.rect(0, kPanelY0, 800, kPanelY1);
+    const int inst = m.inst < kInstances ? m.inst : 0;
+    for (int i = 0; i < kInstances; i++)
+    {
+        const int x0 = kTabX0 + i * kTabStep, x1 = x0 + kTabW;
+        c.color(i == inst ? tabColor(i) : seqpal::dim(tabColor(i)));
+        c.rect(x0, kTabY0, x1, kTabY1);
+        if (i != inst) // inactive: a dim outline
+        {
+            c.color(p.bg);
+            c.rect(x0 + 2, kTabY0 + 2, x1 - 2, kTabY1 - 2);
+        }
+    }
+    if (m.all)
+    {
+        c.color(p.accent);
+        c.rect(kAllX0, kTabY0, kAllX1, kTabY1);
+    }
     c.color(p.panel);
     for (int s = 0; s < kSections; s++)
         c.rect(kBoxX0, kRowY0 + s * kRowStep, kBoxX1, kRowY0 + s * kRowStep + kRowH);
@@ -195,21 +231,32 @@ template <class C> void draw(C& c, const Model& m, const Palette& p)
     }
     // ---- texts ----
     c.textPhase();
+    for (int i = 0; i < kInstances; i++) // the tab labels: dark on the bright tab, the instance colour on the dim ones
+    {
+        c.color(i == inst ? p.onAccent : tabColor(i));
+        snprintf(buf, sizeof buf, "SYNTH %d", i + 1);
+        c.text(kTabX0 + i * kTabStep + kTabW / 2, (kTabY0 + kTabY1) / 2, 3, 1 | 2, buf);
+    }
+    if (m.all)
+    {
+        c.color(p.onAccent);
+        c.text((kAllX0 + kAllX1) / 2, (kTabY0 + kTabY1) / 2, 3, 1 | 2, "ALL");
+    }
     c.color(p.text);
-    // m.track 0 = the instrument page (v0.3.6: same drawing, no track number, no "Instr close": the page has its own key)
+    // m.track 0 = the instrument page (v0.3.6: same drawing, no track number). Right of the tabs: morph, or the track and the CPU.
     if (m.morphPat)
     {
         char mt[24];
         plinkymorph::titleText(mt, sizeof mt, m.morphMs, m.morphPat);
         if (m.track) snprintf(buf, sizeof buf, "T%d  %s", m.track, mt);
-        else snprintf(buf, sizeof buf, "PolySynth  %s", mt);
+        else snprintf(buf, sizeof buf, "%s", mt);
     }
     else if (m.track)
-        snprintf(buf, sizeof buf, "PolySynth T%d CPU %d%%", m.track, m.cpu); // peak CPU is on the instrument page title (budget for the FX2 hint)
+        snprintf(buf, sizeof buf, "T%d CPU %d%% V%d", m.track, m.cpu, m.cap);
     else
-        snprintf(buf, sizeof buf, "PolySynth  CPU %d%%  pk %d%%", m.cpu, m.peak);
-    c.text(12, 42, 3, 2, buf);
-    c.text(12, 398, 1, 2, m.track ? "Jog edit, Shift fine, Del reset, Instr close, FX2 pitch" : "Jog edit, Shift fine, Del reset, FX2 pitch view");
+        snprintf(buf, sizeof buf, "CPU %d%%  pk %d%%  V%d", m.cpu, m.peak, m.cap);
+    c.text(kTabX0 + 3 * kTabStep + 8, 42, 3, 2, buf);
+    c.text(12, 398, 1, 2, m.track ? "Jog edit, Shift+jog ALL, Del reset, Instr next SYNTH, FX2 pitch" : "Jog edit, Shift+jog ALL, Del reset, Params next SYNTH, FX2 pitch");
     if (m.newer)
         c.text(12, 412, 1, 2, "Newer synth file: edits are not saved");
     if (!m.newer)

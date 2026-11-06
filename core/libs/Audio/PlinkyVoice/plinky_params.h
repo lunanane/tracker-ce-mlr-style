@@ -12,6 +12,11 @@
 
 namespace plinkyvoice {
 
+// plan 019: three PolySynth instances (PolySynth 1 / 2 / 3), each with its own parameters. Instance k plays MIDI instrument / channel
+// defaultChannel(k) = 16, 15, 14 (instance 0 keeps the channel 16 of every v0.3.x project).
+constexpr int kInstances = 3;
+inline uint8_t defaultChannel(int inst) { return (uint8_t)(16 - (inst < 0 ? 0 : (inst >= kInstances ? kInstances - 1 : inst))); }
+
 // Shape (plan 015 W): 0 saws, 1..100 pulse, then the Plinky wavetables: kWtTables tables, kWtSteps parameter steps from one table to
 // the next (the sound is the linear blend of the two neighbouring tables). Values 0..100 are the v0.3.6 sounds, unchanged.
 constexpr int kWtTables = 17;
@@ -45,6 +50,9 @@ enum Param : uint8_t
     P_LFO_DEST,  // 0 pitch, 1 shape, 2 cutoff
     P_COUNT
 };
+// plan 019: the parameters of the file formats before the engine extensions (plinky.bin version 1 frame and the PLVM trailer hold exactly these)
+constexpr int kLegacyCount = 21;
+static_assert(P_COUNT >= kLegacyCount, "parameters are only ever appended");
 
 struct ParamInfo
 {
@@ -132,7 +140,7 @@ struct Params
             return 0;
         uint8_t* p = buf + seqsidecar::kHeader;
         for (int i = 0; i < kPayload; i++)
-            p[i] = i < P_COUNT ? v[i] : 0; // the rest is reserved
+            p[i] = i < kLegacyCount ? v[i] : 0; // the rest is reserved (the newer parameters are in the PLVI frames)
         return seqsidecar::frameWrite(buf, cap, kMagic, kVersion, p, kPayload);
     }
     // false: missing / bad frame / short payload (nothing changed). *newer: a later mod version wrote it (leave the file alone).
@@ -145,9 +153,11 @@ struct Params
         seqsidecar::FrameStatus st = seqsidecar::frameRead(buf, len, kMagic, kVersion, &p, &n, &ver);
         if (newer)
             *newer = st == seqsidecar::FRAME_NEWER;
-        if (st != seqsidecar::FRAME_OK || n < (size_t)P_COUNT)
+        if (st != seqsidecar::FRAME_OK || n < (size_t)kLegacyCount)
             return false;
         for (int i = 0; i < P_COUNT; i++)
+            v[i] = paramInfo(i).def;
+        for (int i = 0; i < kLegacyCount; i++)
         {
             const ParamInfo& pi = paramInfo(i);
             v[i] = (p[i] >= pi.min && p[i] <= pi.max) ? p[i] : pi.def;

@@ -7,6 +7,7 @@
 #include "seqPlinkySeqLogic.h"
 #include "seqPlinkyMorphLogic.h"
 #include "seqNotesViewLogic.h"
+#include "seqInstOrderLogic.h"
 #include "seqPlinkyUiLogic.h"
 #include "seqTracks.h"
 #include "seqTracksLogic.h"
@@ -41,70 +42,130 @@ bool s_newerFile = false;      // written by a newer mod version: left alone (no
 // initialisers). A __NOINIT(EXTERNAL_RAM) object of that type gets a C++ static constructor that runs from __libc_init_array, long
 // before hardware init powers up and configures the SDRAM -> bus fault at the first write. So: raw storage only (no static
 // constructor), constructed by placement new in seqPlinkyInit() from TrackerImpl::init() (SDRAM ready). See developer_guide.md.
-__NOINIT(EXTERNAL_RAM) alignas(plinkymorph::Controller) uint8_t s_ctlMem[sizeof(plinkymorph::Controller)];
-plinkymorph::Controller& s_ctl = *reinterpret_cast<plinkymorph::Controller*>(s_ctlMem);
-__NOINIT(EXTERNAL_RAM) uint8_t s_fbuf[plinkymorph::kFileMaxAll];
+// plan 019: one snapshot store + morph per instance (3 x 5.4 KB) and a file buffer for the three instances
+__NOINIT(EXTERNAL_RAM) alignas(plinkymorph::Controller) uint8_t s_ctlMem[kInstances][sizeof(plinkymorph::Controller)];
+inline plinkymorph::Controller& ctl(int k) { return *reinterpret_cast<plinkymorph::Controller*>(s_ctlMem[k]); }
+__NOINIT(EXTERNAL_RAM) uint8_t s_fbuf[plinkymorph::kFileMaxBank];
+int s_inst = 0; // the instance the UI shows and edits (main loop only)
 
 // hash of everything that is saved: the values, the morph time and the snapshots
-uint16_t stateHash(const Params& p)
+uint16_t stateHash()
 {
-    uint16_t h = seqsidecar::crc16(p.v, P_COUNT);
-    h = seqsidecar::crc16Update(h, &s_ctl.halfSec, 1);
-    h = seqsidecar::crc16Update(h, s_ctl.store.bits, sizeof(s_ctl.store.bits));
-    for (int i = 1; i < plinkymorph::kPatterns; i++)
-        if (s_ctl.store.has(i))
-            h = seqsidecar::crc16Update(h, s_ctl.store.v[i], P_COUNT);
+    uint16_t h = 0;
+    for (int k = 0; k < kInstances; k++)
+    {
+        uint8_t cur[P_COUNT];
+        for (int i = 0; i < P_COUNT; i++)
+            cur[i] = eng().param(i, k);
+        h = seqsidecar::crc16Update(h, cur, P_COUNT);
+        h = seqsidecar::crc16Update(h, &ctl(k).halfSec, 1);
+        h = seqsidecar::crc16Update(h, ctl(k).store.bits, sizeof(ctl(k).store.bits));
+        for (int i = 1; i < plinkymorph::kPatterns; i++)
+            if (ctl(k).store.has(i))
+                h = seqsidecar::crc16Update(h, ctl(k).store.v[i], P_COUNT);
+    }
     return h;
 }
 
 inline int shownPattern() { return (int)mtProject.values.actualPattern; }
 
 // applies the values the morph / a snapshot changed to the engine (not a hand edit: the project is not marked changed)
-void applyMask(const uint8_t* vals, uint32_t mask)
+void applyMask(int k, const uint8_t* vals, uint32_t mask)
 {
     if (!mask)
         return;
     for (int i = 1; i < P_COUNT; i++)
         if ((mask >> i) & 1u)
-            eng().setParam(i, vals[i]);
-    if (mask & ((1u << P_REVERB) | (1u << P_DELAY)))
-        engine.applyPlinkySends();
+            eng().setParam(i, vals[i], k);
 }
 
 const char kWorkspaceFile[] = "Workspace/plinky.bin";
 const char kFileName[] = "plinky.bin";
 
-Params current()
+Params current(int k)
 {
     Params p;
     for (int i = 0; i < P_COUNT; i++)
-        p.v[i] = eng().param(i);
+        p.v[i] = eng().param(i, k);
     return p;
 }
 
-void apply(const Params& p)
+bool bankNeedsFile()
 {
-    for (int i = 0; i < P_COUNT; i++)
-        eng().setParam(i, p.v[i]);
-    engine.applyPlinkySends();
+    for (int k = 0; k < kInstances; k++)
+        if (plinkymorph::needsTrailer(ctl(k).store, ctl(k).halfSec) || !(current(k) == plinkymorph::instDefaults(k)))
+            return true;
+    return false;
 }
 
 bool writeValues(const char* path)
 {
     if (s_newerFile)
         return false;
-    const Params p = current();
-    size_t n = plinkymorph::saveFile(s_fbuf, sizeof(s_fbuf), p, s_ctl.store, s_ctl.halfSec);
+    Params cur[kInstances];
+    const plinkymorph::Store* st[kInstances];
+    uint8_t hs[kInstances];
+    for (int k = 0; k < kInstances; k++)
+    {
+        cur[k] = current(k);
+        st[k] = &ctl(k).store;
+        hs[k] = ctl(k).halfSec;
+    }
+    size_t n = plinkymorph::saveBank(s_fbuf, sizeof(s_fbuf), cur, st, hs);
     if (!n || !seqsidecar::writeFile(path, s_fbuf, n))
         return false;
-    s_savedHash = stateHash(p);
+    s_savedHash = stateHash();
     return true;
+}
+
+// the instance that plays this MIDI channel, -1 = none (any context: the channel parameters are plain bytes)
+int instOfChannel(uint8_t channel)
+{
+    for (int k = 0; k < kInstances; k++)
+        if (eng().param(P_CHANNEL, k) == channel)
+            return k;
+    return -1;
+}
+
+// set one value of instance k (hand edit): snapshot, dirty flag
+void setInst(int k, int param, int value)
+{
+    if (param == kPlinkyMorphParam)
+    {
+        const int v = value < 0 ? 0 : (value > plinkymorph::kHalfSecMax ? plinkymorph::kHalfSecMax : value);
+        if (v != ctl(k).halfSec)
+        {
+            ctl(k).halfSec = (uint8_t)v;
+            s_dirty.mark();
+        }
+        return;
+    }
+    const uint8_t before = eng().param(param, k);
+    if (param == P_CHANNEL && clampParam(P_CHANNEL, value) != before && clampParam(P_CHANNEL, value) != 0)
+        sendCC(123, 0, clampParam(P_CHANNEL, value), false); // the notes still sounding on the MIDI outputs of the new voice channel end first
+    eng().setParam(param, value, k);
+    if (eng().param(param, k) != before)
+    {
+        if (param == P_CHANNEL)
+        {
+            eng().allNotesOff(k); // the voice's own notes end
+            if (before != 0)
+                sendCC(123, 0, before, false); // v0.3.1 minor 7: the old channel is a plain MIDI output again: all notes off there too
+        }
+        if (param != P_CHANNEL)
+        {   // plan 012: a hand edit leaves the morph and writes the snapshot of the playing (or shown) pattern
+            const Params now = current(k);
+            ctl(k).edit(shownPattern(), param, eng().param(param, k), now.v);
+        }
+        s_dirty.mark();
+    }
 }
 } // namespace
 
 bool seqPlinkyNote(uint8_t channel, uint8_t note, uint8_t velo, bool on)
 {
-    if (eng().param(P_CHANNEL) != channel)
+    const int k = instOfChannel(channel);
+    if (k < 0)
         return false;
     // the same "middle C" shift the MIDI outputs get (sendMidiNoteOn), so the voice plays what an external synth would
     int n = note + 12 * (2 - (int)mtConfig.midi.middleC);
@@ -113,44 +174,55 @@ bool seqPlinkyNote(uint8_t channel, uint8_t note, uint8_t velo, bool on)
     {
         // v0.3.1 minor 4: a note-on the full event queue refused is DROPPED, not sent on: its note-off is absorbed here too, so an external
         // synth would have been left hanging
-        eng().noteOn((uint8_t)n, velo);
+        eng().noteOn((uint8_t)n, velo, k);
         return true;
     }
-    eng().noteOff((uint8_t)n); // velocity 0 is a note-off; a release never gets lost (remembered when the queue is full)
+    eng().noteOff((uint8_t)n, k); // velocity 0 is a note-off; a release never gets lost (remembered when the queue is full)
     return true;
 }
 
 bool seqPlinkyControlChange(uint8_t channel, uint8_t cc, uint8_t value)
 {
-    if (eng().param(P_CHANNEL) != channel)
+    const int k = instOfChannel(channel);
+    if (k < 0)
         return false;
-    eng().controlChange(cc, value);
+    eng().controlChange(cc, value, k);
     return true;
 }
 
 bool seqPlinkyPitchBend(uint8_t channel, int16_t value)
 {
-    if (eng().param(P_CHANNEL) != channel)
+    const int k = instOfChannel(channel);
+    if (k < 0)
         return false;
     int v = value + 8192;
-    eng().pitchBend((int16_t)(v < 0 ? 0 : (v > 16383 ? 16383 : v)));
+    eng().pitchBend((int16_t)(v < 0 ? 0 : (v > 16383 ? 16383 : v)), k);
     return true;
 }
 
 void seqPanicPlinky()
 {
-    eng().allNotesOff();
+    eng().allNotesOff(-1);
 }
 
-int seqPlinkyInstrument()
+int seqPlinkyInstrumentOf(int inst)
 {
-    const int ch = eng().param(P_CHANNEL);
+    if (inst < 0 || inst >= kInstances)
+        return -1;
+    const int ch = eng().param(P_CHANNEL, inst);
     return (ch >= 1 && ch <= kMidiInstrumentsCount) ? MIDI_INSTRUMENTS_START_IDX + ch - 1 : -1;
+}
+
+int seqPlinkyInstanceOf(int instrument)
+{
+    if (instrument < MIDI_INSTRUMENTS_START_IDX)
+        return -1;
+    return instOfChannel((uint8_t)(instrument - MIDI_INSTRUMENTS_START_IDX + 1));
 }
 
 bool seqPlinkyIsVoiceInstrument(int instrument)
 {
-    return instrument >= 0 && instrument == seqPlinkyInstrument();
+    return instrument >= 0 && seqPlinkyInstanceOf(instrument) >= 0;
 }
 
 bool seqPlinkyTrackUsesVoice(uint8_t track)
@@ -158,45 +230,51 @@ bool seqPlinkyTrackUsesVoice(uint8_t track)
     return seqPlinkyIsVoiceInstrument(sequencer.seqPickInstrument(track));
 }
 
+int seqPlinkyTrackInstance(uint8_t track)
+{
+    return seqPlinkyInstanceOf(sequencer.seqPickInstrument(track));
+}
+
+void seqPlinkyFillLayout(instorder::Layout& L)
+{
+    L.nSamples = kSampleInstrumentsCount;
+    L.nMidi = kMidiInstrumentsCount;
+    for (int k = 0; k < instorder::kMaxSynth; k++)
+        L.synth[k] = seqPlinkyInstrumentOf(k);
+}
+
+int seqPlinkyInst() { return s_inst; }
+
+void seqPlinkySetInst(int inst)
+{
+    s_inst = inst < 0 ? 0 : (inst >= kInstances ? kInstances - 1 : inst);
+}
+
+int seqPlinkyCycleInst()
+{
+    s_inst = (s_inst + 1) % kInstances;
+    return s_inst;
+}
+
 int seqPlinkyGet(int param)
 {
     if (param == kPlinkyMorphParam)
-        return s_ctl.halfSec;
-    return eng().param(param);
+        return ctl(s_inst).halfSec;
+    return eng().param(param, s_inst);
 }
 
 void seqPlinkySet(int param, int value)
 {
-    if (param == kPlinkyMorphParam)
+    setInst(s_inst, param, value);
+}
+
+// Shift + dial (plan 019 A, the Model:Samples multi-edit): the same delta is added to the parameter of ALL instances, each clamped on its own
+void seqPlinkySetAll(int param, int delta)
+{
+    for (int k = 0; k < kInstances; k++)
     {
-        const int v = value < 0 ? 0 : (value > plinkymorph::kHalfSecMax ? plinkymorph::kHalfSecMax : value);
-        if (v != s_ctl.halfSec)
-        {
-            s_ctl.halfSec = (uint8_t)v;
-            s_dirty.mark();
-        }
-        return;
-    }
-    const uint8_t before = eng().param(param);
-    if (param == P_CHANNEL && clampParam(P_CHANNEL, value) != before && clampParam(P_CHANNEL, value) != 0)
-        sendCC(123, 0, clampParam(P_CHANNEL, value), false); // the notes still sounding on the MIDI outputs of the new voice channel end first
-    eng().setParam(param, value);
-    if (eng().param(param) != before)
-    {
-        if (param == P_CHANNEL)
-        {
-            eng().allNotesOff(); // the voice's own notes end
-            if (before != 0)
-                sendCC(123, 0, before, false); // v0.3.1 minor 7: the old channel is a plain MIDI output again: all notes off there too
-        }
-        if (param == P_REVERB || param == P_DELAY)
-            engine.applyPlinkySends();
-        if (param != P_CHANNEL)
-        {   // plan 012: a hand edit leaves the morph and writes the snapshot of the playing (or shown) pattern
-            const Params now = current();
-            s_ctl.edit(shownPattern(), param, eng().param(param), now.v);
-        }
-        s_dirty.mark();
+        const int cur = param == kPlinkyMorphParam ? ctl(k).halfSec : eng().param(param, k);
+        setInst(k, param, seqplinky::allValue(param, cur, delta));
     }
 }
 
@@ -207,23 +285,31 @@ void seqPlinkyDefault(int param)
 
 bool seqPlinkyMorphStatus(uint16_t* remainMs, uint8_t* pattern)
 {
-    if (!s_ctl.morph.running)
+    if (!ctl(s_inst).morph.running)
         return false;
-    uint32_t r = s_ctl.morph.remainMs(seqNowMs());
+    uint32_t r = ctl(s_inst).morph.remainMs(seqNowMs());
     if (remainMs)
         *remainMs = (uint16_t)(r > 65535 ? 65535 : r);
     if (pattern)
-        *pattern = s_ctl.morph.pattern;
+        *pattern = ctl(s_inst).morph.pattern;
     return true;
 }
 
+// the i-th sounding voice (pool order) of the shown instance
 bool seqPlinkyVoice(int i, uint8_t* note, uint8_t* level, uint8_t* releasing)
 {
     if (i < 0 || i >= kMaxVoices)
         return false;
-    const Voice& v = eng().voice(i); // plain reads of the audio side's state: enough for a display
-    if (v.stage == ST_IDLE)
+    int n = -1, slot = -1;
+    for (int s = 0; s < kPool && n < i; s++)
+        if (eng().voice(s).stage != ST_IDLE && eng().voice(s).inst == s_inst)
+        {
+            n++;
+            slot = s;
+        }
+    if (n != i)
         return false;
+    const Voice& v = eng().voice(slot); // plain reads of the audio side's state: enough for a display
     float e = v.env * (float)seqnotes::kVoiceBar;
     *note = v.note;
     *level = (uint8_t)(e < 0.0f ? 0 : (e > (float)seqnotes::kVoiceBar ? seqnotes::kVoiceBar : (int)e));
@@ -233,23 +319,26 @@ bool seqPlinkyVoice(int i, uint8_t* note, uint8_t* level, uint8_t* releasing)
 
 uint32_t seqPlinkyMarks()
 {
-    return s_ctl.store.marks(shownPattern());
+    return ctl(s_inst).store.marks(shownPattern());
 }
 
 void seqPlinkyClipLaunched(uint8_t track, uint8_t pattern)
 {
-    if (!seqPlinkyTrackUsesVoice(track))
+    const int k = seqPlinkyTrackInstance(track);
+    if (k < 0)
         return;
-    Params cur = current();
-    applyMask(cur.v, s_ctl.onClip(pattern, true, sequencer.isPlay(), cur.v, seqNowMs()));
+    Params cur = current(k);
+    applyMask(k, cur.v, ctl(k).onClip(pattern, true, sequencer.isPlay(), cur.v, seqNowMs()));
 }
 
 float seqPlinkyCpu() { return engine.getPlinkyCpuPercent(); }
 float seqPlinkyCpuPeak() { return engine.getPlinkyCpuPeakPercent(); }
 int seqPlinkyVoicesActive() { return eng().activeVoices(); }
+int seqPlinkyVoiceCap() { return eng().voiceCap(); }
 
 void seqPlinkyFillModel(seqplinky::Model& m)
 {
+    m.inst = (uint8_t)s_inst;
     for (int i = 0; i <= plinkyvoice::P_COUNT; i++)
         m.v[i] = (uint8_t)seqPlinkyGet(i); // the last one is the morph time (plan 012)
     uint16_t ms = 0;
@@ -269,11 +358,12 @@ void seqPlinkyFillModel(seqplinky::Model& m)
         else
             m.voice[i] = seqnotes::VoiceView();
     }
+    m.cap = (uint8_t)seqPlinkyVoiceCap();
     m.cpu = (uint8_t)(seqPlinkyCpu() + 0.5f);
     m.peak = (uint8_t)(seqPlinkyCpuPeak() + 0.5f);
     m.newer = seqPlinkyNewerFile() ? 1 : 0;
 }
-const void* seqPlinkyTraceRing(int voice) { return eng().traceRing(voice); }
+const void* seqPlinkyTraceRing(int voice) { return eng().traceRing(voice); } // pool voice 0 .. kPool - 1
 unsigned seqPlinkyTraceLen() { return plinkyvoice::kTraceLen; }
 uint16_t seqPlinkyTraceHead() { return eng().traceHeadIndex(); }
 
@@ -281,26 +371,19 @@ bool seqPlinkyNewerFile() { return s_newerFile; }
 
 void seqPlinkyUpdate()
 {
-    {   // CC 91 / 93 change the effective sends in the audio context: the mixer gains follow here (main loop)
-        static int lastRev = -1, lastDly = -1;
-        const int rev = eng().effective(P_REVERB), dly = eng().effective(P_DELAY);
-        if (rev != lastRev || dly != lastDly)
-        {
-            lastRev = rev;
-            lastDly = dly;
-            engine.applyPlinkySends();
-        }
-    }
     {   // plan 012: the playing (or shown) pattern changed on any path (stock switch, song, scene, queue, follow action): morph to its snapshot
-        Params cur = current();
         const uint32_t now = seqNowMs();
-        applyMask(cur.v, s_ctl.onPattern(shownPattern(), sequencer.isPlay(), cur.v, now));
-        applyMask(cur.v, s_ctl.tick(cur.v, now));
+        for (int k = 0; k < kInstances; k++)
+        {
+            Params cur = current(k);
+            applyMask(k, cur.v, ctl(k).onPattern(shownPattern(), sequencer.isPlay(), cur.v, now));
+            applyMask(k, cur.v, ctl(k).tick(cur.v, now));
+        }
     }
     // never ask for a write while the transport plays: the dirty flag waits for the stop
     if (!s_newerFile && !s_wsWritePending && s_dirty.take(sequencer.isPlay()))
     {
-        if (stateHash(current()) != s_savedHash)
+        if (stateHash() != s_savedHash)
         {
             s_hadFile = true;
             newFileManager.setProjectStructChanged();
@@ -311,39 +394,53 @@ void seqPlinkyUpdate()
 
 void seqPlinkyInit()
 {
-    new (s_ctlMem) plinkymorph::Controller();
+    for (int k = 0; k < kInstances; k++)
+        new (s_ctlMem[k]) plinkymorph::Controller();
 }
 
 void seqPlinkyLoadWorkspace()
 {
-    Params p;
+    Params p[kInstances];
+    plinkymorph::Store* st[kInstances];
+    uint8_t hs[kInstances];
     s_hadFile = false;
     s_loadedValid = false;
     s_newerFile = false;
-    s_ctl.store.clear();
-    s_ctl.halfSec = plinkymorph::kHalfSecDefault;
-    s_ctl.resync(); // the next main loop pass applies the snapshot of the shown pattern at once (no morph)
+    for (int k = 0; k < kInstances; k++)
+    {
+        p[k] = plinkymorph::instDefaults(k);
+        st[k] = &ctl(k).store;
+        st[k]->clear();
+        hs[k] = plinkymorph::kHalfSecDefault;
+        ctl(k).resync(); // the next main loop pass applies the snapshot of the shown pattern at once (no morph)
+    }
     if (seqsidecar::exists(kWorkspaceFile))
     {
         size_t n = seqsidecar::readFile(kWorkspaceFile, s_fbuf, sizeof(s_fbuf));
         bool newer = false;
-        if (n && plinkymorph::loadFile(s_fbuf, n, p, s_ctl.store, s_ctl.halfSec, &newer))
+        if (n && plinkymorph::loadBank(s_fbuf, n, p, st, hs, &newer))
             s_hadFile = true;
         else
-        {
-            p = Params(); // short, corrupt or newer file: defaults, the file itself is left alone
-            s_ctl.store.clear();
-            s_ctl.halfSec = plinkymorph::kHalfSecDefault;
-        }
+            for (int k = 0; k < kInstances; k++) // short, corrupt or newer file: defaults, the file itself is left alone
+            {
+                p[k] = plinkymorph::instDefaults(k);
+                st[k]->clear();
+                hs[k] = plinkymorph::kHalfSecDefault;
+            }
         s_newerFile = newer;
         s_loadedValid = true;
     }
     s_loadedId = seqlogic::projectId(newFileManager.getCurrentProjectPath(), newFileManager.getCurrentProjectName());
-    eng().allNotesOff();
-    if (p.v[P_CHANNEL] == 0)
-        p.v[P_CHANNEL] = paramInfo(P_CHANNEL).def; // v0.3.2: the PolySynth instrument always exists (a v0.3 file with the voice off: MIDI instrument 16)
-    apply(p); // a file of v0.3 / v0.3.1 keeps its claimed channel: that MIDI instrument is the PolySynth instrument
-    s_savedHash = stateHash(p);
+    eng().allNotesOff(-1);
+    eng().resetGovernor();
+    plinkymorph::fixChannels(p); // the PolySynth instruments always exist; a v0.3 file keeps its claimed channel for PolySynth 1
+    for (int k = 0; k < kInstances; k++)
+    {
+        for (int i = 0; i < P_COUNT; i++)
+            eng().setParam(i, p[k].v[i], k);
+        ctl(k).halfSec = hs[k];
+    }
+    s_savedHash = stateHash();
     s_wsWritePending = false;
     s_dirty.dirty = false;
 }
@@ -369,7 +466,7 @@ void seqPlinkySaveProject(const char* path, const char* name)
     char file[PATCH_SIZE];
     seqsidecar::projectFilePath(file, sizeof(file), path, name, kFileName);
     uint32_t id = seqlogic::projectId(path, name);
-    switch (seqlogic::sidecarAction(s_hadFile || !current().isDefault() || plinkymorph::needsTrailer(s_ctl.store, s_ctl.halfSec),
+    switch (seqlogic::sidecarAction(s_hadFile || bankNeedsFile(),
                                     s_loadedValid && s_loadedId == id))
     {
         case seqlogic::SIDE_WRITE:

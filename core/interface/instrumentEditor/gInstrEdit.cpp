@@ -1993,7 +1993,9 @@ void cInstrumentEditor::plinkyUpdateView(bool force)
         return;
     seqplinky::Model& m = plinkyView.plinky;
     plinkyView.mode = plinkyPitchView ? SeqPlayViewData::HIDDEN : SeqPlayViewData::PLINKY;
+    seqPlinkySetInst(seqPlinkyInstanceOf(mtProject.values.lastUsedInstrument)); // the page shows the instance of the chosen instrument
     seqPlinkyFillModel(m);
+    m.all = buttons->isButtonPressed(interfaceButtonShift) ? 1 : 0;
     m.sec = plinkyCur.sec;
     m.idx = plinkyCur.idx;
     m.track = 0; // 0 = the instrument page (no track number, own hint line)
@@ -2102,11 +2104,30 @@ void cInstrumentEditor::showPlinkyParams()
     plinkyUpdateView(true);
 }
 
+// plan 019 A: the Params key on the PolySynth page steps SYNTH 1 -> 2 -> 3 -> 1 (the chosen instrument becomes the next instance's slot)
+void cInstrumentEditor::plinkyCycleInstance()
+{
+    const int next = (seqPlinkyInstanceOf(mtProject.values.lastUsedInstrument) + 1) % 3;
+    const int instr = seqPlinkyInstrumentOf(next);
+    if (instr < 0)
+        return;
+    mtProject.values.lastUsedInstrument = instr;
+    seqPlinkySetInst(next);
+    showPlinkyCpu(true);
+    titleBar->setTitle(plinkyTitle);
+    titleBar->showCurrentInstrumentOnRightLabel();
+    plinkyUpdateView(true);
+}
+
 void cInstrumentEditor::plinkyChange(int d)
 {
     const int p = plinkyCur.param();
-    const bool fine = buttons->isButtonPressed(interfaceButtonShift);
-    seqPlinkySet(p, seqplinky::jogValue(p, seqPlinkyGet(p), d, fine));
+    const int cur = seqPlinkyGet(p);
+    const int nv = seqplinky::jogValue(p, cur, d, false);
+    if (buttons->isButtonPressed(interfaceButtonShift))
+        seqPlinkySetAll(p, nv - cur); // plan 019 A: Shift + dial = the same delta on ALL instances
+    else
+        seqPlinkySet(p, nv);
     if (!plinkyActive())
     {
         showInstrumentMidiParams(); // the channel was changed away: back to the MIDI settings
