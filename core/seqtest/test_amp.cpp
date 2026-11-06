@@ -1,7 +1,7 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
-// Host tests of the amplitude view (plan 014 B, plan 015 V): dB table, block peak cascade (a 192 bucket linear part and an exponential
-// histogram), the time axis (almost linear for the last seconds, compression building up towards the left edge, jog scales), per-track
-// lanes and colours, the resampled contour lines, layout over the full height and the display-list budget.
+// Host tests of the amplitude view (plan 014 B, plan 015 V, v0.4.1 time axis): dB table, block peak cascade (three tiers of absolutely
+// aligned buckets), the time axis (right 75 % linear in time, the left 25 % compressing with a continuous slope, cut at the y axis, jog
+// scales), smooth scrolling, per-track lanes and colours, the resampled contour lines, layout over the full height and the display-list budget.
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -112,162 +112,231 @@ static void test_db_table()
 static void test_cascade()
 {
     Cascade c;
-    CHECK(c.count() == 0);
-    // total span = number of finished groups; spans never decrease towards the old end; coarse levels hold at most kPerLevel buckets
-    uint32_t pushes = 0;
-    int maxCount = 0;
-    bool ok = true;
-    const uint32_t kTop = (uint32_t)kGroup << (kLevels - 1);
-    for (int n = 1; n <= 400000; n++)
-    {
-        c.push((uint16_t)(n % 1000));
-        pushes++;
-        if (c.count() > maxCount) maxCount = c.count();
-        if (n < 3000 || n % 997 == 0)
-        {
-            uint64_t sum = 0;
-            int fine = 0;
-            for (int i = 0; i < c.count(); i++)
-            {
-                sum += c.at(i).span;
-                if (i > 0 && c.at(i).span < c.at(i - 1).span) ok = false;
-                if (c.at(i).span == (uint32_t)kGroup) fine++;
-                int same = 0;
-                for (int k = 0; k < c.count(); k++) same += c.at(k).span == c.at(i).span;
-                if (c.at(i).span > (uint32_t)kGroup && c.at(i).span < kTop && same > kPerLevel) ok = false;
-                if (c.at(i).span < kTop && (c.at(i).span & (c.at(i).span - 1))) ok = false; // power of two
-            }
-            if (sum != (uint64_t)(pushes - pushes % kGroup)) ok = false;
-            if (fine > kLinCap) ok = false;
-            if (c.count() && c.at(0).span != (uint32_t)kGroup) ok = false;
-        }
-    }
-    CHECK(ok);
-    CHECK(maxCount <= kMaxBuckets); // constant size however long it runs
-    printf("  cascade: %d buckets after %u block pushes (limit %d), %u bytes per lane, %u bytes for 9 lanes\n", c.count(), pushes,
-           (int)kMaxBuckets, (unsigned)sizeof(Cascade), (unsigned)(sizeof(Cascade) * kLanes));
-    // the history reaches beyond the horizon (120 s) once it is full
-    uint64_t total = 0;
-    for (int i = 0; i < c.count(); i++) total += c.at(i).span;
-    CHECK((double)total * kBlockMs > (double)kHorizonMs);
+    CHECK(c.blocks() == 0);
+    Bucket b;
+    CHECK(!c.get(0, 0, b)); // nothing yet
+    // spans of the tiers, ring sizes (powers of two), memory
+    CHECK(Cascade::span(0) == (uint32_t)kGroup && Cascade::span(1) == 4u * kGroup && Cascade::span(2) == 16u * kGroup);
+    for (int tt = 0; tt < kTiers; tt++) CHECK((Cascade::cap(tt) & (Cascade::cap(tt) - 1)) == 0);
+    printf("  cascade: %u bytes per lane, %u bytes for 9 lanes; rings reach %.1f s / %.1f s / %.1f s\n", (unsigned)sizeof(Cascade),
+           (unsigned)(sizeof(Cascade) * kLanes), Cascade::cap(0) * Cascade::span(0) * kBlockMs / 1000.0, Cascade::cap(1) * Cascade::span(1) * kBlockMs / 1000.0,
+           Cascade::cap(2) * Cascade::span(2) * kBlockMs / 1000.0);
+    CHECK(sizeof(Cascade) <= 4200); // v0.4.0: 1960 B for 120 s of exponential history; now 60 s at full resolution
+    // the history covers the largest total age (60 s) at the display resolution, and the linear part of every scale with the finest tier or the next
+    CHECK((double)Cascade::cap(kTiers - 1) * Cascade::span(kTiers - 1) * kBlockMs >= (double)kMaxTotalMs);
+    CHECK((double)Cascade::cap(0) * Cascade::span(0) * kBlockMs >= 11000.0 && (double)Cascade::cap(1) * Cascade::span(1) * kBlockMs >= 23000.0);
 
-    // fresh: the first finished group is one bucket, the next one the second
+    // fresh: the unfinished bucket is readable (partial), a finished one is final
+    for (int i = 0; i < kGroup - 1; i++) c.push(100);
+    CHECK(c.get(0, 0, b) && b.span == (uint32_t)kGroup - 1 && b.avg == 100 && b.mx == 100);
+    c.push(100);
+    CHECK(c.get(0, 0, b) && b.span == (uint32_t)kGroup && b.avg == 100 && !c.get(0, 1, b));
+    for (int i = 0; i < kGroup; i++) c.push((uint16_t)(i == 3 ? 900 : 50));
+    CHECK(c.get(0, 1, b) && b.mx == 900 && b.avg == (900 + 7 * 50 + 4) / 8 && c.get(0, 0, b) && b.avg == 100);
+    // the coarser tiers average / maximise the same block peaks
+    CHECK(c.get(1, 0, b) && b.span == 16 && b.mx == 900 && b.avg == (8 * 100 + 900 + 7 * 50 + 8) / 16);
+
+    // every held bucket of every tier equals the brute force average / maximum of ITS blocks (absolute alignment, nothing merged)
     Cascade d;
-    for (int i = 0; i < kGroup - 1; i++) d.push(100);
-    CHECK(d.count() == 0); // not finished yet
-    d.push(100);
-    CHECK(d.count() == 1 && d.at(0).span == kGroup && d.at(0).avg == 100 && d.at(0).mx == 100);
-    for (int i = 0; i < kGroup; i++) d.push((uint16_t)(i == 3 ? 900 : 50));
-    CHECK(d.count() == 2 && d.at(0).mx == 900 && d.at(0).avg == (900 + 7 * 50 + 4) / 8 && d.at(1).avg == 100);
+    std::vector<uint16_t> src;
+    unsigned rnd = 99;
+    const uint32_t N = 100000;
+    for (uint32_t n = 0; n < N; n++)
+    {
+        rnd = rnd * 1664525u + 1013904223u;
+        const uint16_t v = (uint16_t)((rnd >> 16) % 3000 + (n % 5000 < 200 ? 20000 : 0));
+        src.push_back(v);
+        d.push(v);
+    }
+    bool exact = true;
+    int held[kTiers] = { 0, 0, 0 };
+    for (int tt = 0; tt < kTiers; tt++)
+    {
+        const uint32_t S = Cascade::span(tt), F = N / S;
+        for (uint32_t j = d.oldestHeld(tt); j <= F; j++)
+        {
+            Bucket g;
+            const bool ok = d.get(tt, j, g);
+            if (j == F && N == F * S) { exact = exact && !ok; continue; } // no partial bucket
+            if (!ok) { exact = false; continue; }
+            held[tt]++;
+            uint64_t sum = 0;
+            uint16_t mx = 0;
+            const uint32_t cnt = j == F ? N - F * S : S;
+            for (uint32_t k = 0; k < cnt; k++) { sum += src[j * S + k]; if (src[j * S + k] > mx) mx = src[j * S + k]; }
+            exact = exact && g.span == cnt && g.mx == mx && g.avg == (uint16_t)((sum + cnt / 2) / cnt);
+        }
+        Bucket gone;
+        exact = exact && !d.get(tt, d.oldestHeld(tt) - 1, gone) && !d.get(tt, F + 5, gone); // older than the ring / in the future
+    }
+    CHECK(exact);
+    CHECK(held[0] >= (int)Cascade::cap(0) && held[1] >= (int)Cascade::cap(1) && held[2] >= (int)Cascade::cap(2)); // the rings are full
+    // reach(): the age that the tier covers completely
+    for (int tt = 0; tt < kTiers; tt++) CHECK(d.reach(tt) >= (Cascade::cap(tt) - 1) * Cascade::span(tt) && d.reach(tt) <= (Cascade::cap(tt) + 1) * Cascade::span(tt));
+    CHECK(d.reach(0) < d.reach(1) && d.reach(1) < d.reach(2));
+    // indexAt: the block of age 0 is the newest one
+    CHECK(d.indexAt(0, 0) == (N - 1) / Cascade::span(0) && d.indexAt(2, 0) == (N - 1) / Cascade::span(2));
 
-    // constant input: every bucket averages to it
+    // constant input: every bucket of every tier is that value
     Cascade k;
     for (int i = 0; i < 50000; i++) k.push(12345);
     bool same = true;
-    for (int i = 0; i < k.count(); i++) same = same && k.at(i).avg == 12345 && k.at(i).mx == 12345;
+    for (int tt = 0; tt < kTiers; tt++)
+        for (uint32_t j = k.oldestHeld(tt); j <= 50000 / Cascade::span(tt); j++)
+        {
+            Bucket g;
+            if (k.get(tt, j, g)) same = same && g.avg == 12345 && g.mx == 12345;
+        }
     CHECK(same);
 
-    // the maximum of a peak survives every merge, in the bucket that covers it; the average weights by span
+    // a peak survives in the bucket that covers it, as long as the tier holds it: 87 s old = only the coarsest tier
     Cascade p;
-    const int N = 40000;
-    for (int i = 0; i < N; i++) p.push((uint16_t)(i == 10000 ? 30000 : 10));
-    uint16_t mx = 0;
-    for (int i = 0; i < p.count(); i++) mx = p.at(i).mx > mx ? p.at(i).mx : mx;
-    CHECK(mx == 30000);
-    double sum = 0, blocks = 0;
-    for (int i = 0; i < p.count(); i++) { sum += (double)p.at(i).avg * p.at(i).span; blocks += p.at(i).span; }
-    const double truth = ((blocks - 1) * 10.0 + 30000.0) / blocks;
-    CHECK(fabs(sum / blocks - truth) < truth * 0.02 + 8); // rounding of the merges only
-    // old data ends in wide buckets: the bucket that holds the peak (about 30 s ago) is coarse
-    bool wide = false;
-    for (int i = 0; i < p.count(); i++) if (p.at(i).mx == 30000 && p.at(i).span >= 8 * 16) wide = true;
-    CHECK(wide);
-    // recent data is kept at full resolution: the newest kLinCap buckets are the finest (4.4 s)
-    bool fine = true;
-    for (int i = 0; i < kLinCap - 2; i++) fine = fine && p.at(i).span == (uint32_t)kGroup;
-    CHECK(fine);
+    for (int i = 0; i < 40000; i++) p.push((uint16_t)(i == 10000 ? 30000 : 10));
+    Bucket g;
+    CHECK(p.get(2, 10000 / Cascade::span(2), g) && g.mx == 30000 && g.avg > 10 && g.avg < 400);
+    CHECK(!p.get(0, 10000 / Cascade::span(0), g) && !p.get(1, 10000 / Cascade::span(1), g));
+    // old data beyond the largest ring is gone (no growth)
+    Cascade q;
+    for (uint32_t i = 0; i < 300000; i++) q.push(7);
+    CHECK(!q.get(2, 100, g) && q.get(2, 300000 / Cascade::span(2) - 1, g));
 }
 
 static void test_age_to_x()
 {
+    const float W = (float)(kX1 - kX0);
+    CHECK(kLinPx == 495 && kDefaultScale == 2 && kLinMs[kDefaultScale] == 8000 && kTotalMs[kDefaultScale] == 30000); // owner: ~8 s linear, ~30 s max
     for (int sc = 0; sc < kScales; sc++)
     {
+        const float lin = (float)kLinMs[sc], tot = (float)kTotalMs[sc], a = lin / (float)kLinPx; // ms per px of the linear part
         CHECK(xOfAge(0, sc) == (float)kX1 && xOfAge(-5, sc) == (float)kX1);
-        CHECK(xOfAge((float)kHorizonMs, sc) == (float)kX0 && xOfAge(1e9f, sc) == (float)kX0);
-        float prev = xOfAge(0, sc), prevStep = 1e9f;
-        bool mono = true, compressed = true;
-        for (int a = 40; a <= kHorizonMs; a += 40)
+        // cut at the y axis: the total age is exactly the left axis, anything older sits there too (and is never drawn)
+        CHECK(xOfAge(tot, sc) == (float)kX0 && xOfAge(1e9f, sc) == (float)kX0);
+        CHECK(fabsf(ageMsOfU(1.0f, sc) - tot) < 1.0f && ageMsOfU(0.0f, sc) == 0.0f);
+        // monotone: older = further left (strictly)
+        float prev = xOfAge(0, sc);
+        bool mono = true;
+        for (int ag = 40; ag < (int)tot; ag += 40)
         {
-            const float x = xOfAge((float)a, sc);
-            if (x > prev) mono = false;
+            const float x = xOfAge((float)ag, sc);
+            if (!(x < prev)) mono = false;
             prev = x;
         }
         CHECK(mono);
-        // compression: the same age step covers fewer pixels the older it is
-        for (float a = 0; a < 100000; a = a * 1.5f + 100)
+        // the right 75 % are LINEAR in time: x = X1 - age / a within a hundredth of a pixel, every column moves at the same speed
+        bool linear = true;
+        for (float ag = 0; ag <= lin; ag += lin / 97.0f) linear = linear && fabsf(xOfAge(ag, sc) - ((float)kX1 - ag / a)) < 0.02f;
+        CHECK(linear);
+        CHECK(fabsf(xOfAge(lin, sc) - (float)(kX1 - kLinPx)) < 0.02f); // the linear part ends at 75 % of the distance from the right edge
+        bool linU = true;
+        for (float u = 0; u <= 0.75f; u += 0.01f) linU = linU && fabsf(ageMsOfU(u, sc) - a * u * W) < 0.05f;
+        CHECK(linU);
+        // continuous slope at the 75 % point (no kink), then the compression grows smoothly (ms per px never shrinks)
+        const float p0 = (float)kLinPx / W, eps = 0.02f / W;
+        const float sl = (ageMsOfU(p0, sc) - ageMsOfU(p0 - eps, sc)) / 0.02f, sr = (ageMsOfU(p0 + eps, sc) - ageMsOfU(p0, sc)) / 0.02f;
+        CHECK(fabsf(sl - a) < 0.02f * a && fabsf(sr - a) < 0.03f * a && fabsf(sr / sl - 1.0f) < 0.03f);
+        float prevSlope = 0;
+        bool grow = true;
+        for (int px = 0; px + 1 <= (int)W; px++)
         {
-            const float step = xOfAge(a, sc) - xOfAge(a + 1000, sc);
-            if (step > prevStep + 0.01f) compressed = false;
-            prevStep = step;
+            const float s = ageMsOfU((float)(px + 1) / W, sc) - ageMsOfU((float)px / W, sc);
+            if (s < prevSlope - 0.01f) grow = false;
+            prevSlope = s;
         }
-        CHECK(compressed);
-        // the time marks sit in order inside the plot, the last one on the left edge
-        float last = (float)kX1 + 1;
-        bool order = true;
-        for (int i = 0; i < 5; i++)
+        CHECK(grow);
+        // xOfAge inverts ageMsOfU (labels and lines agree)
+        bool inv = true;
+        for (float u = 0.01f; u < 0.995f; u += 0.03f) inv = inv && fabsf(xOfAge(ageMsOfU(u, sc), sc) - ((float)kX1 - u * W)) < 0.06f;
+        CHECK(inv);
+        // time marks: in order inside the plot, apart from each other and from the right edge, the last one on the left axis
+        int mi[7], mx[7];
+        const int nm = timeMarks(sc, mi, mx);
+        bool order = nm >= 2 && mx[nm - 1] == kX0 && (uint32_t)kMarkMs[mi[nm - 1]] == kTotalMs[sc];
+        int last = kX1;
+        for (int i = 0; i < nm; i++)
         {
-            const float x = xOfAge((float)kMarkMs[i], sc);
-            if (!(x < last)) order = false;
-            last = x;
+            if (mx[i] > last - kMarkGap + 1 || mx[i] < kX0) order = false;
+            last = mx[i];
         }
-        CHECK(order && xOfAge((float)kMarkMs[4], sc) == (float)kX0);
-        // the right half of the width shows the chosen span (2 ... 60 s)
-        const float xm = 0.5f * (kX0 + kX1);
-        CHECK(fabsf(xOfAge((float)kHalfSpanS[sc] * 1000.0f, sc) - xm) < 1.0f);
-        CHECK(kHalfSpanS[sc] < kHalfSpanS[sc < kScales - 1 ? sc + 1 : sc] || sc == kScales - 1);
+        CHECK(order);
     }
-    // default: the right half covers the last 4 s (owner: "values are compressed after only 10 %"), almost linearly: the first 10 % of
-    // the width are about 0.4 s, the first quarter about a second; the compression builds up gradually, the left edge is the full history
-    const int D = kDefaultScale;
-    const float W = (float)(kX1 - kX0);
-    CHECK(kHalfSpanS[D] >= 3 && kHalfSpanS[D] <= 5);
-    CHECK(xOfAge(3000, D) > 0.5f * (kX0 + kX1) - 1.0f); // 3 s are inside the right half
-    CHECK(xOfAge(0, D) - xOfAge(1000, D) > 0.20f * W);  // the last second takes more than a fifth of the width (was 16 %)
-    // the speed (ms of history per 10 % of the width) grows gradually: no knee near the right edge
-    float prevMs = 0;
-    bool gradual = true;
-    for (int q = 0; q < 10; q++)
+    // the jog scales are ordered: a longer linear part / total = slower scrolling
+    for (int sc = 0; sc + 1 < kScales; sc++)
     {
-        const float a0 = ageMsOfU(0.1f * q, D), a1 = ageMsOfU(0.1f * (q + 1), D);
-        const float ms = a1 - a0;
-        if (q > 0 && ms < prevMs * 1.0f) gradual = false;
-        prevMs = ms;
+        CHECK(xOfAge(5000, sc) < xOfAge(5000, sc + 1) && kLinMs[sc] < kLinMs[sc + 1] && kTotalMs[sc] < kTotalMs[sc + 1]);
+        CHECK(kTotalMs[sc] >= kLinMs[sc] + (kLinMs[sc] / 3)); // the tail needs room (b >= 0)
     }
-    CHECK(gradual);
-    CHECK(ageMsOfU(0.1f, D) < 600.0f);                       // the first 10 % of the width are still well below a second
-    CHECK(ageMsOfU(0.1f, D) > 150.0f);
-    CHECK(xOfAge(60000, D) - xOfAge(120000, D) < 0.2f * W);   // the last minute of the history takes a small part
-    CHECK(fabsf(ageMsOfU(1.0f, D) - (float)kHorizonMs) < 1.0f);
-    // the jog scales are ordered: a longer right half = a longer almost linear part
-    for (int sc = 0; sc + 1 < kScales; sc++) CHECK(xOfAge(5000, sc) < xOfAge(5000, sc + 1));
+    CHECK(kTotalMs[kScales - 1] == kMaxTotalMs);
+    // default: 8 s take 75 %, 30 s the whole width; the last 22 s are compressed into the left quarter
+    CHECK(fabsf(xOfAge(8000) - (kX1 - 0.75f * W)) < 0.05f && xOfAge(30000) == (float)kX0 && xOfAge(15000) > kX0 + 0.06f * W);
+    CHECK(xOfAge(0) - xOfAge(1000) > 0.08f * W && xOfAge(0) - xOfAge(1000) < 0.11f * W); // 1 s = 61.9 px, the same for every 1 s of the linear part
+    CHECK(fabsf((xOfAge(0) - xOfAge(1000)) - (xOfAge(6000) - xOfAge(7000))) < 0.05f);
 
-    // geometry of a full cascade: start blocks increase, the total reaches beyond the horizon
+    // geometry of a full cascade: the resampled line has as many points as columns, newest at the right edge, oldest EXACTLY at the y axis
     Cascade c;
-    for (int i = 0; i < 100000; i++) c.push(1000); // -30 dB
-    uint32_t st[kMaxBuckets + 1];
-    const int n = geometry(c, st);
-    bool inc = st[0] == 0;
-    for (int i = 1; i <= n; i++) inc = inc && st[i] > st[i - 1];
-    CHECK(inc && (double)st[n] * kBlockMs > kHorizonMs);
-    // the resampled line: every column inside the plot, x increasing, newest at the right edge, as many points as columns
+    for (int i = 0; i < 100000; i++) c.push(1000); // -30 dB, 290 s
     int16_t o[(2 * kMaxCols + 2) * 2];
-    const int cols = 120;
-    const int cnt = resample(c, st, n, cols, 1, D, o);
-    CHECK(cnt == cols && o[0] == kX0 && o[(cnt - 1) * 2] == kX1);
-    bool xs = true;
-    for (int i = 1; i < cnt; i++) xs = xs && o[i * 2] > o[(i - 1) * 2];
-    CHECK(xs);
-    for (int i = 0; i < cnt; i++) CHECK(o[i * 2 + 1] >= kY0 && o[i * 2 + 1] <= kY1);
+    for (int sc = 0; sc < kScales; sc++)
+        for (int cols : { 16, 60, 120, 200 })
+        {
+            const int cnt = resample(c, cols, 1, sc, o);
+            CHECK(cnt == cols && o[0] == kX0 && o[(cnt - 1) * 2] == kX1);
+            bool xs = true;
+            for (int i = 1; i < cnt; i++) xs = xs && o[i * 2] > o[(i - 1) * 2];
+            CHECK(xs);
+            for (int i = 0; i < cnt; i++) CHECK(o[i * 2 + 1] >= kY0 && o[i * 2 + 1] <= kY1 && o[i * 2] >= kX0 && o[i * 2] <= kX1);
+        }
+    // a history shorter than the total age: the line starts where the history starts (at its exact x), not earlier
+    Cascade yng;
+    for (int i = 0; i < (int)(15000 / kBlockMs); i++) yng.push(1000);
+    const int cy = resample(yng, 200, 1, kDefaultScale, o);
+    const float xh = xOfAge(15000.0f);
+    CHECK(cy > 100 && cy < 200 && o[0] >= xh - 1 && o[0] <= xh + 4.0f);
+    // the maxima line: the same
+    CHECK(resample(yng, 200, 0, kDefaultScale, o) == cy);
+}
+
+// smooth scrolling (v0.4.1): a pulse moves left at the constant speed of the linear part, block by block, no jumps
+static void test_scroll()
+{
+    for (int which = 0; which < 2; which++)
+    {
+        Cascade c;
+        for (int i = 0; i < 6000; i++) c.push(0);
+        for (int i = 0; i < 300; i++) c.push(20000); // a 0.87 s pulse
+        const float a = (float)kLinMs[kDefaultScale] / (float)kLinPx; // ms per px
+        int16_t o[(2 * kMaxCols + 2) * 2];
+        float firstEdge = -1, prevEdge = -1, maxStep = 0, lastEdge = 0;
+        const int steps = 600; // 1.7 s
+        for (int s = 0; s < steps; s++)
+        {
+            const int cnt = resample(c, 200, which, kDefaultScale, o);
+            // the leading (newer) edge of the pulse: where the line falls through the middle of its height, scanning from the right edge
+            const int ymid = (yOf(-3.7f) + kY1) / 2;
+            float edge = -1;
+            for (int i = cnt - 1; i > 0; i--)
+                if (o[i * 2 + 1] > ymid && o[(i - 1) * 2 + 1] <= ymid && o[i * 2 + 1] < kY1 + 1)
+                {
+                    const float f = (float)(ymid - o[(i - 1) * 2 + 1]) / (float)(o[i * 2 + 1] - o[(i - 1) * 2 + 1]);
+                    edge = o[(i - 1) * 2] + f * (o[i * 2] - o[(i - 1) * 2]);
+                    break;
+                }
+            if (edge >= 0)
+            {
+                if (firstEdge < 0) firstEdge = edge;
+                else if (edge - prevEdge > maxStep) maxStep = edge - prevEdge;
+                if (prevEdge >= 0 && edge > prevEdge + 0.8f) maxStep = 99;
+                prevEdge = edge;
+                lastEdge = edge;
+            }
+            c.push(0);
+        }
+        // expected: 600 blocks x 2.9025 ms / (16.16 ms per px) = 107.8 px to the left
+        const float moved = firstEdge - lastEdge, expect = steps * kBlockMs / a;
+        printf("  scroll (%s): the pulse edge moves %.1f px in %d blocks (expected %.1f), largest step to the right %.2f px\n", which ? "averages" : "maxima", moved,
+               steps, expect, maxStep);
+        CHECK(firstEdge > 0 && fabsf(moved - expect) < 0.04f * expect + 2.0f);
+        CHECK(maxStep < 0.8f); // never jumps back
+    }
 }
 
 static void test_follower_and_colours()
@@ -292,6 +361,8 @@ static void test_follower_and_colours()
     j.jog(1);
     CHECK(j.scale == kDefaultScale + 1);
     for (int i = 0; i < 20; i++) j.jog(5);
+    CHECK(j.scale == kScales - 1);
+    j.jog(1);
     CHECK(j.scale == kScales - 1);
     for (int i = 0; i < 20; i++) j.jog(-1);
     CHECK(j.scale == 0);
@@ -581,11 +652,54 @@ static void dumpPreviews(const char* dir)
     four.info = busy.info;
     dumpScene(dir, "amp4_four_tracks", four);
     Follower fourLong = four;
-    fourLong.scale = 5;
-    dumpScene(dir, "amp5_four_tracks_scale20s", fourLong);
+    fourLong.scale = 3;
+    dumpScene(dir, "amp5_four_tracks_scale16s_60s", fourLong);
     Follower fourShort = four;
     fourShort.scale = 0;
-    dumpScene(dir, "amp6_four_tracks_scale2s", fourShort);
+    dumpScene(dir, "amp6_four_tracks_scale2s_8s", fourShort);
+    // the first seconds after the Master module is entered: 6 s and 20 s of history (the screen fills from the right)
+    Follower early;
+    {
+        uint16_t lv[kLanes];
+        for (int n = 0; n < (int)(6000.0 / kBlockMs); n++)
+        {
+            const double sec = n * kBlockMs / 1000.0;
+            double mix = 0;
+            for (int tr = 0; tr < 4; tr++)
+            {
+                const double period = tr == 0 ? 0.47 : (tr == 1 ? 0.94 : (tr == 2 ? 0.235 : 3.76));
+                const double ph = fmod(sec + tr * 0.11, period) / period;
+                const double v = 32768.0 * (tr == 3 ? 0.18 : 0.5) * exp(-ph * (tr == 2 ? 9.0 : 4.0));
+                lv[tr] = (uint16_t)v;
+                mix += v;
+            }
+            for (int tr = 4; tr < kTracks; tr++) lv[tr] = 0;
+            lv[kTracks] = (uint16_t)(mix * 0.6);
+            early.push(lv);
+        }
+    }
+    early.info = busy.info;
+    dumpScene(dir, "amp7_four_tracks_after_6s", early);
+    {
+        uint16_t lv[kLanes];
+        for (int n = (int)(6000.0 / kBlockMs); n < (int)(20000.0 / kBlockMs); n++)
+        {
+            const double sec = n * kBlockMs / 1000.0;
+            double mix = 0;
+            for (int tr = 0; tr < 4; tr++)
+            {
+                const double period = tr == 0 ? 0.47 : (tr == 1 ? 0.94 : (tr == 2 ? 0.235 : 3.76));
+                const double ph = fmod(sec + tr * 0.11, period) / period;
+                const double v = 32768.0 * (tr == 3 ? 0.18 : 0.5) * exp(-ph * (tr == 2 ? 9.0 : 4.0));
+                lv[tr] = (uint16_t)v;
+                mix += v;
+            }
+            for (int tr = 4; tr < kTracks; tr++) lv[tr] = 0;
+            lv[kTracks] = (uint16_t)(mix * 0.6);
+            early.push(lv);
+        }
+    }
+    dumpScene(dir, "amp8_four_tracks_after_20s", early);
 }
 
 int main()
@@ -595,10 +709,11 @@ int main()
         dumpPreviews(dir);
         return 0;
     }
-    printf("amp view (plan 014 B, 015 V)\n");
+    printf("amp view (plan 014 B, 015 V, v0.4.1 time axis)\n");
     test_db_table();
     test_cascade();
     test_age_to_x();
+    test_scroll();
     test_follower_and_colours();
     test_layout_and_budget();
     printf("%d checks, %d failed\n", g_checks, g_fail);

@@ -1,20 +1,22 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
-// Master amplitude view (plan 013 M, redesigned in plan 014 B, plan 015 V): one level contour per track plus the master, on a time axis
-// that is almost linear for the last seconds and compresses towards the left edge. New data enters at the right edge. This header holds
+// Master amplitude view (plan 013 M, redesigned in plan 014 B, plan 015 V, time axis of v0.4.1): one level contour per track plus the master.
+// New data enters at the right edge and scrolls to the left. This header holds
 //   - the dB conversion by table (no log per sample),
-//   - Cascade: the history of one lane. The audio side delivers ONE PEAK PER AUDIO BLOCK (2.9 ms). kGroup = 8 blocks (23 ms) form the
-//     finest bucket (average of the block peaks, maximum kept); the newest kLinCap (192 = 4.4 s) finest buckets are kept as they are (a
-//     ring); older ones merge pairwise into an exponential histogram (kPerLevel buckets per span 16, 32, 64, ... blocks, the oldest
-//     bucket absorbs the rest). Constant memory (kMaxBuckets) and O(1) work per block; no per-sample work anywhere,
-//   - the time axis (age -> x): x = X1 - W * u, age(u) = H * (c * u + (1 - c) * u^6): a blend of a straight line and a power curve. With
-//     the default the right half of the width shows the last 4 s almost linearly, the compression builds up gradually and the left edge
-//     is the full history H = 120 s. The jog wheel picks one of seven "right half = 2 / 3 / 4 / 6 / 10 / 20 / 60 s" scales,
+//   - Cascade: the history of one lane. The audio side delivers ONE PEAK PER AUDIO BLOCK (2.9 ms). Three tiers of buckets with
+//     ABSOLUTE alignment (bucket j of a tier covers the blocks j*S .. (j+1)*S - 1): 8 blocks (23 ms, 512 buckets = 11.9 s), 32 blocks
+//     (93 ms, 256 buckets = 23.8 s), 128 blocks (372 ms, 256 buckets = 95 s). Every tier keeps its own ring (average and maximum of the
+//     block peaks), so a bucket never changes after it is finished; the unfinished newest bucket of a tier is read from its accumulator.
+//     The oldest tier holds more than the largest time scale (60 s). Constant memory (4 KB per lane) and O(1) work per block,
+//   - the time axis (age -> x): the right 75 % of the width is LINEAR in time (newest at the right edge, every column moves at the same
+//     speed), the left 25 % compresses with a continuous slope (a parabola in x) up to the total age at the left axis, where the lines are
+//     CUT (nothing older is drawn). The jog wheel picks one of four scales: linear 2 / 4 / 8 / 16 s, total 8 / 15 / 30 / 60 s (default 8 / 30),
 //   - the layout over the full height of the screen between the title bar and the strip, and the drawing over a tiny context (the same code
 //     runs on the FT81x display list in interface/masterParams/ampView.cpp and in the host tests). No Polyend includes.
 //
 // Drawing: every audible track is two thin contour lines (the dim line of the bucket maxima = peaks, in front of it the line of the
 // averages), the master one neutral line. The lines are RESAMPLED at M columns of equal pixel width (M follows the display-list budget and
-// the number of audible lanes: 16 .. 200 points per line), so the resolution on the screen does not depend on the bucket structure.
+// the number of audible lanes: 16 .. 200 points per line); the value of a column is read at the EXACT age of its x (and of the history
+// that the audio side delivered up to now), from the tier whose buckets are at most half a column wide, so the contour moves smoothly.
 #ifndef SEQ_AMP_VIEW_LOGIC_H_
 #define SEQ_AMP_VIEW_LOGIC_H_
 
@@ -32,14 +34,15 @@ enum
     kTracks = 8,           // sample tracks (the only ones with audio of their own)
     kLanes = kTracks + 1,  // + the master (lane 8)
     kGroup = 8,            // blocks per finest bucket (23.2 ms)
-    kLinCap = 192,         // finest buckets kept as they are (4.4 s)
-    kPerLevel = 4,         // buckets per coarser span
-    kLevels = 12,          // level 0 = kGroup blocks, level l = kGroup << l; the top level absorbs everything older
-    kCoarseMax = kPerLevel * (kLevels - 1) + 3,
-    kMaxBuckets = kLinCap + kCoarseMax,
-    kHorizonMs = 120000,   // the left edge of the time axis
-    kX0 = 56,              // plot area: the full height between the stock title bar (28) and the strip (425)
+    kTiers = 3,            // bucket spans kGroup, 4 x kGroup, 16 x kGroup blocks
+    kTierShift = 2,        // span ratio 4
+    kRing0 = 512,          // buckets per tier (powers of two)
+    kRing1 = 256,
+    kRing2 = 256,
+    kRingCells = kRing0 + kRing1 + kRing2,
+    kX0 = 56,              // plot area: the full height between the stock title bar (28) and the strip (425); x = kX0 is the y axis
     kX1 = 716,
+    kLinPx = (kX1 - kX0) * 3 / 4, // the linear part: the right 75 % of the width (495 px)
     kY0 = 36,              // 0 dB
     kY1 = 418,             // the floor
     kPanelY0 = 30,
@@ -48,12 +51,15 @@ enum
     kSilent = -96 * 64,    // dB x 64 of a zero level
     kMaxCols = 200,        // points per line, at most (3.3 px apart)
     kMinCols = 16,
-    kScales = 7,
-    kDefaultScale = 2,     // right half = 4 s
+    kScales = 4,
+    kDefaultScale = 2,     // linear 8 s, total 30 s
     kDefaultBudget = 5400  // bytes of display list for the view (8172 - 400 margin - title bar 600 - strip / labels 1720)
 };
 constexpr float kBlockMs = 128000.0f / 44100.0f; // 2.9025 ms
-static const uint8_t kHalfSpanS[kScales] = { 2, 3, 4, 6, 10, 20, 60 };
+// time scales (jog wheel): the age at the 75 % point (end of the linear part) and the age at the left axis (the line is cut there)
+static const uint16_t kLinMs[kScales] = { 2000, 4000, 8000, 16000 };
+static const uint32_t kTotalMs[kScales] = { 8000, 15000, 30000, 60000 };
+constexpr uint32_t kMaxTotalMs = 60000;
 
 // 1/64 dB of a level (0 .. 32768 = full scale; larger values clamp to +6 dB). Table of 6.02 dB * log2(1 + i / 64) * 64, linear
 // interpolation: error < 0.06 dB. Called per bucket, never per sample.
@@ -93,133 +99,125 @@ inline uint16_t levelOfRms(float rms)
 
 struct Bucket
 {
-    uint16_t avg;  // weighted average of the merged block peaks
-    uint16_t mx;   // maximum of the merged block peaks
-    uint32_t span; // blocks covered
+    uint16_t avg;  // average of the block peaks in it
+    uint16_t mx;   // maximum of the block peaks in it
+    uint32_t span; // blocks covered (the unfinished newest bucket of a tier: fewer than the tier's span)
 };
 
-// History of one lane. Index 0 = newest. at(i).span never decreases with i; the sum of the spans is the number of blocks pushed
-// (minus the 0..7 of the unfinished finest bucket). Levels: the finest kLinCap buckets are a ring; the coarser ones (spans 16 ... ) keep at
-// most kPerLevel buckets per level, a fifth makes the two oldest of the level merge into one of the next level.
+// History of one lane: kTiers rings of buckets with absolute alignment (see the header). Nothing is merged: a finished bucket never
+// changes. n_ counts the pushed blocks (uint32: 140 hours; the view is re-armed whenever the Master module is entered).
 class Cascade
 {
   public:
     Cascade() { reset(); }
     void reset()
     {
-        rn_ = rh_ = cn_ = 0;
-        pn_ = 0;
-        ps_ = 0;
-        pm_ = 0;
+        n_ = 0;
+        for (int t = 0; t < kTiers; t++)
+        {
+            sum_[t] = 0;
+            mx_[t] = 0;
+        }
     }
-    int count() const { return rn_ + cn_; }
-    const Bucket& at(int i) const { return i < rn_ ? r_[(rh_ + i) % kRing] : c_[i - rn_]; }
+    uint32_t blocks() const { return n_; }
+    static uint32_t span(int t) { return (uint32_t)kGroup << (kTierShift * t); }
+    static uint32_t cap(int t) { return t == 0 ? (uint32_t)kRing0 : (t == 1 ? (uint32_t)kRing1 : (uint32_t)kRing2); }
     // one audio block peak (0 .. 65535)
     void push(uint16_t v)
     {
-        ps_ += v;
-        if (v > pm_) pm_ = v;
-        if (++pn_ < kGroup) return;
-        Bucket b;
-        b.avg = (uint16_t)((ps_ + kGroup / 2) / kGroup);
-        b.mx = pm_;
-        b.span = kGroup;
-        pn_ = 0;
-        ps_ = 0;
-        pm_ = 0;
-        rh_ = (uint16_t)((rh_ + kRing - 1) % kRing);
-        r_[rh_] = b;
-        rn_++;
-        if (rn_ > kLinCap) // the two oldest finest buckets become one bucket of level 1
+        for (int t = 0; t < kTiers; t++)
         {
-            const Bucket older = at(rn_ - 1), newer = at(rn_ - 2);
-            rn_ = (uint16_t)(rn_ - 2);
-            addCoarse(merged(newer, older));
+            sum_[t] += v;
+            if (v > mx_[t]) mx_[t] = v;
+        }
+        n_++;
+        for (int t = 0; t < kTiers; t++)
+        {
+            const uint32_t s = span(t);
+            if (n_ == 0 || (n_ & (s - 1)) != 0) continue;
+            Cell& c = cell_[base(t) + (((n_ / s) - 1) & (cap(t) - 1))];
+            c.avg = (uint16_t)((sum_[t] + s / 2) / s);
+            c.mx = mx_[t];
+            sum_[t] = 0;
+            mx_[t] = 0;
         }
     }
+    // Bucket j of tier t (absolute index, covers blocks j*S .. (j+1)*S - 1). The newest one (j = blocks / S) is the unfinished bucket.
+    // false: not held (older than the ring, or no block in it yet).
+    bool get(int t, uint32_t j, Bucket& b) const
+    {
+        const uint32_t s = span(t), f = n_ / s;
+        if (j == f)
+        {
+            const uint32_t c = n_ - f * s;
+            if (!c) return false;
+            b.avg = (uint16_t)((sum_[t] + c / 2) / c);
+            b.mx = mx_[t];
+            b.span = c;
+            return true;
+        }
+        if (j > f || f - j > cap(t)) return false;
+        const Cell& c = cell_[base(t) + (j & (cap(t) - 1))];
+        b.avg = c.avg;
+        b.mx = c.mx;
+        b.span = s;
+        return true;
+    }
+    uint32_t oldestHeld(int t) const // first finished bucket still in the ring
+    {
+        const uint32_t f = n_ / span(t);
+        return f > cap(t) ? f - cap(t) : 0;
+    }
+    // age in blocks that tier t covers completely (the start of its oldest held bucket, counted back from now)
+    uint32_t reach(int t) const { return n_ - oldestHeld(t) * span(t); }
+    // bucket of tier t that holds the block of the given age (0 = the newest block); a must be < blocks()
+    uint32_t indexAt(int t, uint32_t a) const { return (n_ - 1 - a) / span(t); }
 
   private:
-    enum { kRing = kLinCap + 2 };
-    static int levelOf(uint32_t span)
+    struct Cell
     {
-        int l = 0;
-        uint32_t s = span / kGroup;
-        while (s > 1 && l < kLevels - 1)
-        {
-            s >>= 1;
-            l++;
-        }
-        return l;
-    }
-    static Bucket merged(const Bucket& a, const Bucket& b) // a newer, b older
-    {
-        Bucket m;
-        const uint64_t sa = a.span, sb = b.span;
-        m.avg = (uint16_t)(((uint64_t)a.avg * sa + (uint64_t)b.avg * sb + (sa + sb) / 2) / (sa + sb));
-        m.mx = a.mx > b.mx ? a.mx : b.mx;
-        m.span = (uint32_t)(sa + sb);
-        return m;
-    }
-    void addCoarse(const Bucket& m)
-    {
-        for (int i = cn_; i > 0; i--) c_[i] = c_[i - 1];
-        c_[0] = m;
-        cn_++;
-        int i = 0;
-        for (int l = 1; l < kLevels; l++)
-        {
-            const int s = i;
-            while (i < cn_ && levelOf(c_[i].span) == l) i++;
-            const int cnt = i - s;
-            if (cnt > kPerLevel)
-            {
-                c_[s + cnt - 2] = merged(c_[s + cnt - 2], c_[s + cnt - 1]);
-                for (int k = s + cnt - 1; k + 1 < cn_; k++) c_[k] = c_[k + 1];
-                cn_--;
-                i = s + cnt - 2; // the merged bucket is the newest of the next level
-            }
-        }
-    }
-    Bucket r_[kRing];
-    Bucket c_[kCoarseMax + 2];
-    uint16_t rn_, rh_, cn_;
-    uint8_t pn_;
-    uint32_t ps_;
-    uint16_t pm_;
+        uint16_t avg, mx;
+    };
+    static uint32_t base(int t) { return t == 0 ? 0u : (t == 1 ? (uint32_t)kRing0 : (uint32_t)(kRing0 + kRing1)); }
+    Cell cell_[kRingCells];
+    uint32_t sum_[kTiers];
+    uint16_t mx_[kTiers];
+    uint32_t n_;
 };
 
 // ---- time axis ------------------------------------------------------------------------------------------------------------------
-// Share of the straight line in age(u) = H * (c * u + (1 - c) * u^6) so that age(0.5) is the chosen span of the right half.
-inline float linShare(int scale)
+// p = distance from the right edge in pixels (0 .. W). p <= kLinPx: age = a * p (linear, a = linear age / 495 px). Beyond: with d = p - kLinPx
+// age = lin + a * d + b * d^2 (same slope a at the 75 % point), b chosen so that the left edge (p = W) is the total age of the scale.
+inline float tailB(int scale)
 {
-    const float s = (float)kHalfSpanS[scale] * 1000.0f / (float)kHorizonMs;
-    float c = (s - 1.0f / 64.0f) / (0.5f - 1.0f / 64.0f);
-    return c < 0 ? 0 : (c > 1 ? 1 : c);
+    const float D = (float)(kX1 - kX0 - kLinPx);
+    const float a = (float)kLinMs[scale] / (float)kLinPx;
+    return ((float)kTotalMs[scale] - (float)kLinMs[scale] - a * D) / (D * D);
 }
 // u = 0 (now, right edge) .. 1 (left edge) -> age in ms
 inline float ageMsOfU(float u, int scale)
 {
-    const float c = linShare(scale), u2 = u * u;
-    return (float)kHorizonMs * (c * u + (1.0f - c) * u2 * u2 * u2);
+    const float p = u * (float)(kX1 - kX0), a = (float)kLinMs[scale] / (float)kLinPx;
+    if (p <= (float)kLinPx) return a * p;
+    const float d = p - (float)kLinPx;
+    return (float)kLinMs[scale] + a * d + tailB(scale) * d * d;
 }
-inline float uOfAge(float ageMs, int scale)
-{
-    float lo = 0.0f, hi = 1.0f;
-    for (int i = 0; i < 24; i++)
-    {
-        const float mid = 0.5f * (lo + hi);
-        if (ageMsOfU(mid, scale) < ageMs) lo = mid;
-        else hi = mid;
-    }
-    return 0.5f * (lo + hi);
-}
-// x of a point of the given age (ms, 0 = newest = right edge). Monotone; the px per ms shrink with the age (compression); ages beyond the
-// horizon sit at the left edge.
+// x of a point of the given age (ms, 0 = newest = right edge). Monotone, continuous slope; the total age and anything older sit at the left axis.
 inline float xOfAge(float ageMs, int scale = kDefaultScale)
 {
     if (ageMs <= 0.0f) return (float)kX1;
-    if (ageMs >= (float)kHorizonMs) return (float)kX0;
-    return (float)kX1 - (float)(kX1 - kX0) * uOfAge(ageMs, scale);
+    if (ageMs >= (float)kTotalMs[scale]) return (float)kX0;
+    const float a = (float)kLinMs[scale] / (float)kLinPx;
+    float p;
+    if (ageMs <= (float)kLinMs[scale])
+        p = ageMs / a;
+    else
+    {
+        const float r = ageMs - (float)kLinMs[scale], b = tailB(scale);
+        const float d = b < 1e-9f ? r / a : (sqrtf(a * a + 4.0f * b * r) - a) / (2.0f * b);
+        p = (float)kLinPx + d;
+    }
+    return (float)kX1 - p;
 }
 
 // header values (set by the entry point from the sequencer)
@@ -249,8 +247,13 @@ class Follower
     }
     uint32_t blocks() const { return blocks_; }
     const Cascade& lane(int i) const { return lane_[i]; }
-    uint16_t newest(int i) const { return lane_[i].count() ? lane_[i].at(0).avg : (uint16_t)0; }
-    // the jog wheel: one step per call towards a longer (+) / shorter (-) almost linear part
+    uint16_t newest(int i) const
+    {
+        const Cascade& c = lane_[i];
+        Bucket b;
+        return c.blocks() && c.get(0, c.indexAt(0, 0), b) ? b.avg : (uint16_t)0;
+    }
+    // the jog wheel: one step per call towards a longer (+) / shorter (-) time scale
     void jog(int delta)
     {
         const int s = scale + (delta > 0 ? 1 : (delta < 0 ? -1 : 0));
@@ -265,25 +268,14 @@ class Follower
     uint32_t blocks_;
 };
 
-// Start block (age) of every bucket, newest first; st[n] = total. Returns n. All lanes advance together, so one lane gives the geometry.
-inline int geometry(const Cascade& c, uint32_t* st)
-{
-    uint32_t t = 0;
-    const int n = c.count();
-    for (int i = 0; i < n; i++)
-    {
-        st[i] = t;
-        t += c.at(i).span;
-    }
-    st[n] = t;
-    return n;
-}
-
-// Does a lane have anything above the floor (silent lanes are not drawn)
+// Does a lane have anything above the floor (silent lanes are not drawn): looked up in the oldest tier, which holds the whole displayed range
 inline bool audible(const Cascade& c)
 {
-    for (int i = 0; i < c.count(); i++)
-        if (dbx64(c.at(i).mx) > kFloorDb * 64) return true;
+    const int t = kTiers - 1;
+    const uint32_t f = c.blocks() / Cascade::span(t);
+    Bucket b;
+    for (uint32_t j = c.oldestHeld(t); j <= f; j++)
+        if (c.get(t, j, b) && dbx64(b.mx) > kFloorDb * 64) return true;
     return false;
 }
 
@@ -297,14 +289,14 @@ inline int colsFor(int budget, int lines, int lanes)
 }
 
 // One line of one lane over M columns (left .. right x = kX0 .. kX1, equal spacing). which 0 = maxima, 1 = averages. Writes (x, y) pairs from
-// the oldest column to the newest at the right edge; returns the number of points (columns older than the history are left out).
-inline int resample(const Cascade& cs, const uint32_t* st, int n, int cols, int which, int scale, int16_t* o)
+// the oldest column to the newest at the right edge; returns the number of points. A column is drawn when its exact age (from the time axis)
+// lies inside the history, so the line starts where the history starts and ends exactly at the left axis (x = kX0) at the latest.
+inline int resample(const Cascade& cs, int cols, int which, int scale, int16_t* o)
 {
-    int16_t dbv[kMaxBuckets];
-    for (int k = 0; k < n; k++) dbv[k] = (int16_t)dbx64(which ? cs.at(k).avg : cs.at(k).mx);
+    const uint32_t P = cs.blocks();
     const float bpms = 1.0f / kBlockMs;
     const float du = 1.0f / (float)(cols - 1);
-    int cnt = 0, k = 0;
+    int cnt = 0;
     float dbs[kMaxCols];
     int16_t xs[kMaxCols];
     for (int j = cols - 1; j >= 0; j--) // newest first
@@ -312,20 +304,31 @@ inline int resample(const Cascade& cs, const uint32_t* st, int n, int cols, int 
         const float u = (float)(cols - 1 - j) * du; // j = cols - 1 -> u = 0 (now)
         const float uL = u - 0.5f * du < 0 ? 0.0f : u - 0.5f * du, uR = u + 0.5f * du > 1 ? 1.0f : u + 0.5f * du;
         const float aL = ageMsOfU(uL, scale) * bpms, aR = ageMsOfU(uR, scale) * bpms, ac = ageMsOfU(u, scale) * bpms;
-        if (aL >= (float)st[n]) break; // older than the history
-        while (k + 1 < n && (float)st[k + 1] <= aL) k++;
-        int k1 = k;
-        while (k1 + 1 < n && (float)st[k1 + 1] < aR) k1++;
+        if (!(ac < (float)P)) break; // older than the history
+        // the tier: the coarsest one whose buckets are at most half a column wide, a coarser one where the finer ring does not reach back
+        const float colSpan = aR - aL;
+        int t = 0;
+        while (t + 1 < kTiers && 2.0f * (float)Cascade::span(t + 1) <= colSpan) t++;
+        while (t + 1 < kTiers && aR > (float)cs.reach(t)) t++;
+        const uint32_t S = Cascade::span(t);
+        const uint32_t jn = cs.indexAt(t, (uint32_t)aL);
+        uint32_t jo = cs.indexAt(t, aR >= (float)(P - 1) ? P - 1 : (uint32_t)aR);
+        const uint32_t jmin = cs.oldestHeld(t);
+        if (jo < jmin) jo = jmin;
+        if (jn < jo) break; // older than the oldest tier holds
+        Bucket b;
         float db;
-        if (k1 > k) // several buckets in this column: the average (weighted by the overlap) or the maximum of them
+        if (jn > jo) // several buckets in this column: the average (weighted by the overlap) or the maximum of them
         {
             float sum = 0, wsum = 0;
             uint32_t mx = 0;
-            for (int q = k; q <= k1; q++)
+            for (uint32_t q = jo; q <= jn; q++)
             {
-                const float lo = (float)st[q] > aL ? (float)st[q] : aL, hi = (float)st[q + 1] < aR ? (float)st[q + 1] : aR;
+                if (!cs.get(t, q, b)) continue;
+                const float e = (float)(P - q * S), s = e - (float)b.span;
+                const float lo = s > aL ? s : aL, hi = e < aR ? e : aR;
                 const float w = hi > lo ? hi - lo : 0.0f;
-                const uint32_t v = which ? cs.at(q).avg : cs.at(q).mx;
+                const uint32_t v = which ? b.avg : b.mx;
                 sum += w * (float)v;
                 wsum += w;
                 if (v > mx) mx = v;
@@ -334,15 +337,17 @@ inline int resample(const Cascade& cs, const uint32_t* st, int n, int cols, int 
         }
         else // inside one bucket: linear between the centres of it and its neighbour (smooth contour, no steps)
         {
-            const float c0 = 0.5f * ((float)st[k] + (float)st[k + 1]);
-            const int nb = ac < c0 ? k - 1 : k + 1;
-            db = (float)dbv[k];
-            if (nb >= 0 && nb < n)
+            if (!cs.get(t, jn, b)) break;
+            const float e = (float)(P - jn * S), c0 = e - 0.5f * (float)b.span;
+            db = (float)dbx64(which ? b.avg : b.mx);
+            const uint32_t nj = ac < c0 ? jn + 1 : jn - 1; // newer / older neighbour
+            Bucket nb;
+            if ((ac < c0 || jn > 0) && cs.get(t, nj, nb))
             {
-                const float c1 = 0.5f * ((float)st[nb] + (float)st[nb + 1]);
-                float t = (ac - c0) / (c1 - c0);
-                t = t < 0 ? 0 : (t > 1 ? 1 : t);
-                db += ((float)dbv[nb] - db) * t;
+                const float ne = (float)(P - nj * S), c1 = ne - 0.5f * (float)nb.span;
+                float tt = c1 != c0 ? (ac - c0) / (c1 - c0) : 0.0f;
+                tt = tt < 0 ? 0 : (tt > 1 ? 1 : tt);
+                db += ((float)dbx64(which ? nb.avg : nb.mx) - db) * tt;
             }
         }
         const float lowest = (float)((kFloorDb - 6) * 64);
@@ -386,9 +391,28 @@ inline int resample(const Cascade& cs, const uint32_t* st, int n, int cols, int 
     return w;
 }
 
-static const int kMarkMs[5] = { 1000, 5000, 15000, 60000, 120000 };
-static const char* const kMarkText[5] = { "1s", "5s", "15s", "60s", "2m" };
+static const int kMarkMs[7] = { 1000, 2000, 4000, 8000, 15000, 30000, 60000 };
+static const char* const kMarkText[7] = { "1s", "2s", "4s", "8s", "15s", "30s", "60s" };
 static const int kDbLines[5] = { 0, -12, -24, -36, -48 };
+constexpr int kMarkGap = 40; // px between two time marks (and to the right edge)
+
+// the time marks of a scale: candidates up to the total age, thinned so that labels do not touch; the total age (the left axis) is always one
+inline int timeMarks(int scale, int* idx, int* xs)
+{
+    int n = 0, lastX = kX1;
+    for (int i = 0; i < 7 && (uint32_t)kMarkMs[i] <= kTotalMs[scale]; i++)
+    {
+        const int x = (int)(xOfAge((float)kMarkMs[i], scale) + 0.5f);
+        const bool total = (uint32_t)kMarkMs[i] == kTotalMs[scale];
+        if (!total && (x > lastX - kMarkGap || x < kX0 + kMarkGap)) continue;
+        if (total && n && x > lastX - kMarkGap) n--; // the left axis label wins over a neighbour that is too close
+        idx[n] = i;
+        xs[n] = x;
+        n++;
+        lastX = x;
+    }
+    return n;
+}
 
 // C as in pitchtrace::draw (color, width, rect, lines, strip, textPhase, text, finish)
 template <class C> void draw(C& c, const Follower& f, const char* title, const char* hint)
@@ -401,7 +425,7 @@ template <class C> void draw(C& c, const Follower& f, const char* title, const c
 
     // grid: horizontal dB lines, vertical time marks (the marks follow the chosen time scale)
     c.width(16);
-    int16_t seg[10 * 4];
+    int16_t seg[12 * 4];
     int n = 0;
     for (int i = 1; i < 5; i++)
     {
@@ -410,18 +434,20 @@ template <class C> void draw(C& c, const Follower& f, const char* title, const c
         for (int k = 0; k < 4; k++) seg[n * 4 + k] = s[k];
         n++;
     }
-    for (int i = 0; i < 5; i++)
+    int mIdx[7], mX[7];
+    const int marks = timeMarks(sc, mIdx, mX);
+    for (int i = 0; i < marks; i++)
     {
-        const int16_t x = (int16_t)(xOfAge((float)kMarkMs[i], sc) + 0.5f);
+        const int16_t x = (int16_t)mX[i];
         const int16_t s[4] = { x, kY0, x, kY1 };
         for (int k = 0; k < 4; k++) seg[n * 4 + k] = s[k];
         n++;
     }
     c.color(seqpal::kGrid);
     c.lines(seg, n);
-    const int16_t edge[8] = { kX0, kY0, kX1, kY0, kX1, kY0, kX1, kY1 }; // 0 dB line and the "now" edge
+    const int16_t edge[12] = { kX0, kY0, kX1, kY0, kX1, kY0, kX1, kY1, kX0, kY0, kX0, kY1 }; // 0 dB line, the "now" edge and the y axis (the cut)
     c.color(seqpal::kGridHi);
-    c.lines(edge, 2);
+    c.lines(edge, 3);
 
     // scale labels, inside the plot at the bottom (no footer band)
     c.color(seqpal::dim(seqpal::kText));
@@ -430,18 +456,17 @@ template <class C> void draw(C& c, const Follower& f, const char* title, const c
         snprintf(buf, sizeof buf, "%d", kDbLines[i]);
         c.text(kX0 - 6, i == 0 ? kY0 + 7 : (i == 4 ? kY1 - 7 : yOf((float)kDbLines[i])), 1, 2 | 4, buf);
     }
-    for (int i = 0; i < 5; i++)
-        c.text((int)(xOfAge((float)kMarkMs[i], sc) + 0.5f), kY1 - 22, 1, 1 | 2, kMarkText[i]);
+    for (int i = 0; i < marks; i++)
+        c.text(mX[i], kY1 - 22, 1, 1 | 2, kMarkText[mIdx[i]]);
     c.text(kX1 - 4, kY1 - 22, 1, 4 | 2, "now");
 
     // the lines: resampled at M columns; maxima dim behind (pass 0), averages on top (pass 1); the master neutral and without a second line
-    uint32_t st[kMaxBuckets + 1];
-    const int nb = geometry(f.lane(0), st);
+    const bool history = f.lane(0).blocks() >= 2 * (uint32_t)kGroup;
     int lines = 0, lanes = 0;
     bool aud[kLanes];
     for (int ln = 0; ln < kLanes; ln++)
     {
-        aud[ln] = nb >= 2 && audible(f.lane(ln));
+        aud[ln] = history && audible(f.lane(ln));
         if (aud[ln])
         {
             lanes++;
@@ -455,7 +480,7 @@ template <class C> void draw(C& c, const Follower& f, const char* title, const c
         for (int ln = 0; ln < kLanes; ln++)
         {
             if (!aud[ln] || (ln == kTracks && pass == 0)) continue;
-            const int cnt = resample(f.lane(ln), st, nb, cols, pass, sc, o);
+            const int cnt = resample(f.lane(ln), cols, pass, sc, o);
             const uint32_t col = ln == kTracks ? seqpal::kTitle : seqpal::trackColor(ln);
             c.color(pass == 0 ? seqpal::faint(col) : col);
             c.width(pass == 0 ? 10 : (ln == kTracks ? 12 : 16));
@@ -487,7 +512,7 @@ template <class C> void draw(C& c, const Follower& f, const char* title, const c
     // header, inside the plot: title and the jog label at the top left; pattern / BPM / hint in the free corner of the right column
     c.color(seqpal::kTitle);
     c.text(kX0 + 8, kY0 + 12, 1, 2, title);
-    snprintf(buf, sizeof buf, "Jog: time scale, right half = %d s", (int)kHalfSpanS[sc]);
+    snprintf(buf, sizeof buf, "Jog: time scale, linear %d s / total %d s", (int)(kLinMs[sc] / 1000), (int)(kTotalMs[sc] / 1000));
     c.color(seqpal::kText);
     c.text(kX0 + 150, kY0 + 12, 1, 2, buf);
     const Info& in = f.info;

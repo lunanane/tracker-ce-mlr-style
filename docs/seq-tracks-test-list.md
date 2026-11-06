@@ -802,6 +802,19 @@ block peak cascade, time axis (all seven jog scales), resampled contour lines, p
 | Same, turn the jog wheel | The label "Jog: time scale, right half = N s" | One step per click through 2 / 3 / 4 / 6 / 10 / 20 / 60 s (default 4); the time marks and the contours move accordingly; 60 s is a straight line. The wheel does nothing else while the view is open. |
 | Open and close the amp view a few times, leave the page | CPU on Config | The per block taps run only while the view is open; the CPU number returns to its old value after closing. |
 
+## 11k. v0.4.1: amplitude view time axis (plan 015 V, Original Tracker only)
+Host-checked (`make test`): axis (right 75 % linear, continuous slope, cut at the y axis), tiered history, smooth scrolling, device feed replay (30 s to the
+left axis, aligned afterwards), FIFO stages. Nothing below is device-tested yet.
+
+| Do | Look at | Expected |
+|---|---|---|
+| Master key, page 3 "Global Mixer 3/3", play a loop, after about 10 s press **Amp view** | The graph | The history is **there at once** (about 10 s of lines from the right edge), no empty start. (The history runs from entering the Master module, also while the view is closed.) |
+| Keep the view open with the loop playing | The left end of the lines | The lines grow to the left at constant speed and reach the **y axis (x = left edge) after 30 s**; from then on the left end stays exactly on the axis, the curve is **cut** there (nothing left of it); it does not slowly drift for minutes. |
+| Same | Right 75 % of the width | A hit moves left **smoothly at constant speed** (no stepping, no speed-up) until 75 % of the distance (8 s with the default scale); the left quarter compresses smoothly without a kink; marks 1s / 2s / 4s / 8s / 15s / 30s, "30s" at the axis. |
+| Turn the jog wheel | The label "Jog: time scale, linear N s / total M s" | Four steps: 2 s / 8 s, 4 s / 15 s, 8 s / 30 s (default), 16 s / 60 s; the marks and lines follow; the screen fills after the total time. |
+| Leave the Master module and come back | The view | History starts again from empty (the taps are detached outside the module). |
+| Open and close the view; Config page CPU readout | CPU | About 1.5 % more while the Master module is open with eight tracks playing, independent of the view being shown; back to the old value when you leave the module. |
+
 ## 11k. v0.3.7: PolySynth wavetables (plan 015 W, Original Tracker only)
 Host-checked (`make test`, `test_plinky.cpp`): old Shape values bit-exact, table lookup / mip selection / aliasing, no clicks over the table range, texts,
 sidecar range, morph across tables. Nothing below is device-tested yet.
