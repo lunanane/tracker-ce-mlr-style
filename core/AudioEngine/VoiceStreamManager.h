@@ -62,6 +62,34 @@ class VoiceStreamManager
                                      const int16_t* preCacheBase,
                                      uint32_t preCacheFrames);
 
+    // plan 022 P2: the same value as getSample, the common cases inline (RAM pre-cache hit; ring hit once the fade-in is over); the
+    // rest (fade-in, loop-wrap cache, a miss and its bookkeeping) goes to the out-of-line function. Bit-identical to getSample.
+    __attribute__((always_inline)) inline int16_t getSampleFast(int voiceIdx,
+                                                                int channel,
+                                                                uint32_t absFrame,
+                                                                const int16_t* preCacheBase,
+                                                                uint32_t preCacheFrames)
+    {
+        if (absFrame < preCacheFrames && preCacheBase != nullptr)
+        {
+            return preCacheBase[absFrame];
+        }
+        if ((uint32_t)voiceIdx < (uint32_t)kVoiceCount)
+        {
+            const VoiceStreamState& v = voices[voiceIdx];
+            if (v.active && v.fadeInCounter >= 32)
+            {
+                const uint32_t vStart = v.validStartFrame;
+                const uint32_t vEnd = v.validEndFrame;
+                if (absFrame >= vStart && absFrame < vEnd)
+                {
+                    return ring_[voiceIdx][(channel > 0 && v.isStereo) ? 1 : 0][absFrame & kRingMask];
+                }
+            }
+        }
+        return getSample(voiceIdx, channel, absFrame, preCacheBase, preCacheFrames);
+    }
+
     // Per-instrument EXTERNAL_RAM metadata accessors
     char* getInstrumentStreamPath(int instrIdx);
     const char* getInstrumentStreamPath(int instrIdx) const;
@@ -153,8 +181,14 @@ class VoiceStreamManager
         uint32_t expectedGeneration = 0;
     };
 
+    // ring buffers of the voices (EXTERNAL_RAM, defined in VoiceStreamManager.cpp)
+    static int16_t ring_[kVoiceCount][kMaxChannels][kRingFrames];
+
     FileSystem* fs = nullptr;
     VoiceStreamState voices[kVoiceCount];
+    // plan 022 P2: MLR cue cache / waveform work (seqmlr::idle) only at quiet moments of the stream
+    volatile uint32_t jumpSeq_ = 0;  // counts note-ons of streamed voices (audio context)
+    uint32_t seenJumpSeq_ = 0, quietUntilMs_ = 0, lastIdleMs_ = 0;
     AsyncJob currentJob;
 
     bool readInstrumentFramesBlockingImpl(int instrIdx, int channel, uint32_t startFrame, uint32_t frameCount, int16_t* dest);

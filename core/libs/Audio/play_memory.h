@@ -346,7 +346,7 @@ class AudioPlayMemory : public AudioStream
         {
             return currentStartAddress[absFrame];
         }
-        return voiceStreamManager.getSample((uint8_t)voiceIndex,
+        return voiceStreamManager.getSampleFast((uint8_t)voiceIndex, // plan 022 P2: inline ring hit, same value as getSample
                                             (uint8_t)channel,
                                             absFrame,
                                             (const int16_t*)currentStartAddress,

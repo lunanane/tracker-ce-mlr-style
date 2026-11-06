@@ -163,6 +163,15 @@ void update()
     waveWork(false, 24); // resident samples are read from RAM right here; streamed columns wait for idle()
 }
 
+// plan 022 P2: one cue is read in pieces of kPiece frames (one call of idle() each, which the stream manager spaces out and holds back
+// while voices jump), so a blocking read never keeps the main loop - and the next stream refill - waiting for a whole 6 KB cue.
+namespace
+{
+constexpr uint32_t kPiece = 1024;
+int s_fIdx = -1, s_fCh = 0;
+uint32_t s_fDone = 0, s_fFrame = 0, s_fHash = 0;
+} // namespace
+
 void idle()
 {
     int idx, ch;
@@ -170,14 +179,26 @@ void idle()
     if (s_cache.next(s_curBank, s_prefetch, s_from, idx, ch))
     {
         const Cache::Entry& e = s_cache.entry(idx);
+        if (idx != s_fIdx || ch != s_fCh || e.frame != s_fFrame || e.hash != s_fHash)
+        {
+            s_fIdx = idx; // a new entry (or one that went stale meanwhile): start it from the top
+            s_fCh = ch;
+            s_fFrame = e.frame;
+            s_fHash = e.hash;
+            s_fDone = 0;
+        }
+        const uint32_t n = (kFrames - s_fDone) < kPiece ? (kFrames - s_fDone) : kPiece;
         seqcpu::readKind(seqcpu::R_CUE);
-        if (voiceStreamManager.readInstrumentFramesBlocking(e.instr, ch, e.frame, kFrames, s_pool[idx][ch]))
-            s_cache.loaded(idx, ch);
-        else
-            s_cache.loaded(idx, ch); // an unreadable file: the (zero filled) cue is still better than asking again and again
+        const bool ok = voiceStreamManager.readInstrumentFramesBlocking(e.instr, ch, e.frame + s_fDone, n, s_pool[idx][ch] + s_fDone);
+        s_fDone += n;
+        if (!ok || s_fDone >= kFrames)
+        {
+            s_cache.loaded(idx, ch); // done (an unreadable file too: the zero filled cue is still better than asking again and again)
+            s_fIdx = -1;
+        }
         return;
     }
-    waveWork(true, 2);
+    waveWork(true, 1);
 }
 
 bool findCue(int instr, uint32_t startFrame, int channel, const int16_t*& addr, uint32_t& frames)
