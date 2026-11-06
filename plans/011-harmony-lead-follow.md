@@ -18,3 +18,12 @@ Proposal (owner reviewed the first two decisions):
 - Owner decision 2: the project key does **NOT** drive the stock Tracker pad scale — the Tracker stays chromatic
   (outboard gear has its own scale quantisation and the live set relies on stock chromatic mode). Only the new
   sequencer parts receive quantisation.
+
+## Owner idea 2026-11-06 (not decided — owner is thinking it over)
+"If we could set a lead sequencer in a scene, and even if we record into the tracker with it, could that clip overwrite
+the global scale whenever it's playing?" — Feasible: record the lead's harmony WITH the clip (per pattern×track
+metadata, like the Play 1x clip modes in seqclips.bin): level 1 = root + scale per clip; level 2 = per-step chord
+(a recorded harmony lane, a few bytes per step). When the clip plays (launch, scene, song) it publishes that key /
+chord to the global harmony bus even without a running sequencer; followers quantise to it; stock tracks stay
+chromatic. Open rules: conflict between two playing lead clips (last launched vs scene), clips without harmony keep or
+reset the key, manual edit/clear of a clip's key.
