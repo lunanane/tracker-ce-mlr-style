@@ -1203,6 +1203,8 @@ struct CountCtx
         ensure(0);
         const int n = (int)strlen(s);
         words += n * 2 + 2; // glyphs beyond x 511 need CELL + VERTEX2F
+        textWords += n * 2 + 2;
+        fifoText += 12 + (n + 1 + 3) / 4 * 4; // v0.3.9: what the FT81x command FIFO gets for CMD_TEXT
         texts++;
         const int w = n * (font >= 5 ? 6 : 9), h = font >= 5 ? 13 : 17; // font 5 is the small one (12 px)
         const int x0 = (opt & seqcut::TX_CENTERX) ? x - w / 2 : ((opt & seqcut::TX_RIGHT) ? x - w : x);
@@ -1212,6 +1214,9 @@ struct CountCtx
     }
     void finish() { ensure(0); }
     int bytes() const { return words * 4; }
+    // v0.3.9: bytes of the co-processor command FIFO (one stage = one burst, must stay under 4092; seqTraceStages.h)
+    int textWords = 0, fifoText = 0;
+    int fifo() const { return (words - textWords) * 4 + fifoText; }
 };
 
 seqcut::LaneModel worstLanes(bool rec)
@@ -1262,6 +1267,8 @@ static void test_lane_draw_budget_and_bounds()
     hw.finish();
     printf("  lanes worst case: %d words (%d bytes), %d rects, %d discs, %d texts; playheads %d bytes\n", w.words, w.bytes(), w.rects,
            w.discs, w.texts, hw.bytes());
+    printf("  lanes worst case command FIFO: %d bytes, playheads %d (one stage each, FIFO 4096)\n", w.fifo(), hw.fifo());
+    CHECK(w.fifo() <= 3840 && hw.fifo() <= 3840); // v0.3.9: one display stage is one burst into the 4 KB FT81x command FIFO
     CHECK(w.bytes() <= 4800);                 // the whole frame (every control on screen) must stay below 8172 bytes of display list
     CHECK(hw.bytes() <= 500);                 // the part that is redrawn up to 25 times per second
     CHECK(w.bytes() + hw.bytes() <= 5200);
@@ -2104,6 +2111,23 @@ static void test_mlr_screen_budget_and_bounds()
         CHECK(w.minY >= 30 && w.maxY <= 424 && w.minX >= 0 && w.maxX <= 800);
         CHECK(hw.minY >= 30 && hw.maxY <= 424 && hw.minX >= 0 && hw.maxX <= 800);
         if (w.bytes() > worst) worst = w.bytes();
+        printf("  MLR screen scene %d: command FIFO %d bytes static, %d playheads (one stage each, FIFO 4096)\n", scene, w.fifo(), hw.fifo());
+        CHECK(hw.fifo() <= 3840); // v0.3.9: one display stage is one burst into the 4 KB FT81x command FIFO
+        {   // v0.3.9: the lanes control draws in two stages (seqTraceStages.h BatchSplit): each stage fits the FIFO, together the whole screen
+            CountCtx s0, s1;
+            tracestage::BatchSplit<CountCtx> c0(s0, 0), c1(s1, 1);
+            drawMlr(c0, m);
+            c0.finish();
+            s0.finish();
+            drawMlr(c1, m);
+            c1.finish();
+            s1.finish();
+            const int f0 = s0.fifo() + 4 + 4 + (s1.rects + s1.discs ? 8 : 0), f1 = s1.fifo() + 4 + 8 + 4; // + CMD_DLSTART, SAVE / RESTORE, reopened batch
+            printf("  MLR screen scene %d: stages %d + %d FIFO bytes (dropped %d)\n", scene, f0, f1, c0.dropped);
+            CHECK(f0 <= 3840 && f1 <= 3840 && c0.dropped == 0 && c1.dropped == 0);
+            CHECK(s0.rects + s1.rects == w.rects && s0.discs + s1.discs == w.discs && s0.texts + s1.texts == w.texts);
+            CHECK(c0.used[0] == c1.used[0] && c0.used[1] == c1.used[1]); // both stages cut at the same command
+        }
         if (hw.bytes() > worstHeads) worstHeads = hw.bytes();
     }
     CHECK(worst <= 5400 && worstHeads <= 500 && worst + worstHeads <= 5800);   // the whole frame must stay below 8172 bytes of display list
