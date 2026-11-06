@@ -35,3 +35,16 @@ convenient toggle when chopping up anyway." (The Model:Samples repo is private a
 ## Limits
 CPU: one stereo buffer write per block + repeat read with optional resampling/filter — measure (readout).
 Display: keep every stage ≤ 3840 FIFO bytes (seqTraceStages / fifostub tests).
+
+## Owner decisions + reference (2026-11-06)
+- Reference: the owner's Model:Samples spec `port/mfx2/SPEC.md` §2.3 / §7 "Beat repeat" in github.com/lunanane/custom-modelsamples
+  (private; read-only clone in the session scratchpad `custom_modelsamples`): INTERVAL (1/32 … 4 bars), CHANCE, GRID,
+  GATE, VARIATION (v/10 chance of a grid up to 1 + v/4 positions away), PITCH DECAY (100 = −3 semitones per repeat,
+  floor −2 oct, resampled read, rhythm stays on grid), DECAY (100 = −6 dB per repeat), modes MIX / INSERT / GATE,
+  momentary pads force a repeat at the pad's grid while held; trigger and slice starts sample-exact to the clock.
+- **Capture on press (as the spec)**: no continuous recording; the slice is captured when the repeat triggers (audio
+  passes meanwhile) and repeated from then on — zero cost while idle; ring = one slice (2 × 131072 stereo frames, tempo
+  clamped 30 … 300 BPM) → supersedes "instant from the past" above.
+- **Default mode MIX** (repeats on top of the running audio); INSERT and GATE selectable on a pad.
+- Master insert as planned; the CUT/MLR page toggle (screen button 4 "BeatRpt") switches the pads to beat-repeat
+  control; the spec's knob params (interval, chance, variation, gate, decay, pitch decay) on pads/rows as in this plan.
