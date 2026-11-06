@@ -980,6 +980,19 @@ Host tests: `core/seqtest/test_plinky4.inc` (defaults = old sound, subs and thei
 | 10 | Morph between two patterns with different Type / Chorus / Filter env | stepped values (Type, Wave) switch at the start, the others glide |
 | 11 | Save, reload, open in v0.3.8 | all values return; v0.3.8 plays PolySynth 1 with the old parameters |
 
+## 11p. v0.4.2: performance pass (plan 022, Original Tracker only)
+**P1 - the CPU monitor.** Config > Info > **CPU monitor** (no long press, no dev-mode file needed). Close: button 8. The numbers are per half second window, in percent of the audio block (2.90 ms); stage times are measured only while the monitor is open (the audio interrupt then times every stream with the cycle counter), everything else is counted all the time.
+
+| # | Action | Expected |
+|---|---|---|
+| 1 | Open Config > Info > CPU monitor on an idle project | "Audio ISR avg ..%" (a few percent), the stage lines near 0, "Main loop" a few ms with several hundred passes/s, no ring misses |
+| 2 | Start playback of a project with samples | Samples resident / streamed, voice chain and mixers rise; "other" stays small (a few percent): if "other" is large something is not accounted for, report it |
+| 3 | Play PolySynth chords | PolySynth rises; "PolySynth voices: cap N, sounding M" follows the notes, the own readout is about the PolySynth stage |
+| 4 | Switch the Delay / Reverb sends on, then Beat repeat | Delay, reverb and beat repeat stages show their cost; the reverb stage drops to ~0 when it has been silent for about a second |
+| 5 | MLR with a streamed long loop: jump around with the pads | "MLR jumps ... restarts / reused / from cue", "SD stream jobs/s", "Blocking reads" (cue cache / waveform / stream fill) and "ring misses" (underruns, the click you hear) |
+| 6 | Leave the monitor (Close) and use the page normally | No extra load: with the monitor closed only the ISR total, the main loop pass time and the stream counters are touched |
+| 7 | **Report to the owner** (same rehearsal as before): the screen of the MLR streaming case and of the synth case, before/after each later build | See the per item list at the end of plan 022 |
+
 ## 12. Stock behaviour (never enter Play mode, Session or the fader page)
 | Press | Expected |
 |---|---|

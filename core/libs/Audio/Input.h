@@ -9,6 +9,7 @@ class AudioInputStream : public AudioStream
     AudioInputStream()
       : AudioStream(0, NULL)
     {
+        perfStage = seqcpu::S_IO; // plan 022 P1
     }
 
     virtual void update();

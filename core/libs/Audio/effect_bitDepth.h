@@ -8,6 +8,7 @@ class AudioBitDepth : public AudioStream
     AudioBitDepth(void)
       : AudioStream(1, &inputQueueArray)
     {
+        perfStage = seqcpu::S_VOICE; // plan 022 P1
     }
     virtual void update(void);
     void setBitDepth(uint8_t val);

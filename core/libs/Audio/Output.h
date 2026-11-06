@@ -9,6 +9,7 @@ class AudioOutputStream : public AudioStream
     AudioOutputStream()
       : AudioStream(4, inputQueueArray)
     {
+        perfStage = seqcpu::S_IO; // plan 022 P1
         begin();
     }
 

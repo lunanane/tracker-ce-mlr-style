@@ -1,5 +1,6 @@
 #include "Platform.h"
 #include "Profiler.h"
+#include "seqCpu.h" // plan 022 P1
 #include "configEditor.h"
 #include "configEditor/configEditor.h"
 #include "configEditor/configMenuActions.h"
@@ -100,6 +101,12 @@ void cConfigEditor::update()
         CE->platform->runBootloader(CE->ptrfirmwareNamesList[CE->selectedConfigListPosition]);
     }
 
+    if (cpuMonitorOpen && cpuRefresh > 500)
+    {
+        cpuRefresh = 0;
+        refreshCpuMonitor();
+    }
+
     if (interfaceGlobals.devMode && infoDataRefresh > 1000)
     {
         infoDataRefresh = 0;
@@ -167,6 +174,11 @@ void cConfigEditor::start(uint32_t options)
 
 void cConfigEditor::stop()
 {
+    if (cpuMonitorOpen) // plan 022 P1: left the page with the monitor open (a module key)
+    {
+        cpuMonitorOpen = false;
+        seqcpu::setActive(false);
+    }
     updateConfig(true);
 
     songTimer.show();
@@ -983,6 +995,11 @@ void cConfigEditor::openCredits()
 
 void cConfigEditor::closeCredits()
 {
+    if (cpuMonitorOpen)
+    {
+        cpuMonitorOpen = false;
+        seqcpu::setActive(false); // back to the plain counters
+    }
 
     songTimer.show();
 
@@ -998,6 +1015,28 @@ static void functCloseCreditsButton()
 void openCreditsAction()
 {
     CE->openCredits();
+}
+
+// plan 022 P1: the same screen as About, with the CPU numbers (refreshed twice a second while it is open)
+void cConfigEditor::openCpuMonitor()
+{
+    cpuMonitorOpen = true;
+    seqcpu::setActive(true);
+    cpuRefresh = 0;
+    seqcpu::buildText(cpuText, sizeof(cpuText));
+    openCredits();
+}
+
+void cConfigEditor::refreshCpuMonitor()
+{
+    seqcpu::buildText(cpuText, sizeof(cpuText));
+    display.setControlText(creditsTextBox, cpuText);
+    display.refreshControl(creditsTextBox);
+}
+
+void openCpuMonitorAction()
+{
+    CE->openCpuMonitor();
 }
 
 void startFileTransferMode()

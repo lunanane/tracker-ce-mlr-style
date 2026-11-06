@@ -42,6 +42,7 @@ class AudioAmplifier : public AudioStream
       , multiplier((int32_t)kUnityGain)
       , previousMultiplier((int32_t)kUnityGain)
     {
+        perfStage = seqcpu::S_VOICE; // plan 022 P1
     }
     virtual void update(void);
     void gain(float gain)

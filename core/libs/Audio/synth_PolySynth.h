@@ -10,6 +10,7 @@ class PolySynth : public AudioStream
     PolySynth(void)
       : AudioStream(0, NULL)
     {
+        perfStage = seqcpu::S_SYNTH; // plan 022 P1
     }
 
     void init(Synth* trackerSynth);

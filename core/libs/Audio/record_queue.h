@@ -40,6 +40,7 @@ class AudioRecordQueue : public AudioStream
       , tail(0)
       , enabled(0)
     {
+        perfStage = seqcpu::S_IO; // plan 022 P1
     }
     void begin(void)
     {

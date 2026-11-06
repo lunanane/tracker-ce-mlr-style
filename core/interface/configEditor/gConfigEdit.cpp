@@ -620,7 +620,7 @@ void cConfigEditor::showResetConfigPopout()
 void cConfigEditor::showCreditsControls()
 {
     titleBar->show();
-    titleBar->setTitle("Info");
+    titleBar->setTitle(cpuMonitorOpen ? "CPU monitor" : "Info");
 
     display.setControlHide(blankSpaceCover[0]);
     display.setControlHide(blankSpaceCover[1]);
@@ -639,7 +639,7 @@ void cConfigEditor::showCreditsControls()
     display.setControlHide(bgLabel);
 
     display.setControlShow(creditsTextBox);
-    display.setControlText(creditsTextBox, creditsText);
+    display.setControlText(creditsTextBox, cpuMonitorOpen ? cpuText : creditsText);
     display.refreshControl(creditsTextBox);
 
     display.synchronizeRefresh();

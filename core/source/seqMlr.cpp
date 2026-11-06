@@ -1,5 +1,6 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 #include "seqMlr.h"
+#include "seqCpu.h" // plan 022 P1
 #include "seqCueCache.h"
 #include "VoiceStreamManager.h"
 #include "mtSequencer.h"
@@ -72,6 +73,7 @@ void buildColumn(uint8_t slot, uint8_t col, int base, int ss, bool allowSd)
         else if (n && mem.isStreamed && allowSd)
         {
             static int16_t buf[256];
+            seqcpu::readKind(seqcpu::R_WAVE);
             if (voiceStreamManager.readInstrumentFramesBlocking(instr, 0, frame, n, buf))
                 seqcut::waveFold(w, buf, (int)n, 1);
         }
@@ -168,6 +170,7 @@ void idle()
     if (s_cache.next(s_curBank, s_prefetch, s_from, idx, ch))
     {
         const Cache::Entry& e = s_cache.entry(idx);
+        seqcpu::readKind(seqcpu::R_CUE);
         if (voiceStreamManager.readInstrumentFramesBlocking(e.instr, ch, e.frame, kFrames, s_pool[idx][ch]))
             s_cache.loaded(idx, ch);
         else

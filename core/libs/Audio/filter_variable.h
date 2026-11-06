@@ -47,6 +47,7 @@ class AudioFilterStateVariable : public AudioStream
     AudioFilterStateVariable()
       : AudioStream(1, inputQueueArray)
     {
+        perfStage = seqcpu::S_VOICE; // plan 022 P1
         frequency(1000.0f);
         resonance(0.707f);
         state_inputprev = 0;

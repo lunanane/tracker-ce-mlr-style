@@ -13,6 +13,7 @@ class AudioEffectShortDelay : public AudioStream
     AudioEffectShortDelay(void)
       : AudioStream(1, inputQueueArray)
     {
+        perfStage = seqcpu::S_DELAY; // plan 022 P1
         blockUpdate();
     }
 

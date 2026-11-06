@@ -157,6 +157,7 @@ class VoiceStreamManager
     VoiceStreamState voices[kVoiceCount];
     AsyncJob currentJob;
 
+    bool readInstrumentFramesBlockingImpl(int instrIdx, int channel, uint32_t startFrame, uint32_t frameCount, int16_t* dest);
     bool startAsyncSectorReadForJob(uint8_t channel);
     void completeChannelTransfer();
     bool scheduleNextVoiceJob(bool synchronous);

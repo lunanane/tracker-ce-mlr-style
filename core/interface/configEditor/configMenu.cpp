@@ -56,7 +56,7 @@ cMenuGroup menuFirmware(menuBase, "Firmware", 4);
 cMenuGroup menuFunctionButtons(menuBase, "Fn buttons binding", 8);
 #endif
 
-cMenuGroup menuCredits(menuBase, "Info", 4);
+cMenuGroup menuCredits(menuBase, "Info", 5);
 
 // elementy/////////
 
@@ -309,6 +309,7 @@ const strItemTypeActionButton creditsSetup{ openCreditsAction, nullptr };
 const strItemTypeActionButton manual1Setup{ openManual1Action, nullptr };
 const strItemTypeActionButton manual2Setup{ openManual2Action, nullptr };
 const strItemTypeActionButton manual3Setup{ openManual3Action, nullptr };
+const strItemTypeActionButton cpuMonitorSetup{ openCpuMonitorAction, nullptr }; // plan 022 P1
 
 cMenuItem melOpenCredits(menuCredits,
                          "About",
@@ -333,6 +334,12 @@ cMenuItem melOpenManual3(menuCredits,
                          nullptr,
                          menuTypeItemActionButton,
                          &manual3Setup);
+
+cMenuItem melOpenCpuMonitor(menuCredits,
+                            "CPU monitor",
+                            nullptr,
+                            menuTypeItemActionButton,
+                            &cpuMonitorSetup);
 
 
 //==================================================================================================================================================================

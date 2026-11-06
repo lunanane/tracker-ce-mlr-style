@@ -14,6 +14,7 @@ class MonoToStereo : public AudioStream
     MonoToStereo(void)
       : AudioStream(1, inputQueueArray)
     {
+        perfStage = seqcpu::S_VOICE; // plan 022 P1
         for (int channel = 0; channel < Channel::channelCount; channel++)
         {
             multiplier[channel] = (int32_t)kUnityGain;
