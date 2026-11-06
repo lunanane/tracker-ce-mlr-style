@@ -2,6 +2,7 @@
 // Host tests of the v0.2 step-0 foundations: performance-mode owner mask, panic latch, deferred-write gate, tap refusal, the
 // generic sidecar frame and the per-clip play-mode table (plan 005).
 #include "seqClipsLogic.h"
+#include "seqPalette.h"
 #include "seqMemLogic.h"
 #include "seqModLogic.h"
 #include "seqSidecarLogic.h"
@@ -254,7 +255,9 @@ static void test_scene_flags()
 {
     using namespace seqclips;
     ClipModes m;
-    CHECK(kVersion == 2 && kVersionV1 == 1 && kPayloadV2 == kPayload + 32 && kFileMax == kPayloadV2 + seqsidecar::kOverhead);
+    // plan 017: the file is version 3 now (scene colours); the v2 layout stays readable (tested in test_scene_colors)
+    CHECK(kVersion == 3 && kVersionV2 == 2 && kVersionV1 == 1 && kPayloadV2 == kPayload + 32 && kPayloadV3 == kPayloadV2 + 128 &&
+          kFileMax == kPayloadV3 + seqsidecar::kOverhead);
     // default: every scene loops
     for (int p = 0; p <= 255; p++)
         CHECK(!m.playNext((uint8_t)p));
@@ -272,20 +275,20 @@ static void test_scene_flags()
     CHECK(m.setPlayNext(7, true) && m.mode(7, 0) == CLIP_LOOP);
     CHECK(m.setMode(7, 0, CLIP_PLAY1X) && m.playNext(7));
 
-    // round trip (version 2)
+    // round trip (version 3 since plan 017)
     m.clear();
     m.setPlayNext(3, true);
     m.setPlayNext(255, true);
     m.setMode(4, 2, CLIP_PLAY1X);
     uint8_t buf[kFileMax + 8];
     size_t n = m.save(buf, sizeof(buf));
-    CHECK(n == (size_t)kFileMax && buf[4] == 2);
+    CHECK(n == (size_t)kFileMax && buf[4] == 3);
     CHECK(m.save(buf, kFileMax - 1) == 0);
     ClipModes r;
     bool newer = true;
     CHECK(r.load(buf, n, &newer) && !newer && r.playNext(3) && r.playNext(255) && !r.playNext(4) && r.mode(4, 2) == CLIP_PLAY1X && r.hash() == m.hash());
-    // a version 2 frame with a v1 length (or the other way round) is refused
-    uint8_t payload[kPayloadV2];
+    // a version 3 frame with a v1 length (or the other way round) is refused
+    uint8_t payload[kPayloadV3];
     memset(payload, 0, sizeof(payload));
     uint8_t fb[kFileMax];
     ClipModes q;
@@ -294,6 +297,8 @@ static void test_scene_flags()
     size_t sn = seqsidecar::frameWrite(fb, sizeof(fb), kMagic, kVersion, payload, kPayload);
     CHECK(!q.load(fb, sn) && q.hash() == hq);
     sn = seqsidecar::frameWrite(fb, sizeof(fb), kMagic, kVersionV1, payload, kPayloadV2);
+    CHECK(!q.load(fb, sn) && q.hash() == hq);
+    sn = seqsidecar::frameWrite(fb, sizeof(fb), kMagic, kVersion, payload, kPayloadV2); // version 3 needs the colour table too
     CHECK(!q.load(fb, sn) && q.hash() == hq);
     // a v0.2 file (version 1, clip modes only) loads with every scene flag = Loop and keeps its clip modes
     memset(payload, 0, sizeof(payload));
@@ -304,16 +309,16 @@ static void test_scene_flags()
     CHECK(v1.load(fb, sn) && v1.mode(1, 0) == CLIP_PLAY1X);
     for (int p = 0; p <= 255; p++)
         CHECK(!v1.playNext((uint8_t)p));
-    // ... and saves as version 2 from then on
+    // ... and saves as version 3 from then on
     n = v1.save(buf, sizeof(buf));
-    CHECK(n == (size_t)kFileMax && buf[4] == 2 && r.load(buf, n) && r.mode(1, 0) == CLIP_PLAY1X && !r.playNext(3));
+    CHECK(n == (size_t)kFileMax && buf[4] == 3 && r.load(buf, n) && r.mode(1, 0) == CLIP_PLAY1X && !r.playNext(3));
     // reserved mode values in a version 2 frame are cleaned to Loop too, the scene flags beside them survive
     memset(payload, 0, sizeof(payload));
     payload[0] = 0x0E;                 // clip (1,0) = 2, clip (1,1) = 3 (reserved)
     payload[1] = 0x01;                 // clip (1,4) = Play 1x
     payload[kPayload + 0] = 0x04;      // scene flag of pattern 3
-    sn = seqsidecar::frameWrite(fb, sizeof(fb), kMagic, kVersion, payload, kPayloadV2);
-    CHECK(sn == (size_t)kFileMax && q.load(fb, sn));
+    sn = seqsidecar::frameWrite(fb, sizeof(fb), kMagic, kVersionV2, payload, kPayloadV2); // (a version 2 file: before plan 017 this was kVersion)
+    CHECK(sn == (size_t)kPayloadV2 + seqsidecar::kOverhead && q.load(fb, sn));
     CHECK(q.mode(1, 0) == CLIP_LOOP && q.mode(1, 1) == CLIP_LOOP && q.mode(1, 4) == CLIP_PLAY1X && q.playNext(3) && !q.playNext(1));
     n = q.save(buf, sizeof(buf));
     ClipModes q3;
@@ -321,7 +326,7 @@ static void test_scene_flags()
     // a version 2 file with the unused bit 255 set: the bit is dropped, the other flags stay
     memset(payload, 0, sizeof(payload));
     payload[kPayload + 31] = 0x80 | 0x01; // bit 255 (no pattern) + pattern 249
-    sn = seqsidecar::frameWrite(fb, sizeof(fb), kMagic, kVersion, payload, kPayloadV2);
+    sn = seqsidecar::frameWrite(fb, sizeof(fb), kMagic, kVersionV2, payload, kPayloadV2);
     CHECK(q.load(fb, sn) && q.playNext(249) && !q.playNext(250));
     // a newer version is reported and nothing is loaded
     uint16_t hq2 = q.hash();
@@ -331,6 +336,122 @@ static void test_scene_flags()
     n = m.save(buf, sizeof(buf));
     buf[kPayload + 20] ^= 1;
     CHECK(!q.load(buf, n) && q.hash() == hq2);
+}
+
+// ---- plan 017: scene colours (seqclips.bin version 3), palette, Song page stepping and marks ----
+static void test_scene_colors()
+{
+    using namespace seqclips;
+    ClipModes m;
+    for (int p = 0; p <= 255; p++)
+        CHECK(m.color((uint8_t)p) == 0);
+    uint16_t h0 = m.hash();
+    CHECK(!m.anyNonDefault());
+    // set / unchanged / out of range / nibble neighbours / table ends
+    CHECK(m.setColor(1, 3) && m.color(1) == 3 && m.color(2) == 0 && m.anyNonDefault() && m.hash() != h0);
+    CHECK(!m.setColor(1, 3));
+    CHECK(m.setColor(2, 8) && m.color(2) == 8 && m.color(1) == 3 && m.color(3) == 0);
+    CHECK(m.setColor(255, 15) && m.color(255) == 15 && m.color(254) == 0);
+    CHECK(!m.setColor(0, 1) && m.color(0) == 0 && !m.setColor(1, 16));
+    CHECK(m.setColor(1, 0) && m.color(1) == 0 && m.color(2) == 8);
+    // the colour does not touch the clip modes or the scene flags, and the other way round
+    CHECK(m.setPlayNext(2, true) && m.setMode(2, 0, CLIP_PLAY1X) && m.color(2) == 8 && m.playNext(2) && m.mode(2, 0) == CLIP_PLAY1X);
+    CHECK(m.setColor(2, 0) && m.setColor(255, 0) && m.playNext(2) && m.mode(2, 0) == CLIP_PLAY1X);
+    m.clear();
+    CHECK(!m.anyNonDefault() && m.hash() == h0);
+
+    // round trip
+    m.setColor(1, 1);
+    m.setColor(2, 4);
+    m.setColor(130, 7);
+    m.setColor(255, 8);
+    m.setPlayNext(5, true);
+    m.setMode(9, 1, CLIP_PLAY1X);
+    uint8_t buf[kFileMax + 8];
+    size_t n = m.save(buf, sizeof(buf));
+    CHECK(n == (size_t)kFileMax && buf[4] == 3 && m.save(buf, kFileMax - 1) == 0);
+    ClipModes r;
+    bool newer = true;
+    CHECK(r.load(buf, n, &newer) && !newer && r.hash() == m.hash());
+    CHECK(r.color(1) == 1 && r.color(2) == 4 && r.color(130) == 7 && r.color(255) == 8 && r.color(3) == 0 && r.playNext(5) && r.mode(9, 1) == CLIP_PLAY1X);
+    // bad CRC in the colour table: nothing changes
+    ClipModes q;
+    q.setColor(9, 2);
+    uint16_t hq = q.hash();
+    buf[kPayloadV2 + seqsidecar::kHeader + 5] ^= 1;
+    CHECK(!q.load(buf, n) && q.hash() == hq);
+    buf[kPayloadV2 + seqsidecar::kHeader + 5] ^= 1;
+
+    // old files: version 1 (clip modes) and version 2 (+ scene flags) load with every colour = none, even over set colours
+    uint8_t fb[kFileMax];
+    uint8_t payload[kPayloadV3];
+    memset(payload, 0, sizeof(payload));
+    payload[0] = 0x01;                 // clip (1,0) = Play 1x
+    payload[kPayload + 0] = 0x04;      // scene flag of pattern 3 (version 2 only)
+    size_t sn = seqsidecar::frameWrite(fb, sizeof(fb), kMagic, kVersionV1, payload, kPayload);
+    q.setColor(9, 2);
+    CHECK(q.load(fb, sn) && q.mode(1, 0) == CLIP_PLAY1X && q.color(9) == 0 && !q.playNext(3));
+    sn = seqsidecar::frameWrite(fb, sizeof(fb), kMagic, kVersionV2, payload, kPayloadV2);
+    q.setColor(9, 2);
+    CHECK(q.load(fb, sn) && q.mode(1, 0) == CLIP_PLAY1X && q.playNext(3));
+    for (int p = 0; p <= 255; p++)
+        CHECK(q.color((uint8_t)p) == 0);
+    // ... and they save as version 3 with the colours kept from then on
+    q.setColor(40, 6);
+    n = q.save(buf, sizeof(buf));
+    CHECK(n == (size_t)kFileMax && buf[4] == 3 && r.load(buf, n) && r.color(40) == 6 && r.playNext(3) && r.mode(1, 0) == CLIP_PLAY1X);
+    // the unused high nibble of the last colour byte (a nonexistent pattern 256) is dropped; colours of a later palette survive as numbers
+    memset(payload, 0, sizeof(payload));
+    payload[kPayloadV2 + 127] = 0xF3;      // pattern 255 = 3, nibble of "pattern 256" = 15
+    payload[kPayloadV2 + 0] = 0xC0;        // pattern 2 = 12 (not in this palette, kept in the table)
+    sn = seqsidecar::frameWrite(fb, sizeof(fb), kMagic, kVersion, payload, kPayloadV3);
+    CHECK(q.load(fb, sn) && q.color(255) == 3 && q.color(2) == 12 && q.color(1) == 0);
+    n = q.save(buf, sizeof(buf));
+    CHECK(r.load(buf, n) && r.hash() == q.hash());
+    // a newer version is reported and nothing is loaded
+    uint16_t hq2 = q.hash();
+    sn = seqsidecar::frameWrite(fb, sizeof(fb), kMagic, kVersion + 1, payload, kPayloadV3);
+    CHECK(!q.load(fb, sn, &newer) && newer && q.hash() == hq2);
+
+    // ---- palette ----
+    using namespace seqpal;
+    CHECK(kSceneColors == 9 && kSceneColors <= (int)kColorMax + 1);
+    CHECK(sceneRgb(0) == 0 && sceneRgb(1) == kNote && sceneRgb(2) == kInstr && sceneRgb(3) == kFx1 && sceneRgb(4) == kFx2);
+    CHECK(sceneRgb(kSceneColors) == 0 && sceneRgb(15) == 0);
+    for (uint8_t i = 1; i < kSceneColors; i++)
+    {
+        CHECK(sceneRgb(i) != 0 && sceneRgb(i) <= 0xFFFFFF && sceneName(i)[0] != 0);
+        for (uint8_t j = (uint8_t)(i + 1); j < kSceneColors; j++)
+            CHECK(sceneRgb(i) != sceneRgb(j) && strcmp(sceneName(i), sceneName(j)) != 0);
+        // reads on the dark theme: clearly brighter than the background of the views, and the tint of a clip / scene cell is distinct per colour
+        int lum = (int)((sceneRgb(i) >> 16) & 0xFF) * 3 + (int)((sceneRgb(i) >> 8) & 0xFF) * 6 + (int)(sceneRgb(i) & 0xFF);
+        CHECK(lum / 10 > 100);
+        CHECK(sceneClipFill(i) != kCellNotes && sceneCellFill(i, 0) != kSceneEmpty);
+        CHECK(sceneCellFill(i, 0) != sceneCellFill(i, 1) && sceneCellFill(i, 1) != sceneCellFill(i, 2));
+        CHECK(sceneClipFill(i) != kCellPlaying && sceneCellFill(i, 2) != kScenePlaying);
+    }
+    CHECK(strcmp(sceneName(0), "None") == 0 && strcmp(sceneName(200), "None") == 0);
+    // stepping (the Song page's Color control): forward through the palette and None, backwards the same, wrapping
+    uint8_t c = 0;
+    for (int i = 1; i <= kSceneColors; i++)
+    {
+        c = sceneStep(c, 1);
+        CHECK(c == (uint8_t)(i % kSceneColors));
+    }
+    CHECK(c == 0 && sceneStep(0, -1) == kSceneColors - 1 && sceneStep(kSceneColors - 1, 1) == 0);
+    CHECK(sceneStep(sceneStep(5, 1), -1) == 5 && sceneStep(5, 7) == 6 && sceneStep(5, -3) == 4); // any wheel value is one step
+    CHECK(sceneStep(12, 1) == 1 && sceneStep(12, -1) == kSceneColors - 1);                         // a stored colour of a later palette starts over
+
+    // ---- slot marks of the Song page list: flags and colour pack into one byte ----
+    using namespace seqsong;
+    for (int pn = 0; pn < 2; pn++)
+        for (int qu = 0; qu < 2; qu++)
+            for (uint8_t col = 0; col < 16; col++)
+            {
+                uint8_t mk = slotMarks(pn != 0, qu != 0, col);
+                CHECK(markFlags(mk) == (uint8_t)(pn | (qu << 1)) && markColor(mk) == col);
+            }
+    CHECK(slotMarks(false, false, 0) == 0); // no mark at all = nothing drawn, as before
 }
 
 // ---- plan 006: song advance decision (loop by default), latch, queue ----
@@ -415,6 +536,7 @@ int main()
     test_sidecar_frame();
     test_clip_modes();
     test_scene_flags();
+    test_scene_colors();
     test_song_advance();
     printf("seqmod: %d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;

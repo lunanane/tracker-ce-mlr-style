@@ -382,6 +382,7 @@ void ClipsLayer::build(clipgrid::View& v, clipgrid::Marks& m)
         bool queuedScene = seqSessionQueuedScene() == pattern;
         v.scene[r] = queuedScene ? CELL_QUEUED : (pattern == own ? CELL_PLAYING : (masks[r] ? CELL_NOTES : CELL_EMPTY));
         v.sceneFlags[r] = seqClipPlayNext(pattern) ? F_ONEX : 0; // the scene's own "play next" flag (plan 006)
+        v.sceneColor[r] = seqClipSceneColor(pattern);            // the scene's colour set on the Song page (plan 017)
     }
 
     // ---- animated marks

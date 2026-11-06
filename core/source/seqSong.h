@@ -27,5 +27,7 @@ uint8_t seqSongQueuedSlot();        // 1-based slot shown as queued, 0 = none
 bool seqSongSlotStays();         // song mode and the playing slot loops (no play next): the song is like a pattern loop
 bool seqSongPlayNext(uint8_t slot); // the scene of that slot is flagged "play next"
 void seqSongSetPlayNext(uint8_t slot, bool on); // writes the per-pattern flag (same one the launcher shows)
-uint8_t seqSongSlotMarks(uint16_t slot);   // for the slot list of the Song page: bit 0 = play next, bit 1 = queued
+uint8_t seqSongSlotMarks(uint16_t slot);   // for the slot list of the Song page: bit 0 = play next, bit 1 = queued, bits 4-7 = scene colour
+uint8_t seqSongColor(uint8_t slot);        // plan 017: scene colour (seqpal index, 0 = none) of the slot's pattern
+uint8_t seqSongStepColor(uint8_t slot, int dir); // steps the colour of the slot's pattern through the palette (wraps); returns the new index
 void seqSongPanic();                // Stop: the queue and the last-step answer are dropped

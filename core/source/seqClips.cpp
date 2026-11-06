@@ -1,6 +1,7 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 #include "seqClips.h"
 #include "seqSidecar.h"
+#include "seqPalette.h"
 #include "seqModLogic.h"
 #include "seqTracksLogic.h"
 #include "mtSequencer.h"
@@ -12,7 +13,7 @@ extern Sequencer sequencer;
 
 namespace
 {
-// 1 KB + 32 bytes of scene flags, in the OCRAM bss section (the Plus has only ~5 KB of external RAM left)
+// 1 KB + 32 bytes of scene flags + 128 bytes of scene colours, in the OCRAM bss section (the Plus has only ~5 KB of external RAM left)
 OCRAM_BSS_SECTION seqclips::ClipModes s_modes;
 
 seqlogic::DirtyGate s_dirty;     // a mode changed: the workspace autosave is asked for once the transport stopped
@@ -59,6 +60,18 @@ bool seqClipPlayNext(uint8_t pattern)
 void seqClipSetPlayNext(uint8_t pattern, bool on)
 {
     if (s_modes.setPlayNext(pattern, on))
+        s_dirty.mark();
+}
+
+uint8_t seqClipSceneColor(uint8_t pattern)
+{
+    uint8_t c = s_modes.color(pattern);
+    return c < seqpal::kSceneColors ? c : (uint8_t)0; // a value of a later palette reads as none
+}
+
+void seqClipSetSceneColor(uint8_t pattern, uint8_t color)
+{
+    if (color < seqpal::kSceneColors && s_modes.setColor(pattern, color))
         s_dirty.mark();
 }
 

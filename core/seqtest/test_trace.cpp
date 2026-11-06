@@ -622,6 +622,35 @@ static void test_launcher_budgets()
     CHECK(mc <= kMarksBudget);
     // grid + marks stay well under the 8 KB frame
     CHECK(worst.cost + mc < 8000 - 800);
+    // plan 017: scene colours. Twelve rows in eight different colours, everything else as the worst case above: the budget still holds
+    // (the optional parts drop first), and the mandatory part grows by the colour batches only
+    {
+        View c = w;
+        for (uint8_t r = 0; r < kVisRows; r++)
+            c.sceneColor[r] = (uint8_t)(1 + r % 8);
+        GridPlan wc = planGrid(c);
+        printf("  launcher grid, 12 coloured rows (8 colours): worst %u bytes (budget %d)\n", (unsigned)wc.cost, (int)kGridBudget);
+        CHECK(wc.cost <= kGridBudget && worst.cost <= kGridBudget);
+        CHECK(sceneColorCost(c) == 8 * 5 * kBatchCost + 12 * kRectCost);
+        CHECK(wc.cost + mc < 8000 - 800);
+        // no colours: nothing is added (the plain look costs what it did)
+        CHECK(sceneColorCost(w) == 0 && sceneColorCost(v) == 0);
+        // the mandatory part with every colour in use still leaves the optional parts room in a normal view
+        View n;
+        memset(&n, 0, sizeof n);
+        for (uint8_t r = 0; r < kVisRows; r++)
+            n.sceneColor[r] = (uint8_t)(1 + r % 8);
+        GridPlan pn = planGrid(n);
+        CHECK(pn.outlines && pn.notches && pn.stops && pn.cost == empty.cost + sceneColorCost(n));
+        // one colour on one row
+        View o;
+        memset(&o, 0, sizeof o);
+        o.sceneColor[3] = 2;
+        CHECK(sceneColorCost(o) == 5 * kBatchCost + kRectCost && planGrid(o).cost == empty.cost + sceneColorCost(o));
+        // an out-of-palette value from a later file is counted at most as one more batch group, never beyond the budget
+        o.sceneColor[4] = 15;
+        CHECK(planGrid(o).cost <= kGridBudget);
+    }
     // launcher palette: distinct states
     CHECK(seqpal::kCellEmpty != seqpal::kCellNotes && seqpal::kCellNotes != seqpal::kCellPlaying && seqpal::kSceneNotes != seqpal::kSceneEmpty);
 }

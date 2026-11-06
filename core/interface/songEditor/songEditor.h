@@ -144,6 +144,8 @@ class cSongEditor : public ModuleBase
     uint8_t lastSeenPos = 0;    // playlist position seen by update(): a change ends browsing
     uint32_t busyUntil = 0;     // "Busy" shown on screen button 2 until then (seqNowMs)
     bool hintShown = false;
+    bool colorPicked = false;   // plan 017: the Color step was used during this hold of screen button 1 (the label keeps showing the colour name)
+    uint8_t holdKey = 0;        // what screen button 1's label shows while it is held (0 = the stock label)
 
     uint8_t isDeletingInProgress = 0;
     uint8_t deleteElementMax;

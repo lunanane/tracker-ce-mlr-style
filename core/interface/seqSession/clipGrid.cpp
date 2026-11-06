@@ -50,6 +50,8 @@ void outline(int x0, int y0, int x1, int y1)
     API_END();
 }
 
+bool tinted(uint8_t color) { return color > 0 && color < seqpal::kSceneColors; }
+
 bool fillsAs(uint8_t cell, uint8_t cls) // cls 0 empty, 1 notes (also queued / follow), 2 playing
 {
     uint8_t c = cell == CELL_PLAYING ? 2 : (cell == CELL_EMPTY ? 0 : 1);
@@ -104,20 +106,54 @@ void cSeqClipGrid::update()
     API_LINE_WIDTH(16);
     const uint32_t fill[3] = { seqpal::kCellEmpty, seqpal::kCellNotes, seqpal::kCellPlaying };
     const uint32_t sceneFill[3] = { seqpal::kSceneEmpty, seqpal::kSceneNotes, seqpal::kScenePlaying };
+    // Scene colours (plan 017): the clips with content of a coloured row and its scene cell are drawn in the row colour's own batches instead
+    // (same rects, so the cost is the batches only); empty and playing clips keep their state fills so playing stays readable.
     for (uint8_t cls = 0; cls < 3; cls++)
     {
         API_COLOR(fill[cls]);
         API_BEGIN(RECTS);
         for (uint8_t r = 0; r < kVisRows; r++)
             for (uint8_t t = 0; t < kTracks; t++)
-                if (fillsAs(v.cell[r][t], cls))
+                if (fillsAs(v.cell[r][t], cls) && !(cls == 1 && tinted(v.sceneColor[r])))
                     rect(colX(t), rowY(r), colX(t) + kCellW - 1, rowY(r) + kCellH - 1);
         API_END();
         API_COLOR(sceneFill[cls]);
         API_BEGIN(RECTS);
         for (uint8_t r = 0; r < kVisRows; r++)
-            if (fillsAs(v.scene[r], cls))
+            if (fillsAs(v.scene[r], cls) && !tinted(v.sceneColor[r]))
                 rect(sceneX(), rowY(r), sceneX() + kSceneW - 1, rowY(r) + kCellH - 1);
+        API_END();
+    }
+    for (uint8_t c = 1; c < seqpal::kSceneColors; c++)
+    {
+        bool any = false;
+        for (uint8_t r = 0; r < kVisRows; r++)
+            any = any || v.sceneColor[r] == c;
+        if (!any)
+            continue;
+        API_COLOR(seqpal::sceneClipFill(c));
+        API_BEGIN(RECTS);
+        for (uint8_t r = 0; r < kVisRows; r++)
+            if (v.sceneColor[r] == c)
+                for (uint8_t t = 0; t < kTracks; t++)
+                    if (fillsAs(v.cell[r][t], 1))
+                        rect(colX(t), rowY(r), colX(t) + kCellW - 1, rowY(r) + kCellH - 1);
+        API_END();
+        for (uint8_t cls = 0; cls < 3; cls++)
+        {
+            API_COLOR(seqpal::sceneCellFill(c, cls));
+            API_BEGIN(RECTS);
+            for (uint8_t r = 0; r < kVisRows; r++)
+                if (v.sceneColor[r] == c && fillsAs(v.scene[r], cls))
+                    rect(sceneX(), rowY(r), sceneX() + kSceneW - 1, rowY(r) + kCellH - 1);
+            API_END();
+        }
+        // a 2 px line in the colour under the whole row (in the gap between the rows)
+        API_COLOR(seqpal::sceneRgb(c));
+        API_BEGIN(RECTS);
+        for (uint8_t r = 0; r < kVisRows; r++)
+            if (v.sceneColor[r] == c)
+                rect(colX(0), rowY(r) + kCellH + 1, sceneX() + kSceneW - 1, rowY(r) + kCellH + 2);
         API_END();
     }
 
