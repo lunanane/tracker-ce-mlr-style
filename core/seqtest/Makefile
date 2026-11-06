@@ -7,7 +7,7 @@ HRSRC = ../../seqgen/hr.cpp ../../seqgen/hr_stab.cpp ../../seqgen/hr_arpseq.cpp 
 GLUE = ../source/seqTracksCore.cpp ../source/seqCut.cpp ../interface/seqSession/cutLayer.cpp
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
 
-.PHONY: test clean preview amp-preview pitch-preview
+.PHONY: test clean preview amp-preview pitch-preview grid-preview
 test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE) build/seq_plinky_tests$(EXE) build/seq_trace_tests$(EXE) build/seq_amp_tests$(EXE) build/seq_warp_tests$(EXE)
 	build/seq_cpu_tests$(EXE)
 	build/seq_glue_tests$(EXE)
@@ -20,7 +20,7 @@ test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tes
 	build/seq_amp_tests$(EXE)
 	build/seq_warp_tests$(EXE)
 
-build/seq_glue_tests$(EXE): test_main.cpp test_session.cpp test_cut.inc ../source/seqSessionLogic.h ../source/seqClipsLogic.h ../source/seqCut.h ../source/seqCutLogic.h ../interface/seqSession/cutLayer.h ../interface/seqSession/cutSessionLayer.h ../interface/seqSession/laneDraw.h ../interface/seqSession/laneView.h ../source/seqTracksCore.h ../source/seqTracksLogic.h ../source/seqTracksRec.h ../source/seqRecLogic.h test_rec.inc test_hr.inc test_plinkyseq.inc ../source/seqPlinkySeqLogic.h ../source/seqPlinkyUiLogic.h $(GLUE) $(SEQ)
+build/seq_glue_tests$(EXE): test_main.cpp test_session.cpp test_cut.inc ../source/seqSessionLogic.h ../source/seqClipsLogic.h ../source/seqCut.h ../source/seqCutLogic.h ../interface/seqSession/cutLayer.h ../interface/seqSession/cutSessionLayer.h ../interface/seqSession/laneDraw.h ../interface/seqSession/mlrDraw.h ../source/seqMlrLogic.h ../source/seqCueCache.h ../source/seqPalette.h ../interface/seqSession/laneView.h ../source/seqTracksCore.h ../source/seqTracksLogic.h ../source/seqTracksRec.h ../source/seqRecLogic.h test_rec.inc test_hr.inc test_plinkyseq.inc ../source/seqPlinkySeqLogic.h ../source/seqPlinkyUiLogic.h $(GLUE) $(SEQ)
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -I../libs/Audio test_main.cpp test_session.cpp $(GLUE) $(SEQ) -o $@
 
@@ -44,6 +44,13 @@ amp-preview: build/seq_amp_tests$(EXE)
 	mkdir -p build/preview
 	SEQ_AMP_PREVIEW=build/preview build/seq_amp_tests$(EXE) > /dev/null
 	python amp_preview.py build/preview
+
+# PNG previews of the clip launcher with and without scene colours (plan 017): the real clipGrid.cpp against stubbed display list macros (needs Pillow)
+grid-preview: preview_grid.cpp gridstub/FT812.h ../interface/seqSession/clipGrid.cpp ../source/seqPalette.h ../source/seqSessionLogic.h
+	mkdir -p build/preview
+	$(CXX) $(CXXFLAGS) -Igridstub -I../interface preview_grid.cpp -o build/preview_grid$(EXE)
+	build/preview_grid$(EXE) build/preview
+	python grid_preview.py build/preview
 
 # PNG previews of the pitch view (plan 015 V): the real engine through ring, follower and drawing (needs Pillow)
 pitch-preview: build/seq_trace_tests$(EXE)

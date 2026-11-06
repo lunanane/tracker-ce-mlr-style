@@ -1,6 +1,7 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 #include "seqSong.h"
 #include "seqClips.h"
+#include "seqPalette.h"
 #include "seqLauncher.h"
 #include "mtSequencer.h"
 #include "mtStructs.h"
@@ -166,7 +167,21 @@ uint8_t seqSongSlotMarks(uint16_t slot)
 {
     if (slot >= SONG_MAX)
         return 0;
-    return (uint8_t)((seqSongPlayNext((uint8_t)slot) ? 1 : 0) | (seqSongQueuedSlot() == slot + 1 ? 2 : 0));
+    return seqsong::slotMarks(seqSongPlayNext((uint8_t)slot), seqSongQueuedSlot() == slot + 1, seqSongColor((uint8_t)slot));
+}
+
+uint8_t seqSongColor(uint8_t slot)
+{
+    return slot < SONG_MAX ? seqClipSceneColor(mtProject.song.playlist[slot]) : 0;
+}
+
+uint8_t seqSongStepColor(uint8_t slot, int dir)
+{
+    if (slot >= SONG_MAX || mtProject.song.playlist[slot] == 0)
+        return 0;
+    uint8_t c = seqpal::sceneStep(seqClipSceneColor(mtProject.song.playlist[slot]), dir);
+    seqClipSetSceneColor(mtProject.song.playlist[slot], c);
+    return c;
 }
 
 void seqSongPanic()

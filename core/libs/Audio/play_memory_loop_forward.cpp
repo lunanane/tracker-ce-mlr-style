@@ -2,6 +2,7 @@
 #include "play_memory.h"
 #include "utility/dspinst.h"
 #include <cmath>
+#include "seqMlrCue.h"
 
 // Play dla wszystkich trybow loop jest wspolny stad tylko tu pelna implementacja a w innych
 // wywolanie
@@ -100,6 +101,11 @@ AUDIO_CORE_FLASH void AudioPlayMemory::playLoopForward(uint8_t instrIdx, int8_t 
     length = currentSampleLength - pointsInSamples.start;
     iPitchCounter = reverseDirectionFlag ? constrainsInSamples.endPoint - 1 : 0;
 
+    if (currentIsStreamed && !reverseDirectionFlag && pointsInSamples.start >= currentPreCacheFrames)
+    {
+        // MLR cue cache (plan 016 A2): a jump onto a cached cue plays from RAM at once, the stream joins right behind the cache
+        seqmlr::findCue(instrIdx, pointsInSamples.start, channel, currentSliceCacheAddress, currentSliceCacheFrames);
+    }
     if (currentIsStreamed && channel == 0 && voiceIndex >= 0)
     {
         voiceStreamManager.notifyNoteOn((uint8_t)voiceIndex,
@@ -110,7 +116,8 @@ AUDIO_CORE_FLASH void AudioPlayMemory::playLoopForward(uint8_t instrIdx, int8_t 
                                         pointsInSamples.end,
                                         currentPlayMode,
                                         reverseDirectionFlag != 0,
-                                        pitchControl);
+                                        pitchControl,
+                                        currentSliceCacheFrames);
     }
 
     warpPrepare(instrIdx); // plan 016 B: Warp (this play function serves all loop modes)

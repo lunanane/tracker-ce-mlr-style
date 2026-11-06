@@ -13,6 +13,10 @@ void seqClipSetMode(uint8_t pattern, uint8_t track, uint8_t mode);  // marks the
 bool seqClipPlayNext(uint8_t pattern);
 void seqClipSetPlayNext(uint8_t pattern, bool on);                  // marks the sidecar dirty when it changed
 
+// ---- scene colour (plan 017): per pattern, a seqpal index (0 = none, the plain look); set on the Song page, shown there and on the launcher ----
+uint8_t seqClipSceneColor(uint8_t pattern);
+void seqClipSetSceneColor(uint8_t pattern, uint8_t color);          // marks the sidecar dirty when it changed
+
 // ---- sidecar "seqclips.bin" (main loop, file manager steps; same scheme as seqtracks.bin) ----
 void seqClipsLoadWorkspace();                                       // Workspace/seqclips.bin -> table (missing / invalid: all Loop)
 void seqClipsSaveWorkspace();                                       // table -> Workspace/seqclips.bin when it changed (never while playing)

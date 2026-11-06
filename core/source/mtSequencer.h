@@ -803,6 +803,9 @@ class Sequencer
     int seqCutSteps(uint8_t row);
     int seqCutPos(uint8_t row) { return player.track[row].actual_pos; }
     void seqCutNoteMap(uint8_t row, uint8_t steps, uint8_t* hasNote);
+    // The sample frame a jump to pattern step `pos` of the track starts at (the Position FX path of seqCutRetrigger); `map` = seqCutNoteMap.
+    // The one place that maps pattern steps to sample positions (plan 016 A2 cue cache, waveform); false = the jump plays nothing / no sample.
+    bool seqCutFrameForPos(uint8_t row, int pos, int steps, const uint8_t* map, uint8_t& instr, uint32_t& frame, uint32_t& hash, uint8_t& stereo);
     void seqCutStopNote(uint8_t row);
     uint32_t seqCutStart[kAllTracks]; // start point + 1 for the next sample note of the track (0 = none), set by seqCutRetrigger
     uint16_t seqCutPending;           // cut tracks that had a step boundary in this tick

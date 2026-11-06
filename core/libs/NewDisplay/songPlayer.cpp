@@ -2,6 +2,7 @@
 #include "display.h"
 #include "displayControls.h"
 #include "songPlayerControl.h"
+#include "seqPalette.h"
 #include <algorithm>
 #include <string.h>
 
@@ -603,6 +604,22 @@ void cSongPlayer::drawIcon(int pos, int row, int x, int y, int h)
         uint8_t m = list->slotMarks((uint16_t)pos);
         int16_t cy = y + (row * h);
         int16_t mx = x + 160;
+        const uint8_t sceneColor = (uint8_t)(m >> 4); // plan 017: a seqpal scene colour index (0 = none); a chip left of the other marks
+        m &= 3;
+        if (sceneColor != 0)
+        {
+            API_COLOR(colors[3]);
+            API_LINE_WIDTH(16);
+            API_BEGIN(RECTS);
+            API_VERTEX2F(mx - 42, cy - 11);
+            API_VERTEX2F(mx - 19, cy + 11);
+            API_END();
+            API_COLOR(seqpal::sceneRgb(sceneColor));
+            API_BEGIN(RECTS);
+            API_VERTEX2F(mx - 40, cy - 8);
+            API_VERTEX2F(mx - 22, cy + 8);
+            API_END();
+        }
         if (m)
         {
             // the pattern name is drawn before: a list-coloured patch keeps the marks readable over a long name

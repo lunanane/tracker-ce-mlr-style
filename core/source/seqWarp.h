@@ -12,6 +12,10 @@ uint8_t seqWarpBars(uint8_t instr); // the setting, 0 = Auto
 void seqWarpSetOn(uint8_t instr, bool on);
 void seqWarpSetBars(uint8_t instr, uint8_t bars);
 
+// MLR / retrigger mapping (seqCutFrameForPos): source frames per output frame (the timeline speed) of a voice of this instrument
+// that warps, 0 = it does not warp (Warp off, a play mode that is not warped). Ignores the 2-voice cap.
+float seqWarpTimelineSpeed(uint8_t instr);
+
 // ---- sidecar "seqwarp.bin" ----
 void seqWarpLoadWorkspace();                                    // Workspace/seqwarp.bin -> values (missing / invalid: all off)
 void seqWarpSaveWorkspace();                                    // values -> Workspace/seqwarp.bin when asked (never while playing)

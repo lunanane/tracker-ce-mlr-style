@@ -79,4 +79,13 @@ inline int16_t slotAfterSwitch(uint8_t queuedSlot1, uint8_t patternAtQueued, uin
     return -1;
 }
 
+// ---- slot marks of the Song page's slot list (localList_t::slotMarks): bit 0 play next, bit 1 queued, bits 4-7 the scene colour
+// (plan 017, a seqpal scene colour index, 0 = none) ----
+inline uint8_t slotMarks(bool playNext, bool queued, uint8_t color)
+{
+    return (uint8_t)((playNext ? 1 : 0) | (queued ? 2 : 0) | ((color & 15u) << 4));
+}
+inline uint8_t markFlags(uint8_t marks) { return (uint8_t)(marks & 3u); }
+inline uint8_t markColor(uint8_t marks) { return (uint8_t)(marks >> 4); }
+
 }  // namespace seqsong

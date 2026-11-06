@@ -9,6 +9,7 @@
 #include "fileManagerDefs.h"
 #include "config.h"
 #include "play_memory.h"
+#include "mtAudioEngine.h"
 
 extern Sequencer sequencer;
 
@@ -60,6 +61,24 @@ void seqWarpSetBars(uint8_t instr, uint8_t bars)
         return;
     s_params.it[instr].bars = bars;
     s_dirty.mark();
+}
+
+float seqWarpTimelineSpeed(uint8_t instr)
+{
+    if (instr >= seqwarp::kCount || !seqWarpOn(instr))
+        return 0.0f;
+    const strInstrument& in = mtProject.instrument[instr];
+    if (!(in.playMode == playModeSingleShot || in.playMode == playModeLoopForward || in.playMode == playModeLoopBackward ||
+          in.playMode == playModePingpong) ||
+        in.endPoint <= in.startPoint)
+        return 0.0f;
+    const float region = (float)(in.endPoint - in.startPoint) / (float)MAX_16BIT * (float)in.sample.length;
+    if (region < 512.0f)
+        return 0.0f;
+    float bpm = engine.getTempoBpm();
+    if (!(bpm >= 10.0f))
+        bpm = mtProject.values.globalTempo;
+    return seqwarp::ratioFor(seqwarp::ratioK(region, seqwarp::resolveBars(seqWarpBars(instr), region, bpm)), bpm);
 }
 
 float seqWarpCpuPercent(uint8_t* voices)

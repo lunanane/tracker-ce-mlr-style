@@ -13,11 +13,17 @@ static View noView()
     v.loopLo = 1;
     v.loopHi = 0;
     v.flags = 0;
+    v.flags2 = 0;
+    v.sec = 0;
+    v.nsec = 0;
+    v.pads = 0;
     return v;
 }
 
-Cut::Cut() : activeMask_(0), holdMask_(0), stopMask_(0), snapMask_(0), handMask_(0), quant_(Q_STEP)
+Cut::Cut() : activeMask_(0), holdMask_(0), stopMask_(0), snapMask_(0), handMask_(0), quant_(Q_STEP), secMode_(false)
 {
+    memset(gridMode_, 0, sizeof(gridMode_));
+    memset(holdSec_, 0xFF, sizeof(holdSec_));
     memset(hand_, 0, sizeof(hand_));
     memset(stock_, 0, sizeof(stock_));
     memset(&hooks_, 0, sizeof(hooks_));
@@ -58,12 +64,14 @@ void Cut::activate(uint8_t t)
     handMask_ = (uint16_t)(handMask_ & ~(1u << t));
     Playhead& p = ph_[t];
     p.reset();
+    if (secMode_) p.setGrid(gridSteps(gridMode_[t])); // 16 pads on the musical grid (the section hold is applied below)
     int steps = hooks_.trackSteps ? hooks_.trackSteps(hooks_.user, t) : 16;
     int pos = hooks_.trackPos ? hooks_.trackPos(hooks_.user, t) : 0;
     p.setLength(steps);
     p.setQuantise(quantStepsFor(quant_, steps)); // queued jumps / loops wait for the grid (plan 008 A)
     p.setImmediate(quant_ == Q_OFF);
     p.restart((uint32_t)(pos + 1)); // the track continues where it is (and the grid counter with it)
+    if (secMode_) p.setHoldSection(holdSec_[t]);
     stock_[t] = (int16_t)pos;
     memset(&rt_[t], 0, sizeof(Rt));
     rt_[t].view = noView();
@@ -88,14 +96,15 @@ void Cut::publish(uint8_t t)
     View v = noView();
     v.col = columnOf(p.position(), p.length(), p.columns());
     int n = 0, lo = -1, hi = -1;
-    for (int c = 0; c < kPosCols; c++)
+    for (int c = 0; c < kMlrPads; c++)
         if ((r.held >> c) & 1u)
         {
             n++;
             if (lo < 0) lo = c;
             hi = c;
         }
-    if (p.looping())
+    if (secMode_) sectionView(v, p.position(), p.length(), p.gridSteps(), p.holdSection(), t);
+    if (p.looping() && (!secMode_ || p.loopBase() == p.shownBase()))
     {
         v.loopLo = (uint8_t)p.loopLo(); // a loop stays after the pads are up
         v.loopHi = (uint8_t)p.loopHi();
@@ -116,18 +125,28 @@ void Cut::publish(uint8_t t)
     views_[t] = v;
 }
 
+// The section fields of a view: grid, shown section (held, or the one `pos` is in), the playhead pad (0xFF = elsewhere), active pads.
+void Cut::sectionView(View& v, int pos, int steps, int spp, int holdSec, uint8_t t) const
+{
+    if (spp < 1) spp = gridSteps(gridMode_[t]);
+    const int sec = holdSec >= 0 ? holdSec : sectionOf(pos, spp);
+    v.sec = (uint8_t)sec;
+    v.nsec = (uint8_t)sectionCount(steps, spp);
+    v.pads = (uint8_t)padsIn(sec, steps, spp);
+    v.col = padOfPos(pos, sec, spp);
+    v.flags2 = (uint8_t)((spp == 2 ? V2_GRID8 : 0) | (holdSec >= 0 ? V2_HOLD : 0));
+}
+
 View Cut::view(uint8_t track) const
 {
     View v = noView();
     if (track >= kCutTracks) return v;
-    if (!((activeMask_ >> track) & 1u))
+    const bool stockShown = !((activeMask_ >> track) & 1u) || ((snapMask_ >> track) & 1u);
+    if (stockShown)
     {
-        v.flags = (uint8_t)(1 << VF_RATE_SHIFT); // rate 1
-        return v;
-    }
-    if ((snapMask_ >> track) & 1u)
-    {
-        v.flags = (uint8_t)(1 << VF_RATE_SHIFT); // SYNC ALL done: shown as stock until the boundary / Play hands the track back
+        v.flags = (uint8_t)(1 << VF_RATE_SHIFT); // rate 1; SYNC ALL done: shown as stock until the boundary / Play hands the track back
+        if (secMode_ && hooks_.trackPos && hooks_.trackSteps)
+            sectionView(v, hooks_.trackPos(hooks_.user, track), hooks_.trackSteps(hooks_.user, track), 0, holdSec_[track], track);
         return v;
     }
     return views_[track];
@@ -143,7 +162,7 @@ void Cut::syncAll()
         if (!((activeMask_ >> i) & 1u)) continue;
         Playhead& p = ph_[i];
         Rt& r = rt_[i];
-        for (int col = 0; col < kPosCols; col++)
+        for (int col = 0; col < kMlrPads; col++)
             if ((r.held >> col) & 1u) p.release(col); // the held pads (and with them a two-pad loop gesture) end
         r.held = 0;
         p.clearRecording();
@@ -181,16 +200,50 @@ void Cut::apply(uint8_t t, uint8_t arg)
                 }
             return;
         }
+        if (argIsGrid(arg) || argIsHold(arg))
+        {
+            if (t >= kCutTracks || !secMode_) return;
+            const bool wasActive = ((activeMask_ >> t) & 1u) != 0;
+            if (argIsGrid(arg))
+            {
+                gridMode_[t] = argGrid(arg);
+                holdSec_[t] = -1; // the section index means something else on the other grid
+                if (wasActive)
+                {
+                    ph_[t].setGrid(gridSteps(gridMode_[t]));
+                    ph_[t].setHoldSection(-1);
+                }
+            }
+            else if (argHold(arg))
+            {
+                const int pos = wasActive ? ph_[t].position() : (hooks_.trackPos ? hooks_.trackPos(hooks_.user, t) : 0);
+                holdSec_[t] = (int8_t)sectionOf(pos, gridSteps(gridMode_[t]));
+                if (wasActive)
+                {
+                    if (ph_[t].holdSection() < 0) ph_[t].setHoldSection(holdSec_[t]);
+                    holdSec_[t] = (int8_t)ph_[t].holdSection();
+                }
+            }
+            else
+            {
+                holdSec_[t] = -1;
+                if (wasActive) ph_[t].setHoldSection(-1);
+            }
+            if (wasActive) publish(t);
+            return;
+        }
         if (argCol(arg) != 0) return; // col 0 = RESET, col 1 = SYNC ALL, anything else is not a command
         for (uint8_t i = 0; i < kCutTracks; i++)
             if ((activeMask_ >> i) & 1u) deactivate(i);
+        memset(gridMode_, 0, sizeof(gridMode_));
+        memset(holdSec_, 0xFF, sizeof(holdSec_));
         return;
     }
     if (t >= kCutTracks) return;
     const uint8_t sub = argSub(arg);
     const bool down = argDown(arg);
     const uint8_t col = argCol(arg);
-    if (sub >= SUB_COUNT || (sub == SUB_PAD && col >= kPosCols)) return;
+    if (sub >= SUB_COUNT || (sub == SUB_PAD && col >= (secMode_ ? (int)kMlrPads : (int)kPosCols))) return;
     const bool wasActive = ((activeMask_ >> t) & 1u) != 0;
     // releases, Rec up and Resync mean nothing to a track the playhead does not drive
     if (!wasActive && ((sub == SUB_PAD || sub == SUB_REC) && !down)) return;
@@ -204,7 +257,11 @@ void Cut::apply(uint8_t t, uint8_t arg)
         case SUB_PAD:
             if (down)
             {
-                p.press(col);
+                if (!p.press(col))
+                {
+                    if (!wasActive) deactivate(t); // an inactive pad (behind the end of the pattern): nothing happened
+                    return;
+                }
                 r.held = (uint16_t)(r.held | (1u << col));
             }
             else

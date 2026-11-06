@@ -130,6 +130,17 @@ struct View
     uint8_t loopLo;   // held loop range in columns, loopLo > loopHi = none
     uint8_t loopHi;
     uint8_t flags;
+    // MLR sections (plan 016 A, Cut::setSectionMode): col / loopLo / loopHi are PADS (0..15) of the shown section; col 0xFF = the
+    // playhead is in another section. The legacy 8-column layout leaves these at 0 (pads = 0 means "not used").
+    uint8_t flags2;   // ViewFlags2
+    uint8_t sec;      // shown section (0-based)
+    uint8_t nsec;     // sections of the pattern
+    uint8_t pads;     // pads of the shown section that map to a step of the pattern
+};
+enum ViewFlags2 : uint8_t
+{
+    V2_GRID8 = 1, // grid 1/8 (2 steps per pad), otherwise 1/4 (4 steps)
+    V2_HOLD = 2   // the pads stay on the held section
 };
 enum ViewFlags : uint8_t
 {

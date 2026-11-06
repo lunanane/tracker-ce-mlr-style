@@ -255,7 +255,8 @@ void cSongEditor::lightUpPadBoard()
 //==============================================================================================================
 
 // Sequencer tracks mod (plan 006). Screen button 1 is "play pattern" (loop / song toggle). Held with the wheel it sets the "play next"
-// flag of the selected slot's scene instead (the same per-pattern flag the clip launcher shows). A plain tap still does the stock thing,
+// flag of the selected slot's scene instead (the same per-pattern flag the clip launcher shows); with Shift the wheel steps the scene's colour
+// (plan 017, shown on the slot and in the clip launcher). A plain tap still does the stock thing,
 // now when the button is released (a wheel turn while it is held cancels the tap).
 static void functPlayPatternHold(uint8_t state)
 {
@@ -263,6 +264,7 @@ static void functPlayPatternHold(uint8_t state)
     {
         SE->flagHeld = true;
         SE->flagWheelUsed = false;
+        SE->colorPicked = false;
     }
     else if (state == buttonRelease)
     {
@@ -700,7 +702,16 @@ static void functEncoder(int16_t value)
         SE->flagWheelUsed = true;
         if (value != 0)
         {
-            seqSongSetPlayNext(SE->selectedSongPosition, value > 0);
+            if (SE->buttons->isButtonPressed(interfaceButtonShift))
+            {
+                // plan 017: button 1 held + Shift + wheel = scene colour of the selected slot's pattern (the label names it)
+                seqSongStepColor(SE->selectedSongPosition, value);
+                SE->colorPicked = true;
+            }
+            else
+            {
+                seqSongSetPlayNext(SE->selectedSongPosition, value > 0);
+            }
             display.refreshControl(SE->songPlayerControl);
         }
         return;

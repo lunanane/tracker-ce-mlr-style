@@ -11,7 +11,7 @@ namespace seqgen {
 class Playhead {
  public:
   enum Rate : uint8_t { RATE_HALF = 0, RATE_NORMAL = 1, RATE_DOUBLE = 2 };
-  enum { kMaxLength = 256, kMaxColumns = 12, kMaxRec = 256 };
+  enum { kMaxLength = 256, kMaxColumns = 16, kMaxRec = 256 };
   enum { kSerialVersion = 1, kSerialSize = 8 + kMaxRec + kMaxRec / 8 };
 
   // What the track should play for one sequencer step.
@@ -30,7 +30,15 @@ class Playhead {
 
   // ---- settings (take effect on the next step()) ----
   void setLength(int steps);       // 1..256
-  void setColumns(int n);          // 8 or 12 (anything else = 8); clears held pads / loop / queued jumps
+  void setColumns(int n);          // 8, 12 or 16 (anything else = 8): the pads split the whole pattern evenly; clears held pads / loop / queued jumps
+  // Grid mode (plan 016 A): 16 pads, each `stepsPerPad` steps; the pads address one SECTION of 16 x stepsPerPad steps - the section the
+  // playhead is in (follow), or the held one (setHoldSection). Steps past the end of the pattern are inactive pads. Clears gestures.
+  void setGrid(int stepsPerPad);   // 1..16; 0 = back to the even split of setColumns
+  void setHoldSection(int sec);    // -1 = follow the playhead's section, >= 0 = the pads stay on that section
+  int gridSteps() const { return spc_; }
+  int holdSection() const { return holdSec_; }
+  int shownBase() const;           // first step of the section the pads address (grid mode; 0 otherwise)
+  int activePads() const;          // pads that map to a step of the pattern (columns() in the even split)
   void setQuantise(int steps);     // 1 = next step, 4 = next beat (steps; 1..64)
   void setRate(Rate r);
   void setReverse(bool rev);
@@ -44,7 +52,7 @@ class Playhead {
   int columnPosition(int col) const { return (col * length_) / columns_; }  // col 0..columns; position of a column's first step
 
   // ---- gestures (any time between step() calls) ----
-  void press(int col);    // 0-based column of this track's row
+  bool press(int col);    // 0-based pad; false = the pad is inactive (grid mode: behind the end of the pattern), nothing happens
   void release(int col);
   void recDown();         // start a take: records what is played on each following step()
   void recUp();           // close the take: recorded steps become a loop (a take with 0 steps clears the loop)
@@ -68,6 +76,7 @@ class Playhead {
   bool looping() const { return loopActive_; }     // a two-pad loop range is active (it stays after the pads are released)
   int loopLo() const { return loA_; }              // its columns, inclusive (valid while looping())
   int loopHi() const { return loB_; }
+  int loopBase() const { return loBase_; }        // grid mode: first step of the section the loop columns are relative to
   int heldCount() const;
   bool pending() const { return pendLoop_ || pendJump_ >= 0; }  // a jump/loop is queued for the next boundary
   void clearRecording() { recActive_ = false; recording_ = false; recCount_ = 0; }
@@ -91,7 +100,9 @@ class Playhead {
   void closeRecording();
 
   uint16_t length_, recLen_, recIdx_, recCount_;
-  uint8_t columns_, quant_, rate_;
+  uint8_t columns_, quant_, rate_, spc_;
+  int8_t holdSec_;
+  uint16_t heldBase_, pendBase_, loBase_;
   bool rev_;
   uint16_t held_;                    // bit c = column c is down
   int16_t pos_;                      // last played position

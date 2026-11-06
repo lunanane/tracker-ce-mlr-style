@@ -1,5 +1,6 @@
 #include "VoiceStreamManager.h"
 #include "cr_section_macros.h"
+#include "seqMlr.h" // idle(): MLR cue cache / waveform work
 #include <string.h>
 
 extern strMtProject mtProject;
@@ -1728,7 +1729,10 @@ void VoiceStreamManager::update()
 
     if (!currentJob.inProgress && !fs->isAsyncReadBusy())
     {
-        scheduleNextVoiceJob(false);
+        if (!scheduleNextVoiceJob(false))
+        {
+            seqmlr::idle(); // nothing to stream: one chunk of the MLR cue cache / waveform (blocking read of ~6 KB)
+        }
     }
 }
 

@@ -19,6 +19,8 @@ Do these first (the full list below is the detail):
 9. R2: Song on the Song page opens the launcher (Song again returns); with the song playing launch a clip (the song keeps looping its slot, no freeze); a Play 1x clip chains into the next row; Stop = panic (section 9, 9b, 9c).
 10. Plan 006 (v0.2.3): play the song: the slot **loops** until its scene is flagged play next; queue another slot with Insert on the Song page; set the flag with screen button 1 + wheel (section 9e).
 
+11. Plan 017 (v0.3.8): scene colours: on the Song page hold screen button 1 + Shift and turn the wheel on a slot; look at the colour chip, then open the launcher (section 9f).
+
 Contents: 1-6 Play mode | 7 Record | 8 save / load | 9 Session CLIPS (9e live-set Song page) | 10 Session CUT (10c lane screen, SYNC ALL, panic) | 11 alt Performance page | 12 stock-behaviour checks.
 
 ## 1. Enter / leave Play mode (v0.2: Play mode is the 4th action-button page of the pattern editor)
@@ -358,10 +360,29 @@ The song no longer runs away: **at the pattern end the playing slot plays again*
 | Pattern page: Pattern + Right / Left while the song plays | The pattern switches at its end; **the song mode goes on** (v0.2.3; stock ended it): it only ends when the new pattern is not in the song. |
 | Performance page with per-track patterns changed, leave it while the song plays | At the pattern end the pattern is reloaded (the changed tracks are put back), also in song mode; a slot flagged play next then plays one more time before it advances. |
 
+### 9f. Scene colours (plan 017, v0.3.8)
+Each scene (pattern) can carry one of nine colours: **None** (default, the plain look), the four tracker key colours (**Teal, Yellow, Purple, Blue**) and **Orange, Red, Green, White**. Set on the Song page, shown there and on the launcher. Saved in `seqclips.bin` (version 3: + 128 bytes, 4 bits per pattern); a file without any colour is still written as version 2 (identical to v0.3.7), version 3 only when a colour is set; a version 1 or 2 file loads with no colours; nothing is written to the SD card while the transport plays (the usual deferred save).
+
+| Press | Expected |
+|---|---|
+| Song page, hold screen button **1** | Its label changes to `Wheel:Next` / `Shift:Color` while it is held (back to the stock label on release). |
+| Hold button 1, hold **Shift**, turn the wheel one click clockwise on a slot with no colour | The label reads `Color:` and `Teal`; the slot shows a **teal chip** left of the right-end marks. Further clicks: Yellow, Purple, Blue, Orange, Red, Green, White, then None (chip gone), then Teal again. Anticlockwise goes backwards. The label keeps naming the colour until the button is released. |
+| Same, without Shift | Sets / clears the **play next** arrow as before (section 9e); no colour change. |
+| Release button 1 after a colour step | No song / pattern toggle (a wheel turn while held cancels the tap, as for the play-next flag). |
+| Give a pattern a colour that two slots hold | Both slots show the chip (the colour belongs to the pattern). |
+| Colour chip beside the play-next arrow and the red queue square | All three readable; a long pattern name can run under the marks (known). |
+| Open the launcher (Song button) | Every row of a coloured scene has a **tinted scene cell** (dim when the scene is empty, brighter with content, brightest playing), its **clips with content tinted** in the colour, and a **thin line in the colour** under the row. Rows with None look as before. |
+| Launch a clip in a coloured row / queue one | The playing clip keeps its **teal fill and teal outline** and progress line; a queued clip keeps the blinking yellow outline; the scene cell turns brighter while its scene plays. Nothing is hidden by the colour. |
+| Set a colour while the song plays | The Song page chip and the launcher update at once; the SD write waits for the stop (the project is marked changed). |
+| Stop, save, power off, load the project | The colours are back on the Song page and in the launcher. A project saved before v0.3.8 (no colours) loads plain. |
+| Save with colours on v0.3.8, load on v0.3.7 | v0.3.7 treats the version 3 file as from a newer mod: it leaves it alone (clip modes and flags of that file are not loaded there). Keep a backup before trying a rollback. |
+
+Known limits (plan 017): one colour per scene (no per-clip colours); the colour step needs the wheel and Shift (all eight screen buttons of the Song page are in use); the launcher grid has a fixed display list budget, so a screen with every row in a different colour costs about 700 bytes more of the 5500 byte grid budget (still within it; the optional marks drop first).
+
 Known limits (plan 006): the play-next flag and the queue use the cursor slot; marks of long pattern names can overlap the names. A slot queued at the very last step of a pattern is taken one pattern later (the stock scene arm rule).
 
 ## 10. Session CUT (MLR playhead, plan 002 S2)
-Open it with Song, Song (Song page, then launcher) > screen button 8 (CUT). Title "Session: CUT   tracks 1-4"; screen buttons 1-4 choose the four tracks shown (1-4, 5-8, 9-12, 13-16); the CUT layer draws its own lane screen (no info lines). Use a project with: track 1 = ONE long
+Open it with Song, Song (Song page, then launcher) > screen button 8 (CUT). Since v0.3.8 (plan 016 A) the layer is the two-slot MLR of section 10b (the rows of this section that speak of "4 rows = 4 tracks" and the 8 positions describe the v0.3.7 layout; with grid 1/8 on a 16-step pattern the pads give those same 8 positions); the CUT layer draws its own lane screen (no info lines). Use a project with: track 1 = ONE long
 loop sample on step 1 only (e.g. a 2 s drum loop, pattern 16 steps, tempo so the loop fits the 16 steps, note at the sample's
 original pitch, play mode One-shot or Loop), track 2 = a normal drum pattern, track 3 = a MIDI track with a few notes.
 Pad grid of the layer (all 12 columns, none reserved): 4 rows = 4 tracks of the group; pads 1-8 of a row = 8 positions; pad 9 = STOP/START,
@@ -446,6 +467,28 @@ Use the project of section 10 (track 1 loop sample, track 2 drums, track 3 MIDI)
 | Panic (Stop) while stopped, with jams | Lanes and the R1 strip show the tracks as normal at once (no OFF GRID, label without brackets). |
 | Display-list worst case: 128-step patterns on all four lanes, every flag set (stopped, reverse, rate, Rec) | No truncated or missing shapes (the whole frame must fit 8172 bytes: read `lastMemoryUsed` in a DEBUG build; host estimate for the lanes alone is about 3.6 KB). |
 | Main-loop gap with the 25 fps playhead (Profiler: longest main-loop pass while CUT is visible and the transport runs, long SD-streamed sample playing) | No audible stream underrun. If there is one, set `kRedrawPerStep = true` in `seqCutLogic.h` (one redraw per step instead of 25 fps) and repeat. |
+
+## 10b. MLR slots on a musical grid + cue cache (plan 016 A, v0.3.8 - original Tracker)
+Layout: **slot A = pad rows 1-2, slot B = pad rows 3-4**, each holds one track (default A = track 1, B = track 2). Per slot, pad columns 1-8 of its two rows = **16 steps** of a grid (**1/4** = one beat = 4 pattern steps per pad, or **1/8** = 2 steps); 16 steps = one **section** (64 or 32 pattern steps). The pads address the section the playhead is in and follow it; steps behind the end of the pattern are dark. Pad columns 9-12 of a slot: first row **STOP REV RATE RSYNC**, second row **GRID SECT REC MUTE**. Screen buttons: **1 Assign 1, 2 Assign 2, 3 Help, 4 empty, 5 Q, 6 SYNC ALL, 7 [REC] label, 8 CLIPS/CUT**. Use a project with a long (> 6 s, SD-streamed) loop sample on track 1 (a note on step 1, pattern 64 or 128 steps, loop or one-shot) and a drum pattern on track 2.
+| Press | Expected |
+|---|---|
+| Open the layer (button 8, label CUT) | Two lanes A (teal) and B (purple): track name, grid `1/4`, `sec 1/n`, the waveform of the shown section, 16 step boundaries (1, 5, 9, 13 numbered), note marks, a dot per cached cue, the playhead (white line, filled pad), the names of the eight extra pads at the right (state highlighted). Header: `A: T1 1/4    B: T2 1/4`, `bar b.b` right. |
+| Pad 5 of slot A | The track jumps to step 5 of the section it is playing in (position 16 at grid 1/4), at the next grid point (Q). The LED of the pad is bright. Two pads = a loop that latches; one pad ends it. |
+| Let the playhead run into the next section (pattern longer than 64 steps at 1/4) | Pad LEDs and the lane (`sec 2/n`, new waveform) follow the playhead; the pads now jump inside section 2. A latched loop keeps the playhead (and the shown section) where it is. |
+| Pattern whose length is not a multiple of the section (e.g. 70 steps) | The last section shows only the steps that exist (2 pads at 1/4); the other pads are dark and do nothing. |
+| **GRID** pad (second row, col 9) | The slot switches between 1/4 and 1/8 (label `grid 1/8`, 32 steps per section, the pad LED bright at 1/8). A latched loop of the slot ends, the shown section changes accordingly. |
+| **SECT** pad (col 10, second row) | `HOLD`: the pads stay on the section that was shown, the playhead leaves it (no playhead line, pads still address the held section: jump into it from anywhere). Again: `FOLLOW`. |
+| **REC** pad (col 11, second row) | A take of this slot only (the first pad pressed in the slot starts it); again closes it; the Rec key still arms / closes all takes. |
+| **MUTE** pad (col 12, second row) | The slot's track is muted (same mute as the pattern editor's mute buttons; the lane says `MUTED`, the pad is bright). |
+| **Assign 1** (screen button 1) | Rows 1-2 become a **track picker**: the 16 step pads are tracks 1-16 (lit = the pattern has notes on it, bright = the assigned track), the lane says `Slot 1: pick a track`. Slot B keeps playing / meshing. A pad assigns the track and the rows return to MLR; Assign 1 again cancels. Taking the track slot B holds swaps the two. Same with Assign 2 on rows 3-4. |
+| **Help** (screen button 3) | A 12 x 4 map of the pads with their words (steps 1-16, STOP REV RATE RSYNC / GRID/4 FOLLOW REC MUTE, slot names with their tracks, `T1`..`T16` while picking), current states highlighted (grid, hold, rec, mute, rate, the playhead pad). It stays open while you play (pads work underneath); Help again closes it. |
+| **Cue cache** (original Tracker, long streamed loop, quantise off): jump with the pads of the current section, 16 cues in a row | After a second or two the dots of the lane fill (a dot per cached cue, current section; the next section's dots fill once the playhead is past pad 8). A jump onto a dotted pad starts at once (no late start); a pad without a dot still works as in v0.3.7 (starts from the stream). |
+| Cached jump, listen at the join (about 70 ms after the start) | No click, no gap, no doubled or skipped audio; the sound simply continues. Try a loop with a clear transient 2 steps after the pad, and rate 2x. |
+| Change the BPM, the loop points or the sample of the slot's instrument while the layer is open | The dots disappear and fill again (the cues moved); the waveform is redrawn. No crash, no audible change on the playing voice. |
+| Streamed sample + both slots + the pattern editor's other tracks playing | The SD streams of the other voices do not break (the cache only loads when no stream read is due); no main-loop stall (Profiler: longest pass while the dots fill). |
+| **Press-to-sound latency** (A3, with quantise off): record the pad press (pad contact / LED) and the audio with a phone or scope; 20 presses on cached pads vs. 20 on pads without a dot | Cached: sound within about one audio block (host model: ~4 ms); uncached streamed: model ~18 ms plus the SD time of the day. Report both medians. |
+| Display list: both lanes with the waveform, loops, every flag, the legend open | No truncated drawing, no flicker; the Profiler main-loop gap does not grow while the playhead runs. |
+| Load a project with a full sample pool, play, open the layer | No out-of-memory, no sample missing (the cache uses 768 KB of the free external RAM). |
 
 # Alt Performance page (8-step faders) — plans/004-perform-faders.md, reworked in plan 005 R3 (v0.2)
 

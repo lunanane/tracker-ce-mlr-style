@@ -1,5 +1,7 @@
 #include "songEditor/songEditor.h"
 #include "seqTracks.h"
+#include "seqSong.h"
+#include "seqPalette.h"
 
 #include "Platform.h"
 #include "mtSequencer.h"
@@ -237,6 +239,7 @@ void cSongEditor::refreshSongPlayerSelectedSlot()
 
 void cSongEditor::refreshButtonsLabels()
 {
+    const uint8_t stateBefore = playButtonsState;
     Sequencer::enSeqState seqState = sequencer.getSeqState();
     if (seqState == Sequencer::SEQ_STATE_STOP)
     {
@@ -341,6 +344,31 @@ void cSongEditor::refreshButtonsLabels()
             display.refreshControl(label[0]);
             display.refreshControl(label[1]);
             playButtonsState = 5;
+        }
+    }
+
+    // sequencer tracks mod (plan 017): while screen button 1 is held its label says what the wheel does; with Shift (or after a colour step)
+    // it names the colour of the selected slot's scene
+    uint8_t key = 0;
+    if (flagHeld)
+    {
+        bool color = colorPicked || buttons->isButtonPressed(interfaceButtonShift);
+        key = color ? (uint8_t)(16 + seqSongColor(selectedSongPosition)) : (uint8_t)1;
+    }
+    if (key != 0 && stateBefore != playButtonsState)
+        holdKey = 0xFF; // the stock label was rewritten during the hold: write ours again
+    if (key != holdKey)
+    {
+        holdKey = key;
+        if (key == 0)
+        {
+            playButtonsState = 0xFF; // the stock label comes back at the next pass
+        }
+        else
+        {
+            display.setControlText(label[0], key == 1 ? "Wheel:Next" : "Color:");
+            display.setControlText2(label[0], key == 1 ? "Shift:Color" : seqpal::sceneName((uint8_t)(key - 16)));
+            display.refreshControl(label[0]);
         }
     }
 

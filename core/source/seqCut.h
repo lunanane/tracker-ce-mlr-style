@@ -5,6 +5,7 @@
 #pragma once
 #include "playhead.h"
 #include "seqCutLogic.h"
+#include "seqMlrLogic.h"
 
 namespace seqcut {
 
@@ -56,6 +57,12 @@ class Cut
     int stock(uint8_t track) const { return track < kCutTracks ? stock_[track] : 0; }
     void setStock(uint8_t track, int pos) { if (track < kCutTracks) stock_[track] = (int16_t)pos; }
     uint16_t activeMask() const { return activeMask_; }
+    // MLR sections (plan 016 A): off = the legacy layout (8 pads share the whole pattern, kept for the engine tests), on = 16 pads on the
+    // musical grid, the pads address one section. Set once before use (seqCutInit); the grid (1/4, 1/8) and a section hold are per track.
+    void setSectionMode(bool on) { secMode_ = on; }
+    bool sectionMode() const { return secMode_; }
+    uint8_t grid(uint8_t track) const { return track < kCutTracks ? gridMode_[track] : 0; }
+    int holdSection(uint8_t track) const { return track < kCutTracks ? holdSec_[track] : -1; }
     uint8_t quant() const { return quant_; } // jump quantise mode (seqcut::Quant), audio context writes it, any context may read it
     // Mask for the audio hooks: driven tracks plus tracks whose hand-back retrigger is still to be played (see consumeRetrigger).
     uint16_t hookMask() const { return (uint16_t)(activeMask_ | handMask_); }
@@ -82,6 +89,7 @@ class Cut
     void publish(uint8_t t);
     void setHold(uint8_t t, bool h);
     void setStopped(uint8_t t, bool s);
+    void sectionView(View& v, int pos, int steps, int spp, int holdSec, uint8_t t) const;
 
     seqgen::Playhead ph_[kCutTracks];
     Rt rt_[kCutTracks];
@@ -96,6 +104,9 @@ class Cut
     int16_t stock_[kCutTracks];
     volatile uint8_t quant_; // the engine starts on every step; the CUT layer (cutLayer.cpp) sets the user's default (beat) when it is first used
     View views_[kCutTracks];
+    bool secMode_;
+    uint8_t gridMode_[kCutTracks];
+    int8_t holdSec_[kCutTracks]; // held section of the track, -1 = follow
 };
 
 } // namespace seqcut
