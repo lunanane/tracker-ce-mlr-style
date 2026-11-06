@@ -34,6 +34,7 @@ void PitchTraceView::createControl()
     prop.h = 480;
     prop.data = &data_;
     data_.kind = TraceViewData::NONE;
+    data_.busyMs = 0;
     control_ = display.createControl<cSeqTraceControl>(&prop);
 }
 
@@ -86,6 +87,8 @@ void PitchTraceView::update()
     const uint32_t now = seqNowMs();
     if (lastMs_ != 0 && (uint32_t)(now - lastMs_) < kRefreshMs)
         return;
+    if (data_.busyMs != 0 && (uint32_t)(now - data_.busyMs) < 200u)
+        return; // v0.3.9: the control is between its two display stages, both must draw the same samples (seqTraceStages.h)
     lastMs_ = now ? now : 1;
 #ifdef FEATURE_PLINKY
     static_assert(sizeof(pitchtrace::Sample) == sizeof(plinkyvoice::TraceSample), "ring layout");
