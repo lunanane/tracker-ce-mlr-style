@@ -50,6 +50,10 @@ void seqPadRelease(uint8_t track, uint8_t pad); // never lost: kept and retried 
 
 // ---- CUT (MLR) layer (main loop) ----
 void seqCutInit(); // constructs the 16 playheads in external RAM (idempotent; also done when the workspace is loaded)
+// MLR pad extras and the track picker (plan 016 A, main loop)
+bool seqCutTrackMuted(uint8_t track);     // the project mute of the track
+void seqCutToggleMute(uint8_t track);     // same as the mute buttons of the pattern editor
+uint16_t seqCutTracksWithNotes();         // bit per track: the current pattern holds a note on it (lit in the track picker)
 
 // ---- record (main loop; Play mode screen calls these) ----
 bool seqRecTrackLaunched(uint8_t track); // the track holds a launched Session clip: it is not recorded

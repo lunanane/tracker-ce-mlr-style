@@ -19,7 +19,7 @@ test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tes
 	build/seq_trace_tests$(EXE)
 	build/seq_amp_tests$(EXE)
 
-build/seq_glue_tests$(EXE): test_main.cpp test_session.cpp test_cut.inc ../source/seqSessionLogic.h ../source/seqClipsLogic.h ../source/seqCut.h ../source/seqCutLogic.h ../interface/seqSession/cutLayer.h ../interface/seqSession/cutSessionLayer.h ../interface/seqSession/laneDraw.h ../interface/seqSession/laneView.h ../source/seqTracksCore.h ../source/seqTracksLogic.h ../source/seqTracksRec.h ../source/seqRecLogic.h test_rec.inc test_hr.inc test_plinkyseq.inc ../source/seqPlinkySeqLogic.h ../source/seqPlinkyUiLogic.h $(GLUE) $(SEQ)
+build/seq_glue_tests$(EXE): test_main.cpp test_session.cpp test_cut.inc ../source/seqSessionLogic.h ../source/seqClipsLogic.h ../source/seqCut.h ../source/seqCutLogic.h ../interface/seqSession/cutLayer.h ../interface/seqSession/cutSessionLayer.h ../interface/seqSession/laneDraw.h ../interface/seqSession/mlrDraw.h ../source/seqMlrLogic.h ../source/seqCueCache.h ../source/seqPalette.h ../interface/seqSession/laneView.h ../source/seqTracksCore.h ../source/seqTracksLogic.h ../source/seqTracksRec.h ../source/seqRecLogic.h test_rec.inc test_hr.inc test_plinkyseq.inc ../source/seqPlinkySeqLogic.h ../source/seqPlinkyUiLogic.h $(GLUE) $(SEQ)
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -I../libs/Audio test_main.cpp test_session.cpp $(GLUE) $(SEQ) -o $@
 

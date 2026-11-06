@@ -11,7 +11,6 @@
 void laneViewCreate();                                   // module start: both controls, hidden (created once, only shown / hidden after)
 void laneViewForget();                                   // module stop: the display frees the controls itself, drop the handles
 void laneViewShow(bool show);                            // the CUT layer becomes visible / hidden
-bool laneViewRefresh(bool force, uint8_t firstTrack);    // main loop, every pass while visible; true = the screen changed
+bool laneViewRefresh(bool force);                        // main loop, every pass while visible; true = the screen changed
 bool cutShiftHeld();                                     // the Shift button is down
-void laneViewRequestGroup(uint8_t firstTrack);           // Left / Right: ask the Session host to switch the group of 4
 bool laneViewAnyOffGrid();                               // a track of the 16 is driven by its playhead (SYNC ALL has work to do)

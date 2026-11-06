@@ -3,6 +3,7 @@
 #include "seqHooks.h"
 
 #include "cutLayer.h"
+#include "seqMlr.h"
 
 // Transport Stop = panic (plan 005 M6): held MLR pads and open takes end, SYNC ALL drops every jam, loop, recorded loop, reverse,
 // rate and STOP. The transport is stopped, so no step boundary follows: the next Play starts every track on the grid.
@@ -16,4 +17,5 @@ void seqPanicCut()
 void seqCutUpdate()
 {
     cutUpdate();
+    seqmlr::update(); // cue cache wants + section waveform (throttled)
 }

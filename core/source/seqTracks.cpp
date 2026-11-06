@@ -1,6 +1,7 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 #include "seqTracks.h"
 #include "mtSequencer.h"
+#include "mtAudioEngine.h"
 #include "mtStructs.h"
 #include "fileManager.h"
 #include "fileManagerDefs.h"
@@ -150,7 +151,48 @@ void seqCutInit()
     seqcut::Cut* c = new (s_cutMem) seqcut::Cut();
     seqcut::Hooks h = { 0, cutNoteMap, cutTrackPos, cutTrackSteps, cutStopNote, cutSampleTrack };
     c->setHooks(h);
+    c->setSectionMode(true); // MLR: two slots of 16 pads on the musical grid (plan 016 A)
     seqEngine.setCut(c); // published last (release)
+}
+
+bool seqCutTrackMuted(uint8_t track)
+{
+    return track < seqlogic::kTracks && sequencer.seqTrackMuted(track) != 0;
+}
+
+void seqCutToggleMute(uint8_t track)
+{
+    if (track >= seqlogic::kTracks)
+        return;
+    if (isSampleTrack(track))
+    {
+        uint8_t& m = mtProject.values.trackMute[track % 8];
+        m = !m;
+        engine.muteTrack(track % 8, m);
+    }
+    else
+    {
+        uint8_t& m = mtProject.values.midiTrackMute[track % 8];
+        m = !m;
+    }
+}
+
+uint16_t seqCutTracksWithNotes()
+{
+    uint16_t mask = 0;
+    for (uint8_t t = 0; t < seqlogic::kTracks; t++)
+    {
+        const int n = sequencer.seqCutSteps(t);
+        uint8_t map[Sequencer::MAXSTEP + 1];
+        sequencer.seqCutNoteMap(t, (uint8_t)(n > Sequencer::MAXSTEP + 1 ? Sequencer::MAXSTEP + 1 : n), map);
+        for (int i = 0; i < n && i <= Sequencer::MAXSTEP; i++)
+            if (map[i] == 1)
+            {
+                mask |= (uint16_t)(1u << t);
+                break;
+            }
+    }
+    return mask;
 }
 
 // Steps the stock sequencer plays on this track (mirrors switchRowStep: last step index + 1).
@@ -339,6 +381,36 @@ void Sequencer::seqCutRetrigger(uint8_t row, strPlayer::strPlayerTrack::strSendS
                               instr.playMode != playModeSingleShot, instr.loopPoint1, instr.loopPoint2, instr.endPoint, start))
         return; // behind the end of a one-shot sample: the retrigger would be silent anyway, play it from the start
     seqCutStart[row] = (uint32_t)start + 1;
+}
+
+bool Sequencer::seqCutFrameForPos(uint8_t row, int pos, int steps, const uint8_t* map, uint8_t& instrOut, uint32_t& frame, uint32_t& hash,
+                                  uint8_t& stereo)
+{
+    int noteStep = 0, since = 0;
+    if (row >= seqlogic::kTracks || !seqgen::Playhead::noteOffsetFor(pos, map, steps, noteStep, since) || map[noteStep] != 1)
+        return false;
+    const strPattern::strTrack::strStep& src = currentPattern->track[row].step[noteStep];
+    if (!isSampleTrack(row) || !isSampleInstrument(src.instrument) || src.note < 0)
+        return false;
+    const auto& instr = mtProject.instrument[src.instrument];
+    if (instr.playMode == playModeSlice || instr.playMode == playModeBeatSlice || instr.playMode == playModeGranular ||
+        instr.playMode == playModeWavetable)
+        return false;
+    uint16_t base = instr.startPoint;
+    for (int i = 0; i < 2; i++)
+        if (src.fx[i].type == fx.FX_TYPE_POSITION)
+            base = (uint16_t)mapClamped<int>(src.fx[i].value, getFxMin(fx.FX_TYPE_POSITION), getFxMax(fx.FX_TYPE_POSITION), 0, MAX_16BIT);
+    float semis = (float)(src.note - 60) + (float)instr.tune + (float)instr.fineTune / 100.0f;
+    uint32_t speed1000 = (uint32_t)(powf(2.0f, semis / 12.0f) * 1000.0f + 0.5f);
+    uint16_t start;
+    if (!seqcut::startPoint16((uint32_t)since, getStepPeriodMs(), instr.sample.length, 44100, speed1000, base, instr.playMode != playModeSingleShot,
+                              instr.loopPoint1, instr.loopPoint2, instr.endPoint, start))
+        return false;
+    frame = (uint32_t)((float)start * ((float)instr.sample.length / MAX_16BIT)); // as AudioPlayMemory::calculatePointPositionAndSnapToZero (streamed part)
+    instrOut = src.instrument;
+    hash = mtProject.sampleMemory[src.instrument].sampleHash;
+    stereo = mtProject.sampleMemory[src.instrument].isStereo ? 1 : 0;
+    return true;
 }
 
 // ---------------------------------------------------------------- Sequencer members used by the glue

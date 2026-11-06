@@ -172,8 +172,8 @@ static void test_mlr_rec_v024_bug_reproduced()
         legacyRec(ev[i].state);
         if (i == 0)
         {
-            cutPad(5, 0, true); // the first pad of the row starts its take
-            cutPad(5, 0, false);
+            tCutPad(5, 0, true); // the first pad of the row starts its take
+            tCutPad(5, 0, false);
             seqEngine.idleTick();
             CHECK(c->view(0).flags & VF_REC);
         }
@@ -227,8 +227,8 @@ static void test_mlr_rec_toggle_keys_driver()
     for (int i = 0; i < 3; i++)
     {
         const int col = tapCol[i];
-        tl.at(tapAt[i], [&a, col]() { a.pad((uint8_t)col, 0, true); });
-        tl.at(tapAt[i] + 50, [&a, col]() { a.pad((uint8_t)col, 0, false); });
+        tl.at(tapAt[i], [&a, col]() { tAPad(a, (uint8_t)col, 0, true); });
+        tl.at(tapAt[i] + 50, [&a, col]() { tAPad(a, (uint8_t)col, 0, false); });
     }
     // 2.4 s later, long after the release of the Rec key: the take is still open and Rec armed
     tl.at(2400, [&]() {
@@ -297,14 +297,14 @@ static void test_mlr_rec_takes_in_any_group()
     hostRec(a, seqrecui::KEY_PRESS);
     hostRec(a, seqrecui::KEY_HOLD);
     hostRec(a, seqrecui::KEY_RELEASE);
-    a.pad(3, 0, true); // track 0
-    a.pad(3, 0, false);
-    a.setGroup(8);
-    a.pad(4, 2, true); // track 10
-    a.pad(4, 2, false);
+    tAPad(a, 3, 0, true); // track 0
+    tAPad(a, 3, 0, false);
+    tSetGroup(8);
+    tAPad(a, 4, 2, true); // track 10
+    tAPad(a, 4, 2, false);
     seqEngine.idleTick();
     CHECK((c->view(0).flags & VF_REC) && (c->view(10).flags & VF_REC));
-    a.setGroup(4); // looking at another group while the takes run
+    tSetGroup(4); // looking at another group while the takes run
     int g = 0;
     f.pos = 0;
     for (int i = 0; i < 2; i++)
@@ -343,27 +343,27 @@ static void test_mlr_gestures_through_layer()
     MlrRun run(c, &f);
     run.runTo(250);
     // jump: a tap on column 6 of row 0 -> the next boundary plays position 12, then the track runs on from there
-    a.pad(6, 0, true);
-    a.pad(6, 0, false);
+    tAPad(a, 6, 0, true);
+    tAPad(a, 6, 0, false);
     run.runTo(250 + 125);
     CHECK(run.played.back() == 12);
     run.runTo(250 + 125 * 3);
     CHECK(run.played[run.played.size() - 1] == 14 && run.played[run.played.size() - 2] == 13);
     // two-pad loop (columns 1 and 3 of row 1 = positions 2..7), held for 1 s (the pad hold events are dropped by the host)
-    a.pad(1, 1, true);
+    tAPad(a, 1, 1, true);
     run.runTo(run.stepsDone * 125 + 40);
-    a.pad(3, 1, true);
+    tAPad(a, 3, 1, true);
     run.runTo(run.stepsDone * 125 + 1000);
     CHECK(c->view(1).loopLo == 1 && c->view(1).loopHi == 3);
-    a.pad(1, 1, false);
-    a.pad(3, 1, false);
+    tAPad(a, 1, 1, false);
+    tAPad(a, 3, 1, false);
     seqEngine.idleTick();
     CHECK(c->view(1).loopHi < c->view(1).loopLo); // released: back to the whole track
     // reverse (column 9) and rate (column 10) on row 2
-    a.pad(COL_REVERSE, 2, true);
-    a.pad(COL_REVERSE, 2, false);
-    a.pad(COL_RATE, 2, true);
-    a.pad(COL_RATE, 2, false);
+    tAPad(a, COL_REVERSE, 2, true);
+    tAPad(a, COL_REVERSE, 2, false);
+    tAPad(a, COL_RATE, 2, true);
+    tAPad(a, COL_RATE, 2, false);
     seqEngine.idleTick();
     CHECK(c->view(2).flags & VF_REVERSE);
     CHECK(viewRate(c->view(2)) == 2);
@@ -690,8 +690,8 @@ static void test_mlr_bar_follows_the_pattern()
     int g = 0;
     for (int i = 0; i < 10; i++)
         stepOnce(*c, f, g);
-    c->apply(0, packArg(SUB_PAD, true, 2)); // columns of 24 steps: 2 -> position 6
-    c->apply(0, packArg(SUB_PAD, false, 2));
+    c->apply(0, packArg(SUB_PAD, true, 3)); // pads of 2 steps: 3 -> position 6 (was column 2 of 8 over 24 steps)
+    c->apply(0, packArg(SUB_PAD, false, 3));
     CHECK(c->playhead(0).quantise() == 24);
     int landed = -1;
     for (int k = 1; k <= 20; k++)

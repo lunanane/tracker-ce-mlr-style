@@ -7,6 +7,8 @@
 #include "display.h"
 #include "displayControls.h"
 #include "laneDraw.h"
+#include "mlrDraw.h"
+#include "seqMlr.h"
 #include "mtSequencer.h"
 #include "seqSession/seqSession.h"
 #include "seqTracks.h"
@@ -24,10 +26,10 @@ class cSeqLanes : public cDisplayControl
     virtual void setText(const char*) {}
     virtual void setValue(int) {}
     virtual void setColors(const uint32_t* colors) { this->colors = colors; }
-    virtual void setData(void* data) { model = (const seqcut::LaneModel*)data; }
+    virtual void setData(void* data) { model = (const seqcut::MlrModel*)data; }
 
   private:
-    const seqcut::LaneModel* model;
+    const seqcut::MlrModel* model;
 };
 
 class cSeqPlayheads : public cDisplayControl
@@ -40,10 +42,10 @@ class cSeqPlayheads : public cDisplayControl
     virtual void setText(const char*) {}
     virtual void setValue(int) {}
     virtual void setColors(const uint32_t* colors) { this->colors = colors; }
-    virtual void setData(void* data) { model = (const seqcut::HeadModel*)data; }
+    virtual void setData(void* data) { model = (const seqcut::MlrHeadModel*)data; }
 
   private:
-    const seqcut::HeadModel* model;
+    const seqcut::MlrHeadModel* model;
 };
 
 namespace
@@ -92,12 +94,6 @@ struct FtCtx
     void finish() { ensure(0); }
 };
 
-Palette palette()
-{
-    Theme& t = display.getTheme();
-    return makePalette(t.backgroundColor, contrastFg(t.backgroundColor), t.red, t.orange, t.cyan);
-}
-
 View viewOf(seqcut::Cut* cut, uint8_t track)
 {
     if (cut)
@@ -112,8 +108,8 @@ View viewOf(seqcut::Cut* cut, uint8_t track)
 
 hControl s_hLanes = -1, s_hHeads = -1;
 bool s_visible = false;
-LaneModel s_lanes;
-HeadModel s_heads;
+MlrModel s_lanes;
+MlrHeadModel s_heads;
 uint32_t s_lastStatic = 0, s_lastHead = 0;
 bool s_have = false; // the models hold a frame that was handed to the display
 } // namespace
@@ -127,7 +123,7 @@ cSeqLanes::cSeqLanes(strControlProperties* properties) : cDisplayControl(control
     posY = properties->y;
     width = properties->w;
     height = properties->h;
-    model = (const LaneModel*)properties->data;
+    model = (const MlrModel*)properties->data;
     setStyle(properties->style);
 }
 
@@ -137,7 +133,7 @@ void cSeqLanes::update()
         return;
     API_SAVE_CONTEXT();
     FtCtx c;
-    drawLanes(c, *model, palette());
+    drawMlr(c, *model);
     c.finish();
     API_RESTORE_CONTEXT();
 }
@@ -150,7 +146,7 @@ cSeqPlayheads::cSeqPlayheads(strControlProperties* properties) : cDisplayControl
     posY = properties->y;
     width = properties->w;
     height = properties->h;
-    model = (const HeadModel*)properties->data;
+    model = (const MlrHeadModel*)properties->data;
     setStyle(properties->style);
 }
 
@@ -160,7 +156,7 @@ void cSeqPlayheads::update()
         return;
     API_SAVE_CONTEXT();
     FtCtx c;
-    drawHeads(c, *model, palette());
+    drawMlrHeads(c, *model);
     c.finish();
     API_RESTORE_CONTEXT();
 }
@@ -215,40 +211,64 @@ void laneViewShow(bool show)
     }
 }
 
-bool laneViewRefresh(bool force, uint8_t firstTrack)
+bool laneViewRefresh(bool force)
 {
     if (!s_visible || s_hLanes < 0 || s_hHeads < 0)
         return false;
     const uint32_t now = seqNowMs();
     bool changed = false;
-    const uint8_t first = groupFirst(firstTrack);
     seqcut::Cut* cut = seqEngine.cut();
+    uint8_t pos[kSlots], uStep[kSlots];
 
-    // static part: rebuilt at most every 100 ms (the note scan is 4 x up to 128 steps), redrawn only when it differs
+    // static part: rebuilt at most every 100 ms, redrawn only when it differs (the legend follows the playheads: its model holds them)
     if (force || !s_have || (uint32_t)(now - s_lastStatic) >= 100)
     {
         s_lastStatic = now;
-        LaneModel m;
+        MlrModel m;
         memset(&m, 0, sizeof(m));
-        m.first = first;
         m.recHeld = cutRecHeld() ? 1 : 0;
-        for (uint8_t r = 0; r < kRows; r++)
+        m.legend = cutLegendShown() ? 1 : 0;
+        m.pickSlot = (uint8_t)cutPickSlot();
+        const uint16_t has = cutPickSlot() >= 0 ? seqCutTracksWithNotes() : 0;
+        for (uint8_t k = 0; k < kSlots; k++)
         {
-            const uint8_t t = (uint8_t)(first + r);
+            const uint8_t t = cutSlotTrack(k);
             const View v = viewOf(cut, t);
-            LaneInfo& l = m.lane[r];
+            SlotInfo& l = m.slot[k];
             l.track = t;
             l.flags = v.flags;
+            l.flags2 = v.flags2;
+            l.spp = (uint8_t)((v.flags2 & V2_GRID8) ? 2 : 4);
+            l.sec = v.sec;
+            l.nsec = v.nsec;
+            l.pads = v.pads;
             l.loopLo = v.loopLo;
             l.loopHi = v.loopHi;
-            int steps = sequencer.seqCutSteps(t);
-            l.steps = (uint8_t)(steps > kMaxSteps ? kMaxSteps : steps);
+            l.picking = cutPickSlot() == (int8_t)k;
+            l.muted = seqCutTrackMuted(t);
+            l.rec = cutTrackRecArmed(t) ? 1 : 0;
+            l.has = has;
+            l.cacheMask = seqmlr::cacheMask(k);
+            const WaveCol* w = seqmlr::wave(k);
+            l.waveOk = w != nullptr;
+            if (w)
+                memcpy(l.wave, w, sizeof(l.wave));
+            // note marks: a pad whose steps hold a note
+            const int steps = sequencer.seqCutSteps(t);
             uint8_t map[kMaxSteps];
             memset(map, 0, sizeof(map));
-            sequencer.seqCutNoteMap(t, l.steps, map);
-            for (int i = 0; i < l.steps; i++)
-                if (map[i] == 1)
-                    noteBitSet(l.notes, i);
+            sequencer.seqCutNoteMap(t, (uint8_t)(steps > kMaxSteps ? kMaxSteps : steps), map);
+            const int base = v.sec * sectionSteps(l.spp);
+            for (int p = 0; p < kMlrPads; p++)
+                for (int i = 0; i < l.spp; i++)
+                {
+                    const int st = base + p * l.spp + i;
+                    if (st < steps && st < kMaxSteps && map[st] == 1)
+                        l.noteMask |= (uint16_t)(1u << p);
+                }
+            uint8_t last = 0;
+            sequencer.seqTrackPos(t, pos[k], uStep[k], last);
+            m.legendPad[k] = padOfPos(pos[k], v.sec, l.spp);
         }
         if (force || !s_have || memcmp(&m, &s_lanes, sizeof(m)) != 0)
         {
@@ -259,17 +279,18 @@ bool laneViewRefresh(bool force, uint8_t firstTrack)
     }
 
     // moving part: the lines move smoothly (1/48 step), the redraw is capped at 25 fps
-    HeadModel h;
+    MlrHeadModel h;
     memset(&h, 0, sizeof(h));
-    for (uint8_t r = 0; r < kRows; r++)
+    for (uint8_t k = 0; k < kSlots; k++)
     {
-        const uint8_t t = (uint8_t)(first + r);
-        uint8_t pos = 0, uStep = 1, last = 0;
-        sequencer.seqTrackPos(t, pos, uStep, last);
-        h.h[r] = makeHead(viewOf(cut, t), pos, kRedrawPerStep ? 1 : uStep, sequencer.seqCutStockPos(t), s_lanes.lane[r].steps); // kRedrawPerStep: the line only moves at a step
+        const uint8_t t = cutSlotTrack(k);
+        uint8_t p = 0, u = 1, last = 0;
+        sequencer.seqTrackPos(t, p, u, last);
+        h.h[k] = makeMlrHead(viewOf(cut, t), p, kRedrawPerStep ? 1 : u, sequencer.seqCutStockPos(t));
     }
-    barBeat(sequencer.seqCutStockPos(0), h.bar, h.beat);
+    barBeat(sequencer.seqCutStockPos(cutSlotTrack(0)), h.bar, h.beat);
     h.recHeld = s_lanes.recHeld;
+    h.legend = s_lanes.legend;
     const bool moved = !s_have || memcmp(&h, &s_heads, sizeof(h)) != 0;
     if (force || redrawDue(moved, now, s_lastHead))
     {
@@ -285,11 +306,6 @@ bool laneViewRefresh(bool force, uint8_t firstTrack)
 bool cutShiftHeld()
 {
     return ModuleBase::buttons->isButtonPressed(interfaceButtonShift);
-}
-
-void laneViewRequestGroup(uint8_t firstTrack)
-{
-    seqSession.selectGroup(firstTrack);
 }
 
 bool laneViewAnyOffGrid()
