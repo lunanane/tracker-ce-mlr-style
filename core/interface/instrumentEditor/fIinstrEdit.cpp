@@ -85,7 +85,8 @@ static void onNoteKeyboardHide();
 
 void cInstrumentEditor::update()
 {
-    moduleRefresh = 0;
+    // v0.4.1: moduleRefresh stays set (stock cleared it here, so Interface::update called this once after start() and never again):
+    // the pitch view, the PolySynth CPU readout and the warp readout below need every main loop pass
 #ifdef FEATURE_PLINKY
     plinkyRefresh();
 #endif

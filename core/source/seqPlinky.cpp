@@ -367,9 +367,10 @@ void seqPlinkyFillModel(seqplinky::Model& m)
     m.peak = (uint8_t)(seqPlinkyCpuPeak() + 0.5f);
     m.newer = seqPlinkyNewerFile() ? 1 : 0;
 }
-const void* seqPlinkyTraceRing(int voice) { return eng().traceRing(voice); } // pool voice 0 .. kPool - 1
-unsigned seqPlinkyTraceLen() { return plinkyvoice::kTraceLen; }
-uint16_t seqPlinkyTraceHead() { return eng().traceHeadIndex(); }
+void seqPlinkyLiveVoice(int voice, bool* on, uint8_t* inst, float* pitch, float* env, uint32_t* serial)
+{
+    eng().liveVoice(voice < 0 ? 0 : (voice >= kPool ? kPool - 1 : voice), *on, *inst, *pitch, *env, *serial);
+}
 
 bool seqPlinkyNewerFile() { return s_newerFile; }
 

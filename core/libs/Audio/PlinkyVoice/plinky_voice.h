@@ -274,6 +274,7 @@ struct Inst
     bool smoothed;
     // plan 019 B: LFO random shapes, chorus
     float lfoHeld, lfoPrev;
+    float vibNow;      // v0.4.1: LFO / bend pitch offset of the last rendered block (semitones), read by the pitch view (liveVoice)
     uint32_t lfoRng;
     float chPhase;
     int16_t* chMem;    // 2 * kChLen samples (left line, right line), raw storage owned by the caller; null = no chorus
@@ -290,6 +291,7 @@ struct Inst
         wtPrev = -1.0f;
         smoothed = false;
         lfoHeld = lfoPrev = 0;
+        vibNow = 0;
         lfoRng = 0x2545F491u + (uint32_t)idx * 7919u;
         chPhase = 0;
         chMem = nullptr;
@@ -423,6 +425,18 @@ class Engine
         return n;
     }
     const Voice& voice(int i) const { return v[i]; }
+    // v0.4.1 (pitch view): the live state of pool voice i, plain reads from any context (a torn read shows at worst one wrong point):
+    // sounding, its instance, pitch in semitones (base note + glide position + the instance's LFO / bend offset), envelope 0..1, and the
+    // serial of its last note start (changes with every note on that took the voice: a note that began and ended between two reads)
+    void liveVoice(int i, bool& on, uint8_t& inst, float& pitch, float& env, uint32_t& serial) const
+    {
+        const Voice& vo = v[i];
+        on = vo.stage != ST_IDLE;
+        inst = vo.inst < kInstances ? vo.inst : 0;
+        pitch = vo.pitch + in[inst].vibNow;
+        env = vo.env;
+        serial = vo.serial;
+    }
     // pitch trace ring (any context, read only): sample k of voice i is trace[i][k & (kTraceLen - 1)], the newest is head - 1.
     // TraceSample.on: bit 0 = sounds, bits 1 and 2 = the instance of the voice at that time.
     const TraceSample* traceRing(int i) const { return trace[i]; }
@@ -493,6 +507,7 @@ class Engine
             }
             Derived d;
             derive(I, d);
+            I.vibNow = d.vib;
             memset(busL, 0, sizeof(busL));
             memset(busR, 0, sizeof(busR));
             for (int i = 0; i < kPool; i++)
