@@ -51,8 +51,8 @@ inline const char* quantName(uint8_t mode)
 
 // Screen button (0-based) of SYNC ALL in the CUT layer: button 6 = seqsession::kButtonLayer (the layer's own button; static_assert in
 // cutSessionLayer.h); 7 is an empty gap and 8 switches CLIPS <-> CUT (both owned by the host).
-enum { kScreenButtonSyncAll = 5, kScreenButtonQuant = 4, kScreenButtonRec = 6 };
-// Button 5 (index 4) = jump quantise (tap cycles off / step / beat / bar, its label shows the value); button 7 (index 6) shows [REC] while a take is armed.
+enum { kScreenButtonSyncAll = 5, kScreenButtonQuant = 4, kScreenButtonRec = 6, kScreenButtonBeatRpt = 3 };
+// Button 4 (index 3) = BeatRpt (plan 021). Button 5 (index 4) = jump quantise (tap cycles off / step / beat / bar, its label shows the value); button 7 (index 6) shows [REC] while a take is armed.
 
 // Group of 4 tracks: firstTrack is clamped to 0, 4, 8, 12 (anything in between rounds down).
 inline uint8_t groupFirst(uint8_t firstTrack) { return (uint8_t)((firstTrack > 15 ? 12 : firstTrack) & ~3); }

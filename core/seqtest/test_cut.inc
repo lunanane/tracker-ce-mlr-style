@@ -4,6 +4,7 @@
 #include "cutLayer.h"
 #include "cutSessionLayer.h"
 #include "laneDraw.h"
+#include "seqBeatRepeat.h"
 #include <stdlib.h>
 
 // Stand-ins for the firmware-only parts of the CUT screen (laneView.cpp: display controls, Shift button, Session host).
@@ -18,6 +19,17 @@ void laneViewShow(bool show) { if (show) g_laneShow++; else g_laneHide++; }
 bool laneViewRefresh(bool) { return false; }
 bool cutShiftHeld() { return g_shiftHeld; }
 bool laneViewAnyOffGrid() { return seqEngine.cut() != 0 && seqEngine.cut()->activeMask() != 0; }
+
+// Stand-ins of the beat repeat glue (seqBeatRepeat.cpp): the controller state is the real seqbr::Ui, the commands to the audio side are recorded.
+static seqbr::Ui g_brUi;
+static std::vector<seqbr::Result> g_brActs;
+static int g_brPanics = 0;
+static beatrepeat::Status g_brStatus;
+static bool g_brHaveStatus = false;
+seqbr::Ui& seqBrUi() { return g_brUi; }
+void seqBrAct(const seqbr::Result& r) { g_brActs.push_back(r); }
+void seqBrPanic() { g_brUi.panic(); g_brPanics++; }
+bool seqBrStatus(beatrepeat::Status* st) { *st = g_brStatus; return g_brHaveStatus; }
 
 
 // ---- legacy-row shim (plan 016 A) -------------------------------------------------------------------------------------------------
@@ -1924,7 +1936,7 @@ static void test_mlr_slots_layer()
     // the picker: "Assign 1" turns the rows 1-2 into a track picker, the other slot keeps meshing; again = cancel
     char lab[12];
     CHECK(a.buttonLabel(kButtonAssign1, lab) && strcmp(lab, "Assign 1") == 0 && a.buttonLabel(kButtonAssign2, lab) && strcmp(lab, "Assign 2") == 0);
-    CHECK(a.buttonLabel(kButtonHelp, lab) && strcmp(lab, "Help") == 0 && a.buttonLabel(3, lab) && lab[0] == 0);
+    CHECK(a.buttonLabel(kButtonHelp, lab) && strcmp(lab, "Help") == 0 && a.buttonLabel(3, lab) && strcmp(lab, "BeatRpt") == 0); // plan 021: the free screen button 4 is BeatRpt now (was: empty)
     CHECK(a.button(kButtonAssign1, true) && a.button(kButtonAssign1, false) && cutPickSlot() == 0);
     CHECK(a.buttonLabel(kButtonAssign1, lab) && strcmp(lab, "[Assign 1]") == 0);
     uint8_t leds[kCutPads];

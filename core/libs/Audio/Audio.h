@@ -53,6 +53,7 @@
 #include "effect_bitDepth.h"
 #include "effect_dynamics.h"
 #include "effect_limiter.h"
+#include "effect_beatRepeat.h"
 #include "effect_polyverb.h"
 #include "effect_shortDelay.h"
 #include "filter_variable.h"

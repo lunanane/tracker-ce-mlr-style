@@ -260,6 +260,9 @@ void audioEngine::init(Platform* platform, [[maybe_unused]] Synth* synth)
 
     limiter[AudioOutput::OutputChannels::kLeft]->begin();
     limiter[AudioOutput::OutputChannels::kRight]->begin();
+#ifdef FEATURE_BEAT_REPEAT
+    beatRepeat.begin(); // plan 021: attaches the SDRAM slice ring (raw storage, no constructor)
+#endif
 
     setLimiterSidechain(mtProject.values.limiterSidechain);
 
@@ -562,6 +565,17 @@ void audioEngine::connectInputToOutput(AudioInput* input, AudioOutput* output)
 
 void audioEngine::connectMixerToOutput(MixerAndFxs<kVoices>* mixerAndFxs, AudioOutput* output)
 {
+#ifdef FEATURE_BEAT_REPEAT
+    // plan 021: tracks + sends mixer -> beat repeat (master insert, passes untouched while idle) -> limiter
+    connections.push_back(
+      new AudioConnection(mixerAndFxs->getTracksAndSendsMixer(MixerAndFxChannelType::kLeft), 0, &beatRepeat, 0));
+    connections.push_back(
+      new AudioConnection(mixerAndFxs->getTracksAndSendsMixer(MixerAndFxChannelType::kRight), 0, &beatRepeat, 1));
+    connections.push_back(
+      new AudioConnection(&beatRepeat, 0, output->getLimiter(AudioOutput::OutputChannels::kLeft), 0));
+    connections.push_back(
+      new AudioConnection(&beatRepeat, 1, output->getLimiter(AudioOutput::OutputChannels::kRight), 0));
+#else
     connections.push_back(
       new AudioConnection(mixerAndFxs->getTracksAndSendsMixer(MixerAndFxChannelType::kLeft),
                           0,
@@ -573,6 +587,7 @@ void audioEngine::connectMixerToOutput(MixerAndFxs<kVoices>* mixerAndFxs, AudioO
                           0,
                           output->getLimiter(AudioOutput::OutputChannels::kRight),
                           0));
+#endif
 
 #ifdef PLATFORM_IMX
     static constexpr int kPolyverbLeftUsbStreamIdx = 16;

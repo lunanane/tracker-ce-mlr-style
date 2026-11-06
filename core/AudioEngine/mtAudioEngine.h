@@ -218,6 +218,7 @@ class audioEngine
     void applyPlinkySends();
     float getPlinkyCpuPercent() { return plinky.cpuPercent(); }
     float getPlinkyCpuPeakPercent() { return plinky.cpuPeakPercent(); }
+    AudioEffectBeatRepeat* getBeatRepeat() { return &beatRepeat; }
     float getTempoBpm() const { return currentTempo; } // plan 016 B: the tempo the audio blocks follow (Warp); 0 before the first block
 #endif
 
@@ -278,6 +279,9 @@ class audioEngine
     std::optional<uint8_t> lastSynthFxId[kSynthParts][2];
 #endif
     ExportQueues exportQueues;
+#ifdef FEATURE_BEAT_REPEAT
+    AudioEffectBeatRepeat beatRepeat; // plan 021: master insert before the limiter; declared (so updated) after the mixers and before the limiter
+#endif
     AudioOutput output;
     AudioAnalyzeRMS* delayRms[(int)MixerAndFxChannelType::kChannelCount];
     AudioAnalyzeRMS* polyverbRms[(int)MixerAndFxChannelType::kChannelCount];

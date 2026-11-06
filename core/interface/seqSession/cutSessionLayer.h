@@ -1,7 +1,8 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 // CUT (MLR) page as a Session layer: adapts the free functions of cutLayer.h to seqsession::SessionLayer
 // and owns the lane screen (laneView.*, plan 005 R4, plan 016 A). Two SLOTS (A = pad rows 1-2, B = rows 3-4) each hold one track.
-// Screen buttons: 1 / 2 = Assign slot 1 / 2 (the slot's rows become a track picker), 3 = Help (pad legend on the screen), 5 = jump
+// Screen buttons: 1 / 2 = Assign slot 1 / 2 (the slot's rows become a track picker), 3 = Help (pad legend on the screen), 4 = BeatRpt (plan 021: the pads
+// and the screen switch to the beat repeat controls, MLR keeps playing), 5 = jump
 // quantise (Q off / step / beat / bar), 6 = SYNC ALL (the layer's own button kButtonLayer); 7 shows [REC] while a take is armed and
 // 8 switches back to CLIPS (the host's, this layer returns false for it). The layer draws its own screen: the host hides its title and
 // info lines. The host's group buttons are not used here (the layer takes the buttons 1-4 first), Left / Right do nothing.
@@ -53,7 +54,7 @@ class CutSessionLayer : public SessionLayer
         snprintf(lines[0], 48, "A: track %d   B: track %d", cutSlotTrack(0) + 1, cutSlotTrack(1) + 1);
         snprintf(lines[1], 48, "Pads 1-16: jump, two = latched loop");
         snprintf(lines[2], 48, "STOP REV RATE RSYNC / GRID SECT REC MUTE");
-        snprintf(lines[3], 48, "Help = pad legend");
+        snprintf(lines[3], 48, "Help = pad legend   BeatRpt = beat repeat");
     }
 
     // ---- own screen ----
@@ -75,8 +76,12 @@ class CutSessionLayer : public SessionLayer
                 cutLegendToggle();
             return true;
         }
-        if (i == 3)
-            return true; // empty
+        if (i == seqcut::kScreenButtonBeatRpt)
+        {
+            if (down)
+                cutBrToggle(); // plan 021: the pads and the screen switch between MLR and the beat repeat controls
+            return true;
+        }
         if (i == seqcut::kScreenButtonQuant)
         {
             if (down)
@@ -102,9 +107,9 @@ class CutSessionLayer : public SessionLayer
             snprintf(out, 12, "%s", cutLegendShown() ? "[Help]" : "Help");
             return true;
         }
-        if (i == 3)
+        if (i == seqcut::kScreenButtonBeatRpt)
         {
-            out[0] = 0;
+            snprintf(out, 12, "%s", cutBrActive() ? "[BeatRpt]" : "BeatRpt");
             return true;
         }
         if (i == seqcut::kScreenButtonQuant)

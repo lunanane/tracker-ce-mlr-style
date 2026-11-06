@@ -1,6 +1,7 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 #include "cutLayer.h"
 #include "seqTracks.h"
+#include "seqBeatRepeat.h"
 #include "seqCutLogic.h"
 #include "seqMlrLogic.h"
 #include <string.h>
@@ -13,6 +14,7 @@ uint8_t s_slot[kSlots] = { 0, 1 }; // the track each slot holds (plan 016 A: slo
 int8_t s_pick = -1;                // slot whose two pad rows are the track picker, -1 = none
 bool s_legend = false;             // the pad legend is shown on the screen
 bool s_rec = false;
+bool s_brOn = false;               // plan 021: the pads are the beat repeat controls (the MLR state underneath is untouched)
 uint16_t s_recTracks = 0; // tracks whose take was started while Rec was held
 int8_t s_heldTrack[kCutPads];
 bool s_init = false;
@@ -103,6 +105,44 @@ void cutPickToggle(uint8_t slot)
 }
 int8_t cutPickSlot() { return s_pick; }
 void cutLegendToggle() { s_legend = !s_legend; }
+
+// ---- plan 021: beat repeat on the pads (fader page layout, seqBeatRepeatLogic.h). The MLR layer keeps playing underneath; its holds,
+// loops and takes are not touched by the switch.
+bool cutBrActive() { return s_brOn; }
+
+void cutBrToggle()
+{
+    init();
+    if (s_brOn)
+    {
+        // back to MLR: the grid pads in the hand are let go (a latched repeat goes on)
+        seqbr::Ui& ui = seqBrUi();
+        if (ui.releaseAll())
+        {
+            seqbr::Result r = { seqbr::BA_UP, 0 };
+            seqBrAct(r);
+        }
+        s_brOn = false;
+        return;
+    }
+    // MLR pads in the hand are let go first (a held pad would otherwise never see its release), the track picker closes
+    for (uint8_t i = 0; i < kCutPads; i++)
+        if (s_heldTrack[i] >= 0)
+            cutPad((uint8_t)(i % kCols), (uint8_t)(i / kCols), false);
+    s_pick = -1;
+    s_brOn = true;
+}
+
+namespace
+{
+void brPad(uint8_t col, uint8_t row, bool down)
+{
+    seqbr::Result r[2];
+    const int n = seqBrUi().pad(col, row, down, r);
+    for (int i = 0; i < n; i++)
+        seqBrAct(r[i]);
+}
+} // namespace
 bool cutLegendShown() { return s_legend; }
 
 void cutPad(uint8_t col, uint8_t row, bool down, bool shift)
@@ -110,6 +150,11 @@ void cutPad(uint8_t col, uint8_t row, bool down, bool shift)
     if (col >= kCols || row >= kRows)
         return;
     init();
+    if (s_brOn)
+    {
+        brPad(col, row, down);
+        return;
+    }
     const uint8_t idx = (uint8_t)(row * kCols + col);
     const PadInfo pi = padInfo(col, row);
     if (pi.role == PR_STEP && s_pick == (int8_t)pi.slot)
@@ -199,6 +244,27 @@ void cutLeds(uint8_t* out48)
 {
     init();
     trySync(); // called on every redraw: also retries lost releases and a SYNC ALL
+    if (s_brOn)
+    {
+        seqbr::Ui& ui = seqBrUi();
+        seqbr::LedState ls;
+        memset(&ls, 0, sizeof(ls));
+        ls.page = ui.page;
+        ls.mode = ui.prm.mode;
+        ls.latch = ui.latch ? 1 : 0;
+        ls.heldMask = ui.heldMask();
+        memcpy(ls.step, ui.prm.step, sizeof(ls.step));
+        beatrepeat::Status st;
+        memset(&st, 0, sizeof(st));
+        if (seqBrStatus(&st))
+        {
+            ls.state = st.state;
+            ls.eventGrid = st.grid;
+        }
+        s_blink++;
+        seqbr::fillLeds(ls, ((s_blink >> 3) & 1u) != 0, out48);
+        return;
+    }
     SlotLeds sl[kSlots];
     Cut* c = seqEngine.cut();
     const uint16_t has = s_pick >= 0 ? seqCutTracksWithNotes() : 0;
@@ -261,12 +327,18 @@ void cutPanic()
 {
     init();
     cutReleaseAll(); // holds and open takes end (the releases go first, in order)
+    seqBrPanic();    // plan 021: Stop ends any beat repeat, the latch is off
     cutSyncAll();
 }
 
 void cutReleaseAll()
 {
     init();
+    if (seqBrUi().releaseAll()) // plan 021: grid pads in the hand are let go (a latched repeat goes on)
+    {
+        seqbr::Result r = { seqbr::BA_UP, 0 };
+        seqBrAct(r);
+    }
     for (uint8_t i = 0; i < kCutPads; i++)
         if (s_heldTrack[i] >= 0)
             cutPad((uint8_t)(i % kCols), (uint8_t)(i / kCols), false);
