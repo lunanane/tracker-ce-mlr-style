@@ -25,6 +25,7 @@ CPP_SRCS 	+= $(shell find ./3rdparty/ -name *.cpp)
 CPP_SRCS 	+= $(shell find ./source/ -name *.cpp)
 C_SRCS 	 	+= $(shell find ./3rdparty/ -name *.c)
 ASM_SRCS 	+= $(shell find ./3rdparty/ -name *.S)
+ASM_SRCS 	+= $(shell find ./source/ -name *.S)
 
 _CPP_OBJS	= $(patsubst ./%.cpp, %.o, $(CPP_SRCS))
 _C_OBJS		= $(patsubst ./%.c, %.o, $(C_SRCS))
@@ -56,6 +57,9 @@ else ifeq ($(PRODUCT), ORIGINAL)
 else 
 $(error Invalid PRODUCT value $(PRODUCT))
 endif
+
+# plan 019 step 0: the platform (teensy core, FatFs, SDMMC, USB) is built for size; only the I2S audio streams stay -O2
+$(filter-out $(OBJ_DIR)/3rdparty/Audio/%,$(OBJS)): COMPILER_OPTIONS += -Os
 
 CPP_OPTIONS=-std=gnu++17 -felide-constructors -includecstdint -fno-rtti -fno-exceptions 
 CC_OPTIONS=
@@ -89,6 +93,7 @@ pre-build:
 post-build: 
 	cp "$(BUILD_DIR)/$(TARGET).axf" "$(BUILD_DIR)/$(TARGET)_$(NOW)_$(TARGET_POSTFIX).axf"
 	sh check_sdram_ctors.sh "$(BUILD_DIR)/$(TARGET).axf" "$(TOOLCHAIN)"
+	sh check_image_size.sh "$(BUILD_DIR)/$(TARGET).axf" "$(TOOLCHAIN)"
 	$(TOOLCHAIN)objcopy --gap-fill=0xFF -v -O ihex "$(BUILD_DIR)/$(TARGET).axf" "$(BUILD_DIR)/$(TARGET)_$(TARGET_POSTFIX).ptf" 
 	$(TOOLCHAIN)objdump -S -C "$(BUILD_DIR)/$(TARGET).axf" > "$(BUILD_DIR)/$(TARGET)_$(NOW)_$(TARGET_POSTFIX).lss" 
 	$(TOOLCHAIN)size "$(BUILD_DIR)/$(TARGET).axf"

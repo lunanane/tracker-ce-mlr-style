@@ -4,6 +4,7 @@
 // clicks, the anti-aliasing of the saw, the event queue, and a cost measurement (printed, not asserted).
 #include "plinky_voice.h"
 #include "seqPlinkyMorphLogic.h"
+#include <algorithm>
 #include <chrono>
 #include <math.h>
 #include <stdio.h>
@@ -74,8 +75,9 @@ static void setOpenMono(Engine& e)
 
 static void test_params_and_sidecar()
 {
-    CHECK(P_COUNT == 21);
-    CHECK((int)P_COUNT <= (int)kPayload);
+    // plan 019 B: the engine extensions are appended after the 21 parameters of the version 1 file (kLegacyCount); they live in the PLVI frames
+    CHECK(kLegacyCount == 21 && P_COUNT == 33);
+    CHECK((int)kLegacyCount <= (int)kPayload);
     for (int i = 0; i < P_COUNT; i++)
     {
         const ParamInfo& pi = paramInfo(i);
@@ -1505,6 +1507,9 @@ static void test_cost()
     CHECK(!e.render(l, r));
 }
 
+#include "test_plinky3.inc"
+#include "test_plinky4.inc"
+
 int main()
 {
     test_params_and_sidecar();
@@ -1529,6 +1534,8 @@ int main()
     test_wt_sound();
     test_wt_no_clicks();
     test_wt_cpu();
+    test_x3_all();
+    test_x4_all();
     test_cost();
     printf("plinky: %d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;

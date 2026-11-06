@@ -383,8 +383,8 @@ static void test_pitch_device_path()
     }
     // the points of the last frame (both stages) per voice colour
     for (auto& s : lastFrame)
-        for (int v = 0; v < pitchtrace::kVoices; v++)
-            if (s.col == pitchtrace::voiceColor(v)) pts[v] += (int)s.x.size();
+        for (int v = 0; v < 4; v++) // plan 019: the chord has four voices (the ring has 8), instance 0 colours
+            if (s.col == pitchtrace::lineColor(0, v)) pts[v] += (int)s.x.size();
     printf("  pitch device path: %d frames, single stage up to %d FIFO bytes (FIFO %d), now stages <= %d; points per voice %d %d %d %d\n",
            frames, maxOld, (int)tracestage::kFifoBytes, maxStage, pts[0], pts[1], pts[2], pts[3]);
     CHECK(frames > 100);
@@ -393,7 +393,7 @@ static void test_pitch_device_path()
     CHECK(dropped == 0);
     CHECK(same);
     CHECK(frozen);
-    for (int v = 0; v < pitchtrace::kVoices; v++) CHECK(pts[v] >= 60); // every voice a pitch line with many points
+    for (int v = 0; v < 4; v++) CHECK(pts[v] >= 60); // every voice a pitch line with many points
     delete f;
     delete e;
 }

@@ -4,6 +4,10 @@
 #include "mtSequencer.h"
 #include "mtStructs.h"
 #include "patternEditor/patternEditor.h"
+#ifdef FEATURE_PLINKY
+#include "seqPlinky.h"
+#include "seqInstOrderLogic.h"
+#endif
 
 #include "ctype.h"
 #include "util_math.h"
@@ -1066,6 +1070,14 @@ uint8_t Sequencer::changeInstrumentInSpecificOrder(int8_t actualValue,
     {
         return MIDI_INSTRUMENTS_START_IDX;
     }
+#ifdef FEATURE_PLINKY
+    if (!midiTypeOnly)
+    {   // plan 019 A (owner): PolySynth 1 / 2 / 3 at the top of the list, then the stock order; only the order, the stored indices are unchanged
+        instorder::Layout L;
+        seqPlinkyFillLayout(L);
+        return (uint8_t)instorder::jogStep(L, actualValue, delta);
+    }
+#endif
 
     uint8_t uiChangeInstrumentOrder[instrumentCount];
     [[maybe_unused]] bool initArray = [&]() -> bool

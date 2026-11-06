@@ -909,6 +909,43 @@ Host tests (`core/seqtest`, `make test`): `plinky`: `test_morph_math`, `test_mor
 | Project > limiter sidechain = a kick track (sample), a PolySynth pad playing | The pad pumps with the kick, like a sample track would. |
 | Limiter sidechain off | The pad does not duck; the limiter still limits the mix. |
 
+## 11m. v0.4 part A: three PolySynths, shared pool + governor, Shift multi-edit, synths first (plan 019, Original Tracker only)
+
+Host tests: `core/seqtest` `test_plinky3.inc` (old-sound identity against golden hashes of the v0.3.8 engine for Voices 1..4, instances, pool, sends, governor, plinky.bin with three instances, multi-edit values, instrument order), `test_plinkyseq.inc` (tabs, ALL tag, exact command FIFO bytes of the view), `test_trace.cpp` / `test_stages.cpp` (8 pool voices in the pitch view).
+
+| # | Check on the device | Expected |
+| - | - | - |
+| 1 | Instrument picker (Instrument key, popup): top of the list | PolySynth 1, PolySynth 2, PolySynth 3, then samples 1..48, then MIDI channels 1..13 |
+| 2 | Instrument + jog in the pattern editor from the first step | steps PolySynth 1, 2, 3, then MIDI 13 .. 1, then the samples; stops at both ends |
+| 3 | Open a v0.3.x project that used the PolySynth (MIDI 16) | patterns play the same; the instrument is PolySynth 1 |
+| 4 | Play mode, a track on PolySynth 2, Instrument Parameters key | the view opens with the SYNTH 2 tab bright; each press: SYNTH 3, SYNTH 1, SYNTH 2 |
+| 5 | Instrument page of PolySynth 1, Params key | the page steps to PolySynth 2 and 3 (title, tab, values follow) |
+| 6 | Edit Cutoff on SYNTH 1, switch to SYNTH 2 | SYNTH 2 has its own value; save, reload: all three keep theirs |
+| 7 | Hold Shift while turning a dial | ALL tag appears; every instance moves by the same amount, each stops at its own limit |
+| 8 | Play 4 notes on each of the three synths | the pool holds 8 voices; the oldest/quietest voice is taken, no clicks |
+| 9 | Heavy project (many sample voices + reverb) with all three synths | the V readout drops below 8 under load, sound keeps going; it comes back after 2 s of headroom |
+| 10 | Pitch view (FX2) with notes on all three | teal, yellow and violet lines, lighter shades for further voices of one instance |
+| 11 | Reverb/Delay sends of PolySynth 2 and 3 | each instance has its own send level |
+| 12 | Open the project in v0.3.8 | PolySynth 1 sounds as saved; instances 2 and 3 are ignored |
+
+## 11n. v0.4 part B: PolySynth engine extensions (plan 019 B, Original Tracker only)
+
+Host tests: `core/seqtest/test_plinky4.inc` (defaults = old sound, subs and their aliasing, SVF / ladder responses and stability, filter envelope, LFO shapes and the level target, chorus, random parameter storm, plinky.bin extras, morph of the new parameters).
+
+| # | Check on the device | Expected |
+| - | - | - |
+| 1 | Open a project saved with v0.3.8 / v0.4 part A | sounds the same; the new parameters are at their defaults |
+| 2 | Cursor Down through the PolySynth view | 8 sections: Oscillator, Sub, Filter, Filter env, Envelope, LFO, Chorus, Voice; five rows show, a thin bar at the right edge marks the window |
+| 3 | Instrument page: the five screen buttons | name the five visible rows and jump to them; button 7 stays Pitch view |
+| 4 | Sub -1 / Sub -2 up | a square one / two octaves below the note, no buzzing at high notes |
+| 5 | Filter Type LPG / SVF LP / BP / HP / Ladder, move Cutoff and Reso | each type filters accordingly; the resonance of the ladder and SVF can ring but stays bounded; switching the type while a note sounds does not click loudly |
+| 6 | Filter env Amount above 50 with a short Dec and low Sus | the cutoff sweeps down after each note start; below 50 it sweeps up |
+| 7 | LFO Wave and Target Level | tremolo with the chosen shape; S&H steps, Smooth glides |
+| 8 | Chorus Mix 50..100 | the sound widens, no clicks when Mix is moved; each SYNTH has its own chorus |
+| 9 | Four voices on the ladder with Width 80 and all three synths busy | the V readout drops under load instead of glitching |
+| 10 | Morph between two patterns with different Type / Chorus / Filter env | stepped values (Type, Wave) switch at the start, the others glide |
+| 11 | Save, reload, open in v0.3.8 | all values return; v0.3.8 plays PolySynth 1 with the old parameters |
+
 ## 12. Stock behaviour (never enter Play mode, Session or the fader page)
 | Press | Expected |
 |---|---|

@@ -1055,6 +1055,13 @@ static void functSwitchModule(uint8_t button)
 
 static void functSwitchMode()
 {
+#ifdef FEATURE_PLINKY
+    if (IE->plinkyActive())
+    {
+        IE->plinkyCycleInstance(); // plan 019 A: on the PolySynth page the key steps the instance
+        return;
+    }
+#endif
     mtPopups.hideInfoPopup();
     sequencer.stopManualNotes();
 

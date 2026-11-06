@@ -1993,9 +1993,12 @@ void cInstrumentEditor::plinkyUpdateView(bool force)
         return;
     seqplinky::Model& m = plinkyView.plinky;
     plinkyView.mode = plinkyPitchView ? SeqPlayViewData::HIDDEN : SeqPlayViewData::PLINKY;
+    seqPlinkySetInst(seqPlinkyInstanceOf(mtProject.values.lastUsedInstrument)); // the page shows the instance of the chosen instrument
     seqPlinkyFillModel(m);
+    m.all = buttons->isButtonPressed(interfaceButtonShift) ? 1 : 0;
     m.sec = plinkyCur.sec;
     m.idx = plinkyCur.idx;
+    m.top = plinkyCur.top;
     m.track = 0; // 0 = the instrument page (no track number, own hint line)
     if (!force && plinkyShownValid && plinkyShownMode == plinkyView.mode && memcmp(&plinkyShownModel, &m, sizeof(m)) == 0)
         return;
@@ -2046,14 +2049,14 @@ void cInstrumentEditor::showPlinkyParams()
     for (uint8_t i = 0; i < 8; i++)
     {
         display.setControlValue(label[i], 1);
-        display.setControlColors(label[i], (i < seqplinky::kSections && i == plinkyCur.sec) ? th.highlightedButtonLabelsColors : th.activeLabelsColors);
+        display.setControlColors(label[i], (i < seqplinky::kVisible && plinkyCur.top + i == plinkyCur.sec) ? th.highlightedButtonLabelsColors : th.activeLabelsColors);
         display.setRemoveControlStyle(label[i], controlStyleLimitTextWidth);
         display.setControlStyle2(label[i], controlStyleCenterX | controlStyleCenterY | controlStyleFont2);
         display.setRemoveControlStyle(label[i], controlStyleShowBitmap);
         display.setRemoveControlStyle(label[i], controlStyleSpecialFx2);
-        if (i < seqplinky::kSections)
+        if (i < seqplinky::kVisible) // plan 019 B: the buttons name the five visible sections (the window scrolls with the cursor)
         {
-            display.setControlText(label[i], seqplinky::section(i).name);
+            display.setControlText(label[i], seqplinky::section((uint8_t)(plinkyCur.top + i)).name);
             display.setControlText2(label[i], "");
         }
         else if (i == 6)
@@ -2102,11 +2105,30 @@ void cInstrumentEditor::showPlinkyParams()
     plinkyUpdateView(true);
 }
 
+// plan 019 A: the Params key on the PolySynth page steps SYNTH 1 -> 2 -> 3 -> 1 (the chosen instrument becomes the next instance's slot)
+void cInstrumentEditor::plinkyCycleInstance()
+{
+    const int next = (seqPlinkyInstanceOf(mtProject.values.lastUsedInstrument) + 1) % 3;
+    const int instr = seqPlinkyInstrumentOf(next);
+    if (instr < 0)
+        return;
+    mtProject.values.lastUsedInstrument = instr;
+    seqPlinkySetInst(next);
+    showPlinkyCpu(true);
+    titleBar->setTitle(plinkyTitle);
+    titleBar->showCurrentInstrumentOnRightLabel();
+    plinkyUpdateView(true);
+}
+
 void cInstrumentEditor::plinkyChange(int d)
 {
     const int p = plinkyCur.param();
-    const bool fine = buttons->isButtonPressed(interfaceButtonShift);
-    seqPlinkySet(p, seqplinky::jogValue(p, seqPlinkyGet(p), d, fine));
+    const int cur = seqPlinkyGet(p);
+    const int nv = seqplinky::jogValue(p, cur, d, false);
+    if (buttons->isButtonPressed(interfaceButtonShift))
+        seqPlinkySetAll(p, nv - cur); // plan 019 A: Shift + dial = the same delta on ALL instances
+    else
+        seqPlinkySet(p, nv);
     if (!plinkyActive())
     {
         showInstrumentMidiParams(); // the channel was changed away: back to the MIDI settings
@@ -2158,9 +2180,9 @@ bool cInstrumentEditor::plinkyButton(uint8_t button, uint8_t state)
             plinkyTogglePitch();
             return true;
         }
-        if (button < seqplinky::kSections)
+        if (button < seqplinky::kVisible)
         {
-            plinkyCur.sec = button;
+            plinkyCur.sec = (uint8_t)(plinkyCur.top + button);
             plinkyCur.fix();
             showPlinkyParams();
         }

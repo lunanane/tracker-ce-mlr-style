@@ -143,6 +143,7 @@ class SeqPlayOverlay
     bool paramsTaken_ = false;     // the Instrument Parameters press was ours (its hold / release are too)
     seqplinky::Cursor plinkyCur_;
     uint32_t plinkyTime_ = 0;
+    uint8_t plinkySel_ = 0xFF;     // the track whose instance the view shows (plan 019)
     uint32_t notesTime_ = 0;
     seqnotes::Band notesBand_;
     char ownerMsg_[24];

@@ -120,6 +120,8 @@ void cSeqPlayLegend::update()
 
     if (view->mode == SeqPlayViewData::PLINKY)
     {
+        // FIFO rule (v0.3.9, seqTraceStages.h): this is ONE display stage, a burst into the 4 KB FT81x command FIFO; the exact byte count of the worst
+        // case (tabs, all rows, ALL tag, morph title, voices) is measured by test_plinkyseq.inc and stays under 3840
         seqplinky::Palette pal = { th.backgroundColor, th.grey_22, 0x555555, th.white, th.cyan, th.yellow, 0x000000, th.cyan };
         PlinkyCtx c;
         seqplinky::draw(c, view->plinky, pal);

@@ -397,6 +397,7 @@ class cInstrumentEditor : public ModuleBase
     void plinkyChange(int d);
     void plinkyDefault();
     bool plinkyNav(uint8_t button);                   // Left / Right / Up / Down: the view's cursor (v0.3.6)
+    void plinkyCycleInstance();                       // plan 019: Params key -> next PolySynth instance
     void plinkyTogglePitch();                         // FX2 / labelled button: pitch view <-> parameters
     void plinkyUpdateView(bool force);
     bool plinkyButton(uint8_t button, uint8_t state); // true = consumed

@@ -92,7 +92,7 @@ static void test_engine_ring()
 {
     // ring layout equals the logic header's sample
     CHECK(sizeof(TraceSample) == sizeof(pitchtrace::Sample));
-    CHECK(kMaxVoices == pitchtrace::kVoices);
+    CHECK(kPool == pitchtrace::kVoices); // plan 019: the ring has one line per pool voice (8), was 4
     // v0.3.7 (plan 015 V): the engine ring only has to bridge the main loop gaps (the follower keeps its own 3.9 s window of kWin samples):
     // a power of two holding at least 400 ms, one sample every 2 blocks, and kWin samples are 3.9 s
     CHECK((kTraceLen & (kTraceLen - 1)) == 0 && kTraceLen * kTraceEvery * kBlockSec >= 0.4f);
@@ -195,6 +195,7 @@ struct FakeRing
 {
     pitchtrace::Sample s[pitchtrace::kVoices][128];
     uint16_t head = 0;
+    FakeRing() { memset(s, 0, sizeof(s)); } // plan 019: voices that nothing writes (the ring has 8) stay silent
     void put(int pitch, int env, int on)
     {
         for (int v = 0; v < pitchtrace::kVoices; v++)
@@ -352,7 +353,7 @@ static Seen drawSeen(Sim& s)
     }
     for (size_t i = 0; i < c.stripY.size(); i++)
         for (int v = 0; v < pitchtrace::kVoices; v++)
-            if (c.stripColor[i] == pitchtrace::voiceColor(v))
+            if (c.stripColor[i] == pitchtrace::lineColor(0, v))
             {
                 o.strips[v]++;
                 o.points[v] += (int)c.stripY[i].size();
@@ -478,7 +479,7 @@ static void test_pitch_layout_and_size()
         for (int v = 0; v < pitchtrace::kVoices; v++) { /* put() writes all voices; shape per voice below */ }
     for (int i = 0; i < pitchtrace::kWin; i++)
     {
-        for (int v = 0; v < pitchtrace::kVoices; v++)
+        for (int v = 0; v < 4; v++) // plan 019: the ring has 8 voices now; this case is the four voice one of v0.3.7
         {
             pitchtrace::Sample& x = ring.s[v][ring.head & 127];
             x.pitch = (int16_t)(((24 + v * 24) * 32) + (int)(sin(i * 0.9 + v) * 40.0));
@@ -509,8 +510,10 @@ static void test_pitch_layout_and_size()
         for (size_t i = 0; i < envY.size() && 2 * i + 1 < pitY.size(); i++) above = above && envY[i] <= pitY[2 * i + 1];
     }
     CHECK(above);
-    // colours: the pitch lines carry the four key colours
-    CHECK(c.stripColor[1] == seqpal::kNote && c.stripColor[3] == seqpal::kInstr && c.stripColor[5] == seqpal::kFx1 && c.stripColor[7] == seqpal::kFx2);
+    // colours (plan 019): the lines of one instance carry its colour (SYNTH 1 = Note teal), each further simultaneous voice a little lighter
+    CHECK(c.stripColor[1] == pitchtrace::lineColor(0, 0) && c.stripColor[3] == pitchtrace::lineColor(0, 1) &&
+          c.stripColor[5] == pitchtrace::lineColor(0, 2) && c.stripColor[7] == pitchtrace::lineColor(0, 3));
+    CHECK(pitchtrace::lineColor(0, 0) == seqpal::kNote);
     CHECK(c.stripColor[0] == seqpal::dim(seqpal::kNote));
 
     // case 2: a pathological on / off pattern (runs of two points): every curve in many short strips

@@ -637,18 +637,31 @@ void SeqPlayOverlay::syncPattern()
     }
 }
 
+// plan 019 A: the first press opens the PolySynth view on the instance of the selected track; every further press (Instrument Parameters
+// key, or a screen button held + Instrument) steps SYNTH 1 -> 2 -> 3 -> 1. The view ends with the Pattern / Play key (leaving Play mode),
+// another non-PolySynth track, or a popup, as before.
 void SeqPlayOverlay::plinkyToggle()
 {
+#ifdef FEATURE_PLINKY
+    if (plinkyOpen_)
+    {
+        seqPlinkyCycleInst();
+        return;
+    }
+#else
     if (plinkyOpen_)
     {
         plinkyClose();
         return;
     }
+#endif
 #ifdef FEATURE_PLINKY
     // v0.3.2: the overlay belongs to the PolySynth instrument, whatever sequencer type the track has
     if (seqPlinkyTrackUsesVoice(selected()))
     {
         plinkyOpen_ = true;
+        plinkySel_ = selected();
+        seqPlinkySetInst(seqPlinkyTrackInstance(selected())); // the instance of this track (PolySynth 1 when it has none)
         plinkyCur_.fix();
         legend_.close(); // no legend over it
         syncPattern();
@@ -670,8 +683,12 @@ void SeqPlayOverlay::plinkyJog(int16_t value)
 {
 #ifdef FEATURE_PLINKY
     const int p = plinkyCur_.param();
-    const bool fine = PE().buttons->isButtonPressed(interfaceButtonShift);
-    seqPlinkySet(p, seqplinky::jogValue(p, seqPlinkyGet(p), value, fine));
+    const int cur = seqPlinkyGet(p);
+    const int nv = seqplinky::jogValue(p, cur, value, false);
+    if (PE().buttons->isButtonPressed(interfaceButtonShift))
+        seqPlinkySetAll(p, nv - cur); // plan 019 A: Shift + dial = the same delta on ALL instances (each clamped on its own)
+    else
+        seqPlinkySet(p, nv);
 #else
     (void)value;
 #endif
@@ -796,6 +813,11 @@ void SeqPlayOverlay::refreshView()
 #ifdef FEATURE_PLINKY
     if (plinkyOpen_ && (!routable() || !seqPlinkyTrackUsesVoice(sel)))
         plinkyClose(); // another track, another instrument or a popup: the overlay ends
+    else if (plinkyOpen_ && sel != plinkySel_)
+    {
+        plinkySel_ = sel; // another PolySynth track: its instance
+        seqPlinkySetInst(seqPlinkyTrackInstance(sel));
+    }
     // v0.3.6 A1: the pitch view replaces the parameter page in the same view (its own control is on top; both together would not fit the
     // frame budget), so this control draws nothing then
     const bool pitchOnly = plinkyOpen_ && pitchTraceView.visible();
@@ -815,7 +837,9 @@ void SeqPlayOverlay::refreshView()
         seqPlinkyFillModel(m); // shared with the instrument page
         m.sec = plinkyCur_.sec;
         m.idx = plinkyCur_.idx;
+        m.top = plinkyCur_.top;
         m.track = (uint8_t)(sel + 1);
+        m.all = PE().buttons->isButtonPressed(interfaceButtonShift) ? 1 : 0;
 #endif
     }
     else if (active_ && list_.open)

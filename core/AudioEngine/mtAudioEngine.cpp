@@ -151,17 +151,12 @@ audioEngine::audioEngine()
           &plinky, 0, mixerAndFxs.getTracksMixer(MixerAndFxChannelType::kLeft), M::kPlinkyTracksChannel));
         connections.push_back(new AudioConnection(
           &plinky, 1, mixerAndFxs.getTracksMixer(MixerAndFxChannelType::kRight), M::kPlinkyTracksChannel));
-        for (int fx = 0; fx < M::kFxCount; fx++)
-        {
-            connections.push_back(
-              new AudioConnection(&plinky, 0, mixerAndFxs.getPreFxMixer((M::FxType)fx), M::kPlinkySendChannel));
-            connections.push_back(
-              new AudioConnection(&plinky, 1, mixerAndFxs.getPreFxMixer((M::FxType)fx), M::kPlinkySendChannel + 1));
-        }
-        mixerAndFxs.getPreFxMixer(M::kDelay)->gain(M::kPlinkySendChannel, 0.0f);
-        mixerAndFxs.getPreFxMixer(M::kDelay)->gain(M::kPlinkySendChannel + 1, 0.0f);
-        mixerAndFxs.getPreFxMixer(M::kReverb)->gain(M::kPlinkySendChannel, 0.0f);
-        mixerAndFxs.getPreFxMixer(M::kReverb)->gain(M::kPlinkySendChannel + 1, 0.0f);
+        // plan 019: the stream's outputs 2 / 3 are the reverb send, 4 / 5 the delay send (the instances' send levels are applied in the
+        // engine, the mixer gains stay at unity: unchanged from the default)
+        connections.push_back(new AudioConnection(&plinky, 2, mixerAndFxs.getPreFxMixer(M::kReverb), M::kPlinkySendChannel));
+        connections.push_back(new AudioConnection(&plinky, 3, mixerAndFxs.getPreFxMixer(M::kReverb), M::kPlinkySendChannel + 1));
+        connections.push_back(new AudioConnection(&plinky, 4, mixerAndFxs.getPreFxMixer(M::kDelay), M::kPlinkySendChannel));
+        connections.push_back(new AudioConnection(&plinky, 5, mixerAndFxs.getPreFxMixer(M::kDelay), M::kPlinkySendChannel + 1));
     }
 #endif
 
@@ -1119,13 +1114,13 @@ void audioEngine::setReverbType(uint8_t type)
 // plan 009 S: reverb / delay send of the synth voice (parameters 0 .. 100), half on each of the two stereo inputs of the mono mixers
 void audioEngine::applyPlinkySends()
 {
+    // plan 019: the sends are scaled inside the engine (per instance, the effective values, so MIDI CC 91 / 93 move them too); the
+    // mixer inputs stay at unity. Kept as a hook for the callers.
     typedef MixerAndFxs<kVoices> M;
-    const float rev = 0.5f * (float)plinky.engine().effective(plinkyvoice::P_REVERB) * 0.01f; // effective: MIDI CC 91 / 93 move the sends too
-    const float dly = 0.5f * (float)plinky.engine().effective(plinkyvoice::P_DELAY) * 0.01f;
-    mixerAndFxs.getPreFxMixer(M::kReverb)->gain(M::kPlinkySendChannel, rev);
-    mixerAndFxs.getPreFxMixer(M::kReverb)->gain(M::kPlinkySendChannel + 1, rev);
-    mixerAndFxs.getPreFxMixer(M::kDelay)->gain(M::kPlinkySendChannel, dly);
-    mixerAndFxs.getPreFxMixer(M::kDelay)->gain(M::kPlinkySendChannel + 1, dly);
+    mixerAndFxs.getPreFxMixer(M::kReverb)->gain(M::kPlinkySendChannel, 1.0f);
+    mixerAndFxs.getPreFxMixer(M::kReverb)->gain(M::kPlinkySendChannel + 1, 1.0f);
+    mixerAndFxs.getPreFxMixer(M::kDelay)->gain(M::kPlinkySendChannel, 1.0f);
+    mixerAndFxs.getPreFxMixer(M::kDelay)->gain(M::kPlinkySendChannel + 1, 1.0f);
 }
 #endif
 float audioEngine::getReverbCpuPercent()

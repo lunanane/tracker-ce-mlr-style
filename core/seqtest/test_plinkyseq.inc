@@ -352,21 +352,39 @@ static void test_plinky_overlay_logic()
         }
     }
     for (int p = 0; p < kUiParams; p++) CHECK(seen[p] == (p == P_CHANNEL ? 0 : 1)); // plan 012: the morph time is the one cell beyond the engine's
-    CHECK(cells == P_COUNT); // 20 voice parameters (no channel) + the morph time
-    CHECK(strcmp(section(0).name, "Oscillator") == 0 && strcmp(section(4).name, "Voice") == 0);
+    CHECK(cells == P_COUNT); // 32 voice parameters (no channel) + the morph time (plan 019 B: Sub, Filter env, Chorus and more cells)
+    CHECK(kSections == 8 && kVisible == 5);
+    CHECK(strcmp(section(0).name, "Oscillator") == 0 && strcmp(section(1).name, "Sub") == 0 && strcmp(section(3).name, "Filter env") == 0 &&
+          strcmp(section(6).name, "Chorus") == 0 && strcmp(section(kSections - 1).name, "Voice") == 0);
     // navigation: Left / Right inside the section (no wrap), Up / Down between sections (no wrap, column kept as far as it exists)
     Cursor c;
     CHECK(c.param() == P_SHAPE);
     CHECK(!c.horizontal(-1) && c.horizontal(1) && c.param() == P_DETUNE && c.horizontal(1) && c.horizontal(1) && !c.horizontal(1) && c.param() == P_NOISE);
-    CHECK(c.vertical(1) && c.sec == 1 && c.idx == 2 && c.param() == P_DRIVE); // Filter has three: column 3 -> 2
-    CHECK(c.vertical(1) && c.sec == 2 && c.idx == 2 && c.param() == P_SUSTAIN); // Envelope has four
+    CHECK(c.vertical(1) && c.sec == 1 && c.idx == 1 && c.param() == P_SUB2); // Sub has two: column 3 -> 1
+    CHECK(c.vertical(1) && c.sec == 2 && c.idx == 1 && c.param() == P_CUTOFF); // Filter has four (Type first)
     c = Cursor();
     CHECK(!c.vertical(-1));
-    for (int i = 0; i < 10; i++) c.vertical(1);
-    CHECK(c.sec == 4 && !c.vertical(1));
+    for (int i = 0; i < 20; i++) c.vertical(1);
+    CHECK(c.sec == kSections - 1 && !c.vertical(1));
+    CHECK(c.top == kSections - kVisible); // the window of five rows scrolled down to the end
     CHECK(c.horizontal(1) && c.horizontal(1) && c.horizontal(1) && c.horizontal(1) && c.horizontal(1) && c.param() == P_DELAY);
     CHECK(c.horizontal(1) && c.param() == P_MORPH && !c.horizontal(1)); // seven cells in the Voice row
-    CHECK(c.vertical(-1) && c.sec == 3 && c.idx == 2 && c.param() == P_LFO_DEST);
+    CHECK(c.vertical(-1) && c.sec == kSections - 2 && c.idx == 2 && c.param() == P_CH_DEPTH);
+    // the window follows the cursor: the selected row is always visible, it moves one row at a time
+    {
+        Cursor w;
+        bool ok = true;
+        for (int step = 0; step < 30; step++)
+        {
+            w.vertical(step < 15 ? 1 : -1);
+            ok = ok && w.sec >= w.top && w.sec < w.top + kVisible && w.top + kVisible <= kSections;
+        }
+        CHECK(ok && w.sec == 0 && w.top == 0);
+        Cursor w2;
+        w2.sec = 7;
+        w2.fix();
+        CHECK(w2.top == 3);
+    }
     // every cursor position resolves to a valid parameter
     for (int s = 0; s < kSections; s++)
         for (int i = 0; i < section((uint8_t)s).count; i++)
@@ -380,7 +398,7 @@ static void test_plinky_overlay_logic()
     CHECK(jogValue(P_CUTOFF, 60, 1, false) == 65 && jogValue(P_CUTOFF, 60, -1, false) == 55 && jogValue(P_CUTOFF, 60, 1, true) == 61);
     CHECK(jogValue(P_CUTOFF, 98, 1, false) == 100 && jogValue(P_CUTOFF, 2, -1, false) == 0);
     CHECK(jogValue(P_INTERVAL, 12, 1, false) == 13 && jogValue(P_VOICES, 4, 1, false) == 4 && jogValue(P_VOICES, 1, -1, false) == 1);
-    CHECK(jogValue(P_LFO_DEST, 0, 1, false) == 1 && jogValue(P_LFO_DEST, 2, 1, false) == 2);
+    CHECK(jogValue(P_LFO_DEST, 0, 1, false) == 1 && jogValue(P_LFO_DEST, 3, 1, false) == 3 && jogValue(P_FTYPE, 4, 1, false) == 4 && jogValue(P_LFO_WAVE, 0, -1, false) == 0);
     CHECK(jogValue(P_CUTOFF, 60, 5, true) == 63); // a fast spin counts at most 3 detents
     // texts
     char t[16];
@@ -519,17 +537,36 @@ static void test_plinky_overlay_draw_budget()
             if (c.fifo() > worstFifo) worstFifo = c.fifo();
             CHECK(c.minX >= 0 && c.maxX <= 800 && c.minY >= 30 && c.maxY <= 424);
         }
+    // v0.3.9 FIFO rule: the view is ONE display stage (one burst into the 4 KB FT81x command FIFO). Worst case over every cursor position and the three
+    // instances (the tabs), with the ALL tag, a running morph, the cap readout and four voices: the exact FIFO bytes
+    m.morphPat = 255; // (the model still holds the worst case values of the loops above)
+    m.all = 1;
+    m.cap = 8;
+    for (int inst = 0; inst < kInstances; inst++)
+        for (int s = 0; s < kSections; s++)
+            for (int i = 0; i < section((uint8_t)s).count; i++)
+            {
+                m.inst = (uint8_t)inst;
+                m.sec = (uint8_t)s;
+                m.idx = (uint8_t)i;
+                PlCtx c;
+                draw(c, m, pal);
+                if (c.fifo() > worstFifo) worstFifo = c.fifo();
+            }
+    printf("  PolySynth view command FIFO: worst %d bytes (one stage, FIFO 4096)\n", worstFifo);
+    CHECK(worstFifo <= 3840);
     m = Model();
     PlCtx z;
     draw(z, m, pal);
     printf("  PolySynth overlay display list: worst %d bytes, empty bars %d bytes, %d rects, %d texts\n", worst, z.bytes(), z.rects, z.texts);
-    // the frame holds the pattern editor under the overlay as well: the overlay keeps to a share of the 8172 bytes
-    CHECK(worst <= 3600);
-    printf("  PolySynth overlay command FIFO: worst %d bytes (one stage, FIFO 4096)\n", worstFifo);
-    CHECK(worstFifo <= 3840); // v0.3.9: one display stage is one burst into the 4 KB FT81x command FIFO (seqTraceStages.h)
+    // the overlay keeps to a share of the 8172 byte frame. Plan 019 (tabs SYNTH 1 | 2 | 3, ALL tag, voice cap): the limit goes from 3600 to
+    // 4200 bytes. Since v0.3.6 A1 the pattern control is hidden while the view is open, so the frame is page + title bar (600) + strip
+    // (1720) + 400 margin: the view may use as much as the pitch view (5400); 4200 keeps 1200 bytes of that margin free.
+    CHECK(worst <= 4200);
+    m.morphPat = 0;
     // cells and rows do not overlap and fit: 7 cells in the widest row (the Voice row, plan 012)
     CHECK(kCellX0 + 6 * kCellStep + kCellW <= kBoxX1 && kCellW <= kCellStep);
-    CHECK(kRowY0 + (kSections - 1) * kRowStep + kRowH <= 396);
+    CHECK(kRowY0 + (kVisible - 1) * kRowStep + kRowH <= 396); // five rows are visible at a time (plan 019 B)
     // the Voice row text widths: the longest names and values fit a 108 px cell at 9 px per character
     for (int p = 0; p < kUiParams; p++)
     {

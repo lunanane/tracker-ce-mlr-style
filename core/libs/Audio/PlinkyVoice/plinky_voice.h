@@ -38,13 +38,16 @@
 // ----------------------------------------------------------------------------------------------------------------------
 // Port and the Tracker integration: Sequencer tracks mod, PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md).
 #pragma once
+#include "plinky_governor.h"
 #include "plinky_params.h"
 #include "plinky_wavetable.h"
 #include <string.h>
 
 namespace plinkyvoice {
 
-constexpr int kMaxVoices = 4;
+constexpr int kMaxVoices = 4;  // per instance (the Voices limit)
+constexpr int kChLen = 1024; // chorus line length per side (power of two: 23 ms at 44.1 kHz)
+constexpr int kPool = 8;       // voices of all instances together (kInstances is in plinky_params.h)
 constexpr int kBlock = 128;
 constexpr float kFs = 44100.0f;
 constexpr float kBlockSec = (float)kBlock / kFs;
@@ -153,6 +156,65 @@ inline float wtSample(const int16_t* tb, uint32_t ph, int shift, float w)
     return (ya + (yb - ya) * w) * (1.0f / 1073741824.0f); // 16384 * 65536 = 2^30 -> 1.0
 }
 
+// LFO waveform at phase 0 .. 1, -1 .. +1 (before the depth). 0: the parabolic sine of v0.3.x (starts at 0, goes down first), 1 triangle (starts at
+// the bottom), 2 saw up, 3 saw down, 4 square (high first), 5 sample & hold (held = the value drawn at the last wrap), 6 smooth random
+// (a smoothstep from the previous to the current random value over the cycle)
+inline float lfoShape(int wave, float phase, float prev, float held)
+{
+    const float x = phase * 2.0f - 1.0f;
+    const float ax = x < 0 ? -x : x;
+    switch (wave)
+    {
+        case 1: return 1.0f - 2.0f * ax;
+        case 2: return x;
+        case 3: return -x;
+        case 4: return phase < 0.5f ? 1.0f : -1.0f;
+        case 5: return held;
+        case 6: return prev + (held - prev) * (phase * phase * (3.0f - 2.0f * phase));
+        default: return 4.0f * x * (1.0f - ax);
+    }
+}
+
+// tan(x) for x < 1.1 (Pade 3/4, error under 1 percent), the SVF and ladder coefficient g = tan(pi fc / fs)
+inline float tanPade(float x)
+{
+    const float x2 = x * x;
+    return x * (105.0f - 10.0f * x2) / (105.0f - 45.0f * x2 + x2 * x2);
+}
+
+// Plan 019 B filters (own implementation of the textbook topology-preserving transform, Zavalishin / Simper):
+// state variable filter, one sample. s[0], s[1] = the two integrator states; coefficients a1 = 1 / (1 + g (g + k)), a2 = g a1, a3 = g a2,
+// k = damping (2 .. 0.04). mode 1 = low pass, 2 = band pass (peak gain 1), 3 = high pass.
+inline float svfStep(float x, float* s, float a1, float a2, float a3, float k, int mode)
+{
+    const float v3 = x - s[1];
+    const float v1 = a1 * s[0] + a2 * v3;
+    const float v2 = s[1] + a2 * s[0] + a3 * v3;
+    s[0] = 2.0f * v1 - s[0];
+    s[1] = 2.0f * v2 - s[1];
+    return mode == 1 ? v2 : (mode == 2 ? k * v1 : x - k * v1 - v2);
+}
+// 4 pole ladder low pass, zero delay feedback solved in closed form (linear), soft clip on the loop input. G = g / (1 + g),
+// G2..G3 its powers, invD = 1 / (1 + kf G^4), kf = feedback 0 .. 3.9.
+inline float ladderStep(float x, float* s, float G, float G2, float G3, float invD, float kf)
+{
+    const float S = (1.0f - G) * (G3 * s[0] + G2 * s[1] + G * s[2] + s[3]);
+    float u = (x - kf * S) * invD;
+    u = softclip(u * 0.5f) * 2.0f;
+    float v = (u - s[0]) * G, y = v + s[0];
+    s[0] = y + v;
+    v = (y - s[1]) * G;
+    y = v + s[1];
+    s[1] = y + v;
+    v = (y - s[2]) * G;
+    y = v + s[2];
+    s[2] = y + v;
+    v = (y - s[3]) * G;
+    y = v + s[3];
+    s[3] = y + v;
+    return y;
+}
+
 struct Saw
 {
     uint32_t ph = 0, prev = 0;
@@ -170,16 +232,77 @@ struct Voice
     uint32_t off = 0;     // pulse width offset (phase) at the end of the last block
     uint32_t serial = 0;
     uint8_t note = 0, stage = ST_IDLE, gate = 0, fresh = 0, relPend = 0;
+    uint8_t inst = 0;     // the instance (synth) that owns the voice
+    uint8_t kill = 0;     // the governor took the voice: it fades out within the next block and is freed
     uint8_t wtOn = 0;     // the last block was rendered by the wavetable oscillator (the saws' delayed samples are stale then)
-    Voice() { memset(y, 0, sizeof(y)); }
+    // plan 019 B: sub oscillators (two squares, each a saw pair), filter envelope, SVF / ladder states
+    float fenv = 0;       // filter envelope level
+    float fg = 0;         // SVF / ladder coefficient g at the end of the last block (0: none yet)
+    float sg1 = 0, sg2 = 0; // sub levels at the end of the last block
+    float fs[8];          // filter states of the SVF / ladder: left 0..3, right 4..7
+    uint32_t sph[2], spv[4];
+    uint8_t fatk = 0, ftype = 0, subOn = 0;
+    Voice()
+    {
+        memset(y, 0, sizeof(y));
+        memset(fs, 0, sizeof(fs));
+        memset(sph, 0, sizeof(sph));
+        memset(spv, 0, sizeof(spv));
+    }
     void clear()
     {
         memset(y, 0, sizeof(y));
         env = g = k = 0;
+        memset(fs, 0, sizeof(fs));
+        fenv = fg = sg1 = sg2 = 0;
+        fatk = ftype = subOn = 0;
         stage = ST_IDLE;
         gate = 0;
         relPend = 0;
+        kill = 0;
     }
+};
+
+// One of the kInstances synths: its own parameters and the control rate state (smoothing, LFO, bend) the voices of the instance share.
+struct Inst
+{
+    uint8_t p[P_COUNT];  // the saved values (written by the UI only)
+    uint8_t ef[P_COUNT]; // the effective values the DSP reads (MIDI CCs move these)
+    float lfoPhase, bend, mod, lvlPrev;
+    float sCut, sRes, sNoise, sDet, sShape, sLevel;
+    float sWt, wtPrev; // wavetable position (0 .. 16) smoothed, and the position at the end of the last block (< 0: not in the mode)
+    bool smoothed;
+    // plan 019 B: LFO random shapes, chorus
+    float lfoHeld, lfoPrev;
+    uint32_t lfoRng;
+    float chPhase;
+    int16_t* chMem;    // 2 * kChLen samples (left line, right line), raw storage owned by the caller; null = no chorus
+    uint16_t chPos;
+    bool chStale;      // the lines hold old audio (the instance was idle): cleared before the next use
+    void init(int idx)
+    {
+        for (int i = 0; i < P_COUNT; i++)
+            p[i] = ef[i] = paramInfo(i).def;
+        p[P_CHANNEL] = ef[P_CHANNEL] = defaultChannel(idx);
+        lfoPhase = bend = mod = lvlPrev = 0;
+        sCut = sRes = sNoise = sDet = sShape = sLevel = 0;
+        sWt = 0;
+        wtPrev = -1.0f;
+        smoothed = false;
+        lfoHeld = lfoPrev = 0;
+        lfoRng = 0x2545F491u + (uint32_t)idx * 7919u;
+        chPhase = 0;
+        chMem = nullptr;
+        chPos = 0;
+        chStale = true;
+    }
+};
+
+// Output blocks of one render: dry left / right and the reverb / delay sends (already scaled by each instance's send level; the
+// mixers take them at unity). A null send pointer = not wanted.
+struct Out
+{
+    int16_t *dryL, *dryR, *revL, *revR, *dlyL, *dlyR;
 };
 
 class Engine
@@ -189,24 +312,18 @@ class Engine
 
     void init()
     {
-        for (int i = 0; i < P_COUNT; i++)
-            p[i] = ef[i] = paramInfo(i).def;
-        for (int i = 0; i < 4; i++)
-            relPend[i] = 0;
+        for (int k = 0; k < kInstances; k++)
+            in[k].init(k);
+        for (int k = 0; k < kInstances; k++)
+            for (int i = 0; i < 4; i++)
+                relPend[k][i] = 0;
         allOffPend = 0;
-        for (int i = 0; i < kMaxVoices; i++)
+        for (int i = 0; i < kPool; i++)
             v[i] = Voice();
         head = 0;
         tail = 0;
         serial = 0;
         rng = 0x1234567u;
-        lfoPhase = 0;
-        bend = 0;
-        mod = 0;
-        lvlPrev = 0;
-        smoothed = false;
-        sWt = 0;
-        wtPrev = -1.0f;
         for (int i = 0; i < E_N; i++)
             q[i].valid = 0;
         memset(trace, 0, sizeof(trace));
@@ -215,46 +332,78 @@ class Engine
         tracePending = false;
         traceOpen = false;
         memset(trLatch, 0, sizeof(trLatch));
+        gov.reset();
+        load = 0;
     }
 
     // ---- any context (the sequencer runs in an interrupt, pads and the UI on the main loop) ----
-    bool noteOn(uint8_t note, uint8_t vel) { return push(EV_ON, note, vel); }
-    // A release that does not fit into the queue is remembered (one bit per note) and applied by the next block: a voice never sticks.
-    bool noteOff(uint8_t note)
+    // inst = 0 .. kInstances - 1 (the synth the message is for); the default 0 keeps single synth callers unchanged.
+    bool noteOn(uint8_t note, uint8_t vel, int inst = 0) { return push(EV_ON, note, vel, inst); }
+    // A release that does not fit into the queue is remembered (one bit per note and instance) and applied by the next block: a voice never sticks.
+    bool noteOff(uint8_t note, int inst = 0)
     {
-        if (push(EV_OFF, note, 0))
+        if (push(EV_OFF, note, 0, inst))
             return true;
-        __atomic_fetch_or(&relPend[(note >> 5) & 3], (uint32_t)1 << (note & 31), __ATOMIC_RELEASE);
+        __atomic_fetch_or(&relPend[inst][(note >> 5) & 3], (uint32_t)1 << (note & 31), __ATOMIC_RELEASE);
         return true;
     }
-    bool allNotesOff()
+    // all notes of the instance (inst < 0: every instance)
+    bool allNotesOff(int inst = 0)
     {
-        if (!push(EV_ALLOFF, 0, 0))
-            __atomic_store_n(&allOffPend, (uint8_t)1, __ATOMIC_RELEASE);
+        if (inst < 0)
+        {
+            bool ok = true;
+            for (int k = 0; k < kInstances; k++)
+                ok &= allNotesOff(k);
+            return ok;
+        }
+        if (!push(EV_ALLOFF, 0, 0, inst))
+            __atomic_fetch_or(&allOffPend, (uint8_t)(1u << inst), __ATOMIC_RELEASE);
         return true;
     }
     // 0 .. 16383, 8192 = centre
-    bool pitchBend(int16_t value14) { return push(EV_BEND, (uint8_t)(value14 & 0x7F), (uint8_t)((value14 >> 7) & 0x7F)); }
-    bool controlChange(uint8_t cc, uint8_t val) { return push(EV_CC, cc, val); }
+    bool pitchBend(int16_t value14, int inst = 0) { return push(EV_BEND, (uint8_t)(value14 & 0x7F), (uint8_t)((value14 >> 7) & 0x7F), inst); }
+    bool controlChange(uint8_t cc, uint8_t val, int inst = 0) { return push(EV_CC, cc, val, inst); }
 
     // The saved values p[] are written by the UI only (setParam). MIDI CCs change the effective values ef[] the DSP reads, like CC1 (mod
     // wheel): the saved patch is never overwritten by automation; moving the parameter in the UI takes the effective value back.
-    void setParam(int i, int value)
+    void setParam(int i, int value, int inst = 0)
     {
-        if (i >= 0 && i < P_COUNT)
-            p[i] = ef[i] = clampParam(i, value);
+        if (i >= 0 && i < P_COUNT && inst >= 0 && inst < kInstances)
+            in[inst].p[i] = in[inst].ef[i] = clampParam(i, value);
     }
-    uint8_t param(int i) const { return p[i]; }
-    uint8_t effective(int i) const { return ef[i]; }
-    uint8_t p[P_COUNT];
-    uint8_t ef[P_COUNT];
+    uint8_t param(int i, int inst = 0) const { return in[inst].p[i]; }
+    uint8_t effective(int i, int inst = 0) const { return in[inst].ef[i]; }
+    // plan 019 B: the chorus delay lines of an instance (2 * kChLen int16, left then right) live in memory the caller owns (EXTERNAL_RAM on the
+    // device); without it the instance has no chorus. Main loop / init only.
+    void setChorusMemory(int inst, int16_t* mem)
+    {
+        if (inst >= 0 && inst < kInstances)
+        {
+            in[inst].chMem = mem;
+            in[inst].chStale = true;
+        }
+    }
+    // the CPU governor needs the load of the previous audio block (permille of the block period); 0 = not measured
+    void setBlockLoad(uint32_t permille) { load = permille; }
+    int voiceCap() const { return gov.cap; }
+    void resetGovernor() { gov.reset(); }
+    Governor& governor() { return gov; }
+    // some instance has a send level: the stream allocates the send blocks
+    bool wantSend(bool delay) const
+    {
+        for (int k = 0; k < kInstances; k++)
+            if (in[k].ef[delay ? P_DELAY : P_REVERB] > 0)
+                return true;
+        return false;
+    }
 
     // ---- audio context ----
     bool isActive() const
     {
         if (head != tail)
             return true;
-        for (int i = 0; i < kMaxVoices; i++)
+        for (int i = 0; i < kPool; i++)
             if (v[i].stage != ST_IDLE)
                 return true;
         return false;
@@ -262,25 +411,39 @@ class Engine
     int activeVoices() const
     {
         int n = 0;
-        for (int i = 0; i < kMaxVoices; i++)
+        for (int i = 0; i < kPool; i++)
             n += v[i].stage != ST_IDLE;
         return n;
     }
+    int activeVoices(int inst) const
+    {
+        int n = 0;
+        for (int i = 0; i < kPool; i++)
+            n += v[i].stage != ST_IDLE && v[i].inst == inst;
+        return n;
+    }
     const Voice& voice(int i) const { return v[i]; }
-    // pitch trace ring (any context, read only): sample k of voice i is trace[i][k & (kTraceLen - 1)], the newest is head - 1
+    // pitch trace ring (any context, read only): sample k of voice i is trace[i][k & (kTraceLen - 1)], the newest is head - 1.
+    // TraceSample.on: bit 0 = sounds, bits 1 and 2 = the instance of the voice at that time.
     const TraceSample* traceRing(int i) const { return trace[i]; }
     uint16_t traceHeadIndex() const { return __atomic_load_n(&traceHead, __ATOMIC_ACQUIRE); }
 
-    // Renders one block of kBlock samples (16 bit, left / right). Returns false (outputs untouched) when nothing sounds.
-    bool render(int16_t* outL, int16_t* outR)
+    // Renders one block of kBlock samples. Returns false (outputs untouched) when nothing sounds. The output blocks must be
+    // writable for kBlock samples; they are overwritten.
+    bool render(const Out& o)
     {
         drain();
         bool any = false;
-        for (int i = 0; i < kMaxVoices; i++)
+        for (int i = 0; i < kPool; i++)
             any |= v[i].stage != ST_IDLE;
         if (!any)
         {
-            lvlPrev = 0;
+            for (int k = 0; k < kInstances; k++)
+            {
+                in[k].lvlPrev = 0;
+                in[k].chStale = true;
+            }
+            gov.update(load, 0);
             // v0.3.6: a note that began and ended between two trace samples (a stab) still gets its sample, and the line ends with a
             // closing sample (all off) where the engine went idle
             if (tracePending)
@@ -293,28 +456,115 @@ class Engine
                 writeTrace();
             return false;
         }
-        Derived d;
-        derive(d);
-        memset(busL, 0, sizeof(busL));
-        memset(busR, 0, sizeof(busR));
-        for (int i = 0; i < kMaxVoices; i++)
+        // plan 019 A: the governor (measured load) and the pool cap: voices over the cap fade out within this block
+        enforceCap(gov.update(load, activeVoices()));
+        memset(o.dryL, 0, kBlock * sizeof(int16_t));
+        memset(o.dryR, 0, kBlock * sizeof(int16_t));
+        if (o.revL)
         {
-            Voice& vo = v[i];
-            if (vo.stage == ST_IDLE)
+            memset(o.revL, 0, kBlock * sizeof(int16_t));
+            memset(o.revR, 0, kBlock * sizeof(int16_t));
+        }
+        if (o.dlyL)
+        {
+            memset(o.dlyL, 0, kBlock * sizeof(int16_t));
+            memset(o.dlyR, 0, kBlock * sizeof(int16_t));
+        }
+        for (int k = 0; k < kInstances; k++)
+        {
+            Inst& I = in[k];
+            // the instance's voices beyond its Voices limit release (the first ones in pool order stay)
+            int rank = 0, cnt = 0;
+            for (int i = 0; i < kPool; i++)
+                if (v[i].inst == k && v[i].stage != ST_IDLE)
+                {
+                    cnt++;
+                    if (rank++ >= (int)I.ef[P_VOICES] && v[i].stage != ST_RELEASE)
+                    {
+                        v[i].stage = ST_RELEASE;
+                        v[i].gate = 0;
+                    }
+                }
+            if (!cnt)
+            {
+                I.lvlPrev = 0;
+                I.chStale = true;
                 continue;
-            if (i >= (int)ef[P_VOICES] && vo.stage != ST_RELEASE)
-            {
-                vo.stage = ST_RELEASE;
-                vo.gate = 0;
             }
-            renderVoice(vo, d);
-            latchTrace(i, vo, d.vib);
-            if (vo.relPend && !vo.fresh && vo.stage != ST_IDLE)
+            Derived d;
+            derive(I, d);
+            memset(busL, 0, sizeof(busL));
+            memset(busR, 0, sizeof(busR));
+            for (int i = 0; i < kPool; i++)
             {
-                vo.relPend = 0;
-                vo.gate = 0;
-                vo.stage = ST_RELEASE;
+                Voice& vo = v[i];
+                if (vo.stage == ST_IDLE || vo.inst != k)
+                    continue;
+                renderVoice(vo, d);
+                latchTrace(i, vo, d.vib);
+                if (vo.relPend && !vo.fresh && vo.stage != ST_IDLE)
+                {
+                    vo.relPend = 0;
+                    vo.gate = 0;
+                    vo.stage = ST_RELEASE;
+                }
             }
+            float lv = I.lvlPrev;
+            const float dl = (d.level - lv) * (1.0f / kBlock);
+            const float sRev = 0.5f * (float)I.ef[P_REVERB] * 0.01f, sDly = 0.5f * (float)I.ef[P_DELAY] * 0.01f;
+            const bool doRev = o.revL && sRev > 0.0f, doDly = o.dlyL && sDly > 0.0f;
+            const bool chorus = I.chMem && I.ef[P_CH_MIX] > 0;
+            if (chorus && I.chStale)
+            {
+                memset(I.chMem, 0, 2 * kChLen * sizeof(int16_t));
+                I.chPos = 0;
+                I.chStale = false;
+            }
+            const float chMix = (float)I.ef[P_CH_MIX] * 0.005f; // 0 .. 0.5 wet share
+            const float chDph = 0.2f * exp2fast((float)I.ef[P_CH_RATE] * 0.05f) * (1.0f / kFs);
+            const float chDepth = (float)I.ef[P_CH_DEPTH] * 2.2f; // +- 220 samples (5 ms) at full depth
+            for (int i = 0; i < kBlock; i++)
+            {
+                lv += dl;
+                float yl = softclip(busL[i] * lv) * 32767.0f, yr = softclip(busR[i] * lv) * 32767.0f;
+                if (chorus)
+                {   // modulated delay per side (triangle LFOs half a cycle apart), linear interpolation, 10 ms centre
+                    I.chPhase += chDph;
+                    if (I.chPhase >= 1.0f)
+                        I.chPhase -= 1.0f;
+                    float pl = I.chPhase, pr = I.chPhase + 0.5f;
+                    if (pr >= 1.0f)
+                        pr -= 1.0f;
+                    const float tl = (pl < 0.5f ? pl : 1.0f - pl) * 4.0f - 1.0f, tr = (pr < 0.5f ? pr : 1.0f - pr) * 4.0f - 1.0f;
+                    I.chMem[I.chPos & (kChLen - 1)] = (int16_t)yl;
+                    I.chMem[kChLen + (I.chPos & (kChLen - 1))] = (int16_t)yr;
+                    const float dL = 441.0f + chDepth * tl, dR = 441.0f + chDepth * tr;
+                    const int iL = (int)dL, iR = (int)dR;
+                    const float fL = dL - (float)iL, fR = dR - (float)iR;
+                    const int16_t* lineL = I.chMem;
+                    const int16_t* lineR = I.chMem + kChLen;
+                    const float wl = (float)lineL[(I.chPos - iL) & (kChLen - 1)] +
+                                     ((float)lineL[(I.chPos - iL - 1) & (kChLen - 1)] - (float)lineL[(I.chPos - iL) & (kChLen - 1)]) * fL;
+                    const float wr = (float)lineR[(I.chPos - iR) & (kChLen - 1)] +
+                                     ((float)lineR[(I.chPos - iR - 1) & (kChLen - 1)] - (float)lineR[(I.chPos - iR) & (kChLen - 1)]) * fR;
+                    I.chPos++;
+                    yl += (wl - yl) * chMix;
+                    yr += (wr - yr) * chMix;
+                }
+                o.dryL[i] = (int16_t)sat16(o.dryL[i] + (int)yl);
+                o.dryR[i] = (int16_t)sat16(o.dryR[i] + (int)yr);
+                if (doRev)
+                {
+                    o.revL[i] = (int16_t)sat16(o.revL[i] + (int)(yl * sRev));
+                    o.revR[i] = (int16_t)sat16(o.revR[i] + (int)(yr * sRev));
+                }
+                if (doDly)
+                {
+                    o.dlyL[i] = (int16_t)sat16(o.dlyL[i] + (int)(yl * sDly));
+                    o.dlyR[i] = (int16_t)sat16(o.dlyR[i] + (int)(yr * sDly));
+                }
+            }
+            I.lvlPrev = d.level;
         }
         if (++traceDiv >= kTraceEvery)
         {
@@ -322,24 +572,22 @@ class Engine
             tracePending = false;
             writeTrace();
         }
-        float lv = lvlPrev;
-        const float dl = (d.level - lv) * (1.0f / kBlock);
-        for (int i = 0; i < kBlock; i++)
-        {
-            lv += dl;
-            outL[i] = (int16_t)(softclip(busL[i] * lv) * 32767.0f);
-            outR[i] = (int16_t)(softclip(busR[i] * lv) * 32767.0f);
-        }
-        lvlPrev = d.level;
         return true;
+    }
+    // single synth callers (tests): dry only
+    bool render(int16_t* outL, int16_t* outR)
+    {
+        Out o = { outL, outR, nullptr, nullptr, nullptr, nullptr };
+        return render(o);
     }
 
   private:
+    static int sat16(int x) { return x > 32767 ? 32767 : (x < -32768 ? -32768 : x); }
     enum { EV_ON, EV_OFF, EV_ALLOFF, EV_BEND, EV_CC };
     enum { E_N = 32 };
     struct Ev
     {
-        uint8_t type, a, b;
+        uint8_t type, a, b; // type = event | instance << 4
         volatile uint8_t valid;
     };
 
@@ -357,20 +605,25 @@ class Engine
         bool wt, wtXF;
         int wtA0, wtA1;
         float wtW0, wtW1;
+        // plan 019 B
+        uint8_t ft;                  // filter type (0 low pass gate)
+        bool sub, fenvOn;
+        float subG1, subG2;          // sub oscillator levels
+        float famt, kFA, kFD, kFR, fsus; // filter envelope: octaves, one pole coefficients, sustain level
+        float svfOct, svfK, ladK;    // log2(fc / 1300 Hz) before the envelope, SVF damping, ladder feedback
     };
 
-    Voice v[kMaxVoices];
+    Voice v[kPool];
+    Inst in[kInstances];
+    Governor gov;
+    uint32_t load;
     Ev q[E_N];
     volatile uint32_t head, tail;
-    volatile uint32_t relPend[4]; // releases that found the queue full: one bit per note (32 bit atomics only on the Cortex-M4)
-    volatile uint8_t allOffPend;
+    volatile uint32_t relPend[kInstances][4]; // releases that found the queue full: one bit per note (32 bit atomics only on the Cortex-M4)
+    volatile uint8_t allOffPend;              // bit per instance
     uint32_t serial, rng;
-    float lfoPhase, bend, mod, lvlPrev;
-    float sCut, sRes, sNoise, sDet, sShape, sLevel;
-    float sWt, wtPrev; // wavetable position (0 .. 16) smoothed, and the position at the end of the last block (< 0: not in the mode)
-    bool smoothed;
     float busL[kBlock], busR[kBlock];
-    TraceSample trace[kMaxVoices][kTraceLen];
+    TraceSample trace[kPool][kTraceLen];
     uint16_t traceHead;
     uint8_t traceDiv;
 
@@ -383,8 +636,9 @@ class Engine
         float pitch;
         float env;
         uint8_t on;
+        uint8_t inst;
     };
-    TraceLatch trLatch[kMaxVoices];
+    TraceLatch trLatch[kPool];
     bool tracePending;
     bool traceOpen; // the last written sample had a sounding voice
 
@@ -396,6 +650,7 @@ class Engine
         t.pitch = vo.pitch + vib;
         t.env = vo.env;
         t.on = 1;
+        t.inst = vo.inst;
         tracePending = true;
     }
 
@@ -404,7 +659,7 @@ class Engine
         const uint16_t h = traceHead;
         const int k = h & (kTraceLen - 1);
         bool open = false;
-        for (int i = 0; i < kMaxVoices; i++)
+        for (int i = 0; i < kPool; i++)
         {
             TraceLatch& t = trLatch[i];
             open |= t.on != 0;
@@ -415,20 +670,22 @@ class Engine
             TraceSample& s = trace[i][k];
             s.pitch = (int16_t)(p < 0 ? p - 0.5f : p + 0.5f);
             s.env = (uint8_t)e;
-            s.on = t.on;
+            s.on = t.on ? (uint8_t)(1 | (t.inst << 1)) : 0;
             t.on = 0;
         }
         traceOpen = open;
         __atomic_store_n(&traceHead, (uint16_t)(h + 1), __ATOMIC_RELEASE);
     }
 
-    bool push(uint8_t type, uint8_t a, uint8_t b)
+    bool push(uint8_t type, uint8_t a, uint8_t b, int inst)
     {
+        if (inst < 0 || inst >= kInstances)
+            return true; // nothing to do for it
         if (head - tail >= (uint32_t)(E_N - 2))
             return false;
         uint32_t i = __atomic_fetch_add(&head, 1u, __ATOMIC_ACQ_REL);
         Ev& e = q[i & (E_N - 1)];
-        e.type = type;
+        e.type = (uint8_t)(type | (inst << 4));
         e.a = a;
         e.b = b;
         __atomic_store_n(&e.valid, (uint8_t)1, __ATOMIC_RELEASE);
@@ -445,72 +702,77 @@ class Engine
             const uint8_t type = e.type, a = e.a, b = e.b;
             e.valid = 0;
             tail = tail + 1;
-            handle(type, a, b);
+            handle(type & 15, type >> 4, a, b);
         }
-        if (__atomic_exchange_n(&allOffPend, (uint8_t)0, __ATOMIC_ACQ_REL))
-            handle(EV_ALLOFF, 0, 0);
-        for (int w = 0; w < 4; w++)
+        const uint8_t ao = __atomic_exchange_n(&allOffPend, (uint8_t)0, __ATOMIC_ACQ_REL);
+        for (int k = 0; k < kInstances; k++)
         {
-            uint32_t m = __atomic_exchange_n(&relPend[w], (uint32_t)0, __ATOMIC_ACQ_REL);
-            for (int n = 0; m; n++, m >>= 1)
-                if (m & 1u)
-                    release((uint8_t)(w * 32 + n));
+            if ((ao >> k) & 1u)
+                handle(EV_ALLOFF, k, 0, 0);
+            for (int w = 0; w < 4; w++)
+            {
+                uint32_t m = __atomic_exchange_n(&relPend[k][w], (uint32_t)0, __ATOMIC_ACQ_REL);
+                for (int n = 0; m; n++, m >>= 1)
+                    if (m & 1u)
+                        release(k, (uint8_t)(w * 32 + n));
+            }
         }
     }
 
-    __attribute__((optimize("Os"))) void handle(uint8_t type, uint8_t a, uint8_t b)
+    __attribute__((optimize("Os"))) void handle(uint8_t type, int k, uint8_t a, uint8_t b)
     {
         switch (type)
         {
             case EV_ON:
                 if (b == 0)
-                    release(a);
+                    release(k, a);
                 else
-                    start(a, b);
+                    start(k, a, b);
                 break;
-            case EV_OFF: release(a); break;
+            case EV_OFF: release(k, a); break;
             case EV_ALLOFF:
-                for (int i = 0; i < kMaxVoices; i++)
-                    if (v[i].stage != ST_IDLE)
+                for (int i = 0; i < kPool; i++)
+                    if (v[i].inst == k && v[i].stage != ST_IDLE)
                     {
                         v[i].stage = ST_RELEASE;
                         v[i].gate = 0;
                     }
                 break;
-            case EV_BEND: bend = ((float)(((int)b << 7) | a) - 8192.0f) * (2.0f / 8192.0f); break;
-            case EV_CC: cc(a, b); break;
+            case EV_BEND: in[k].bend = ((float)(((int)b << 7) | a) - 8192.0f) * (2.0f / 8192.0f); break;
+            case EV_CC: cc(k, a, b); break;
             default: break;
         }
     }
 
-    __attribute__((optimize("Os"))) void cc(uint8_t n, uint8_t val)
+    __attribute__((optimize("Os"))) void cc(int k, uint8_t n, uint8_t val)
     {
+        Inst& I = in[k];
         const int pct = (val * 100 + 63) / 127;
         switch (n)
         {
-            case 1: mod = (float)val * (1.0f / 127.0f); break;
-            case 5: ef[P_GLIDE] = clampParam(P_GLIDE, pct); break;
-            case 7: ef[P_LEVEL] = clampParam(P_LEVEL, pct); break;
-            case 70: ef[P_SHAPE] = clampParam(P_SHAPE, pct); break;
-            case 71: ef[P_RESO] = clampParam(P_RESO, pct); break;
-            case 72: ef[P_RELEASE] = clampParam(P_RELEASE, pct); break;
-            case 73: ef[P_ATTACK] = clampParam(P_ATTACK, pct); break;
-            case 74: ef[P_CUTOFF] = clampParam(P_CUTOFF, pct); break;
-            case 75: ef[P_DECAY] = clampParam(P_DECAY, pct); break;
-            case 76: ef[P_DETUNE] = clampParam(P_DETUNE, pct); break;
-            case 77: ef[P_NOISE] = clampParam(P_NOISE, pct); break;
-            case 91: ef[P_REVERB] = clampParam(P_REVERB, pct); break;
-            case 93: ef[P_DELAY] = clampParam(P_DELAY, pct); break;
+            case 1: I.mod = (float)val * (1.0f / 127.0f); break;
+            case 5: I.ef[P_GLIDE] = clampParam(P_GLIDE, pct); break;
+            case 7: I.ef[P_LEVEL] = clampParam(P_LEVEL, pct); break;
+            case 70: I.ef[P_SHAPE] = clampParam(P_SHAPE, pct); break;
+            case 71: I.ef[P_RESO] = clampParam(P_RESO, pct); break;
+            case 72: I.ef[P_RELEASE] = clampParam(P_RELEASE, pct); break;
+            case 73: I.ef[P_ATTACK] = clampParam(P_ATTACK, pct); break;
+            case 74: I.ef[P_CUTOFF] = clampParam(P_CUTOFF, pct); break;
+            case 75: I.ef[P_DECAY] = clampParam(P_DECAY, pct); break;
+            case 76: I.ef[P_DETUNE] = clampParam(P_DETUNE, pct); break;
+            case 77: I.ef[P_NOISE] = clampParam(P_NOISE, pct); break;
+            case 91: I.ef[P_REVERB] = clampParam(P_REVERB, pct); break;
+            case 93: I.ef[P_DELAY] = clampParam(P_DELAY, pct); break;
             case 120:
-            case 123: handle(EV_ALLOFF, 0, 0); break;
+            case 123: handle(EV_ALLOFF, k, 0, 0); break;
             default: break;
         }
     }
 
-    void release(uint8_t note)
+    void release(int k, uint8_t note)
     {
-        for (int i = 0; i < kMaxVoices; i++)
-            if (v[i].gate && v[i].note == note)
+        for (int i = 0; i < kPool; i++)
+            if (v[i].inst == k && v[i].gate && v[i].note == note)
             {
                 if (v[i].fresh)
                 {
@@ -522,34 +784,91 @@ class Engine
             }
     }
 
-    // voice for a new note: the same note still held, else an idle one, else the quietest releasing one, else the oldest
-    int pick(uint8_t note) const
+    // steal key: a releasing voice by its level (quietest first), then the oldest note
+    static uint32_t victimKey(const Voice& x)
     {
-        const int n = ef[P_VOICES];
-        for (int i = 0; i < n; i++)
-            if (v[i].stage != ST_IDLE && v[i].gate && v[i].note == note)
+        return x.stage == ST_RELEASE ? (uint32_t)(x.env * 60000.0f) : 0x10000u + (x.serial & 0x7FFFFFFFu);
+    }
+
+    // The pool slot for a new note of instance k: the same note still held, else an idle slot while the instance is under its Voices
+    // limit and the pool under the governor's cap, else a victim: of the instance itself when it is at its limit, otherwise of any
+    // instance (a releasing voice first, then the oldest note).
+    int pick(int k, uint8_t note) const
+    {
+        const int limit = in[k].ef[P_VOICES];
+        for (int i = 0; i < kPool; i++)
+            if (v[i].inst == k && v[i].stage != ST_IDLE && v[i].gate && v[i].note == note)
                 return i;
-        for (int i = 0; i < n; i++)
-            if (v[i].stage == ST_IDLE)
-                return i;
-        int best = 0;
+        int own = 0, total = 0;
+        for (int i = 0; i < kPool; i++)
+            if (v[i].stage != ST_IDLE)
+            {
+                total++;
+                own += v[i].inst == k;
+            }
+        if (own < limit && total < gov.cap)
+            for (int i = 0; i < kPool; i++)
+                if (v[i].stage == ST_IDLE)
+                    return i;
+        int best = -1;
         uint32_t bestKey = 0xFFFFFFFFu;
-        for (int i = 0; i < n; i++)
+        for (int i = 0; i < kPool; i++)
         {
-            uint32_t key = v[i].stage == ST_RELEASE ? (uint32_t)(v[i].env * 60000.0f) : 0x10000u + (v[i].serial & 0x7FFFFFFFu);
+            if (v[i].stage == ST_IDLE || (own >= limit && v[i].inst != k))
+                continue;
+            const uint32_t key = victimKey(v[i]);
             if (key < bestKey)
             {
                 bestKey = key;
                 best = i;
             }
         }
+        if (best < 0) // nothing to steal (cap 0 and an empty pool): the first idle slot
+        {
+            for (int i = 0; i < kPool; i++)
+                if (v[i].stage == ST_IDLE)
+                    return i;
+            return 0;
+        }
         return best;
     }
 
-    __attribute__((optimize("Os"))) void start(uint8_t note, uint8_t vel)
+    // The governor lowered the cap: sounding voices above it fade out within the block (victim order as for stealing)
+    void enforceCap(int cap)
     {
-        Voice& vo = v[pick(note)];
+        int n = 0;
+        for (int i = 0; i < kPool; i++)
+            n += v[i].stage != ST_IDLE && !v[i].kill;
+        while (n > cap)
+        {
+            int best = -1;
+            uint32_t bestKey = 0xFFFFFFFFu;
+            for (int i = 0; i < kPool; i++)
+            {
+                if (v[i].stage == ST_IDLE || v[i].kill)
+                    continue;
+                const uint32_t key = victimKey(v[i]);
+                if (key < bestKey)
+                {
+                    bestKey = key;
+                    best = i;
+                }
+            }
+            if (best < 0)
+                break;
+            v[best].kill = 1;
+            v[best].gate = 0;
+            n--;
+        }
+    }
+
+    __attribute__((optimize("Os"))) void start(int k, uint8_t note, uint8_t vel)
+    {
+        const int slot = pick(k, note);
+        Voice& vo = v[slot];
         const bool wasIdle = vo.stage == ST_IDLE;
+        vo.inst = (uint8_t)k;
+        vo.kill = 0;
         vo.note = note;
         vo.vel = 0.2f + 0.8f * (float)vel * (1.0f / 127.0f);
         vo.serial = ++serial;
@@ -566,72 +885,79 @@ class Engine
                 vo.s[i].prev = vo.s[i].ph;
         }
         vo.gate = 1;
+        vo.fatk = 1; // the filter envelope attacks again from where it is
         vo.stage = ST_ATTACK; // a steal or retrigger keeps level, phases and filter: the amplitude is continuous
     }
 
     static float lerpParam(float s, float t, float a) { return s + (t - s) * a; }
 
-    __attribute__((optimize("Os"))) void derive(Derived& d)
+    __attribute__((optimize("Os"))) void derive(Inst& I, Derived& d)
     {
-        const float tCut = (float)ef[P_CUTOFF], tRes = (float)ef[P_RESO], tNoise = (float)ef[P_NOISE], tDet = (float)ef[P_DETUNE],
-                    tLevel = (float)ef[P_LEVEL];
-        if (!smoothed)
+        const float tCut = (float)I.ef[P_CUTOFF], tRes = (float)I.ef[P_RESO], tNoise = (float)I.ef[P_NOISE], tDet = (float)I.ef[P_DETUNE],
+                    tLevel = (float)I.ef[P_LEVEL];
+        if (!I.smoothed)
         {
-            sCut = tCut;
-            sRes = tRes;
-            sNoise = tNoise;
-            sDet = tDet;
-            sLevel = tLevel;
-            sShape = (float)ef[P_SHAPE];
-            smoothed = true;
+            I.sCut = tCut;
+            I.sRes = tRes;
+            I.sNoise = tNoise;
+            I.sDet = tDet;
+            I.sLevel = tLevel;
+            I.sShape = (float)I.ef[P_SHAPE];
+            I.smoothed = true;
         }
         const float a = 0.35f; // block rate one pole: ~12 ms, then ramped linearly across each block
-        sCut = lerpParam(sCut, tCut, a);
-        sRes = lerpParam(sRes, tRes, a);
-        sNoise = lerpParam(sNoise, tNoise, a);
-        sDet = lerpParam(sDet, tDet, a);
-        sLevel = lerpParam(sLevel, tLevel, a);
-        sShape = lerpParam(sShape, (float)ef[P_SHAPE], a);
+        I.sCut = lerpParam(I.sCut, tCut, a);
+        I.sRes = lerpParam(I.sRes, tRes, a);
+        I.sNoise = lerpParam(I.sNoise, tNoise, a);
+        I.sDet = lerpParam(I.sDet, tDet, a);
+        I.sLevel = lerpParam(I.sLevel, tLevel, a);
+        I.sShape = lerpParam(I.sShape, (float)I.ef[P_SHAPE], a);
 
         // shared LFO (parabolic sine), rate 0.1 .. 19 Hz
-        lfoPhase += 0.1f * exp2fast((float)ef[P_LFO_RATE] * 0.076f) * kBlockSec;
-        if (lfoPhase >= 1.0f)
-            lfoPhase -= 1.0f;
-        const float x = lfoPhase * 2.0f - 1.0f;
-        float lfo = 4.0f * x * (1.0f - (x < 0 ? -x : x));
-        float depth = (float)ef[P_LFO_DEPTH] * 0.01f;
-        if (mod > depth)
-            depth = mod;
+        I.lfoPhase += 0.1f * exp2fast((float)I.ef[P_LFO_RATE] * 0.076f) * kBlockSec;
+        if (I.lfoPhase >= 1.0f)
+        {
+            I.lfoPhase -= 1.0f;
+            I.lfoPrev = I.lfoHeld; // a new random value per cycle (sample & hold, smooth random)
+            I.lfoRng = I.lfoRng * 1664525u + 1013904223u;
+            I.lfoHeld = (float)(int32_t)I.lfoRng * (1.0f / 2147483648.0f);
+        }
+        float lfo = lfoShape(I.ef[P_LFO_WAVE], I.lfoPhase, I.lfoPrev, I.lfoHeld);
+        float depth = (float)I.ef[P_LFO_DEPTH] * 0.01f;
+        if (I.mod > depth)
+            depth = I.mod;
         lfo *= depth;
-        const uint8_t dest = ef[P_LFO_DEST];
+        const uint8_t dest = I.ef[P_LFO_DEST];
 
-        d.vib = (dest == 0 ? lfo * 2.0f : 0.0f) + bend;
+        d.vib = (dest == 0 ? lfo * 2.0f : 0.0f) + I.bend;
         const float cutMod = dest == 2 ? exp2fast(lfo * 3.0f) : 1.0f;
-        d.cutGain = exp2fast((sCut - 60.0f) * 0.08f) * cutMod;
-        const float r = sRes * 0.01f;
+        d.cutGain = exp2fast((I.sCut - 60.0f) * 0.08f) * cutMod;
+        const float r = I.sRes * 0.01f;
         d.res = 2.0f * r * r;
-        const float nz = sNoise * 0.01f;
+        const float nz = I.sNoise * 0.01f;
         d.noise = nz * nz;
-        d.detune = sDet * 0.0012f;
-        d.interval = (float)((int)ef[P_INTERVAL] - 12);
-        const float lv = sLevel * 0.01f;
-        d.level = lv * lv * 1.5f * (1.0f + (float)ef[P_DRIVE] * 0.03f);
+        d.detune = I.sDet * 0.0012f;
+        d.interval = (float)((int)I.ef[P_INTERVAL] - 12);
+        const float lv = I.sLevel * 0.01f;
+        d.level = lv * lv * 1.5f * (1.0f + (float)I.ef[P_DRIVE] * 0.03f);
+        if (dest == 3)
+            d.level *= 1.0f + lfo * 0.5f; // tremolo
 
         // envelope: per block one pole coefficients from the times (attack 1 ms .. 2 s, decay / release 5 ms .. 10 s)
-        d.kA = 1.0f - exp2fast(-kBlockSec * 1.4427f * 2.4f / (0.001f * exp2fast((float)ef[P_ATTACK] * 0.11f)));
-        d.kD = 1.0f - exp2fast(-kBlockSec * 1.4427f * 4.6f / (0.005f * exp2fast((float)ef[P_DECAY] * 0.11f)));
-        d.kR = 1.0f - exp2fast(-kBlockSec * 1.4427f * 4.6f / (0.005f * exp2fast((float)ef[P_RELEASE] * 0.11f)));
-        d.sus = (float)ef[P_SUSTAIN] * 0.01f;
+        d.kA = 1.0f - exp2fast(-kBlockSec * 1.4427f * 2.4f / (0.001f * exp2fast((float)I.ef[P_ATTACK] * 0.11f)));
+        d.kD = 1.0f - exp2fast(-kBlockSec * 1.4427f * 4.6f / (0.005f * exp2fast((float)I.ef[P_DECAY] * 0.11f)));
+        d.kR = 1.0f - exp2fast(-kBlockSec * 1.4427f * 4.6f / (0.005f * exp2fast((float)I.ef[P_RELEASE] * 0.11f)));
+        d.sus = (float)I.ef[P_SUSTAIN] * 0.01f;
         d.sus *= d.sus;
-        d.glideK = ef[P_GLIDE] == 0 ? 1.0f : 1.0f - exp2fast(-kBlockSec * 1.4427f / (0.005f * exp2fast((float)ef[P_GLIDE] * 0.1f)));
+        d.glideK = I.ef[P_GLIDE] == 0 ? 1.0f : 1.0f - exp2fast(-kBlockSec * 1.4427f / (0.005f * exp2fast((float)I.ef[P_GLIDE] * 0.1f)));
 
-        d.stereo = ef[P_WIDTH] != 0;
-        const float w = (float)ef[P_WIDTH] * 0.01f;
+        d.stereo = I.ef[P_WIDTH] != 0;
+        const float w = (float)I.ef[P_WIDTH] * 0.01f;
         d.sR = 0.5f * (1.0f - w); // share of the opposite side
         d.sL = 1.0f - d.sR;
-        d.wt = ef[P_SHAPE] > kShapePulseMax;
-        d.pulse = ef[P_SHAPE] != 0 && !d.wt;
-        float sh = sShape;
+        d.wt = I.ef[P_SHAPE] > kShapePulseMax;
+        d.pulse = I.ef[P_SHAPE] != 0 && !d.wt;
+        float sh = I.sShape;
         if (dest == 1 && d.pulse)
             sh += lfo * 50.0f;
         if (sh < 1.0f)
@@ -641,20 +967,20 @@ class Engine
         // pulse width 50% .. 2%
         d.offTarget = (uint32_t)((0.5f - 0.48f * (sh - 1.0f) * (1.0f / 99.0f)) * 4294967040.0f);
 
-        // wavetable position in tables (0 .. 16): the parameter smoothed like the others (a jump into the mode starts at the target), the
+        // wavetable position in tables (0 .. 16): the parameter I.smoothed like the others (a jump into the mode starts at the target), the
         // LFO (target Shape) swings it by +-4 tables at full depth
         d.wtXF = false;
         d.wtA0 = d.wtA1 = 0;
         d.wtW0 = d.wtW1 = 0.0f;
         if (d.wt)
         {
-            const float tgt = (float)((int)ef[P_SHAPE] - kShapeWt0) * (1.0f / kWtSteps);
-            sWt = wtPrev < 0.0f ? tgt : lerpParam(sWt, tgt, a);
-            float pos = sWt + (dest == 1 ? lfo * 4.0f : 0.0f);
+            const float tgt = (float)((int)I.ef[P_SHAPE] - kShapeWt0) * (1.0f / kWtSteps);
+            I.sWt = I.wtPrev < 0.0f ? tgt : lerpParam(I.sWt, tgt, a);
+            float pos = I.sWt + (dest == 1 ? lfo * 4.0f : 0.0f);
             const float top = (float)(kWtTables - 1);
             pos = pos < 0.0f ? 0.0f : (pos > top ? top : pos);
-            const float pos0 = wtPrev < 0.0f ? pos : wtPrev;
-            wtPrev = pos;
+            const float pos0 = I.wtPrev < 0.0f ? pos : I.wtPrev;
+            I.wtPrev = pos;
             // a pair is (table A, A + 1) and a weight 0 .. 1: the last table is A = 15 with weight 1
             int a1 = (int)pos;
             if (a1 > kWtTables - 2)
@@ -672,14 +998,30 @@ class Engine
                 d.wtXF = true;
         }
         else
-            wtPrev = -1.0f;
+            I.wtPrev = -1.0f;
+
+        // ---- plan 019 B: sub oscillators, filter type and envelope
+        d.ft = I.ef[P_FTYPE];
+        d.sub = I.ef[P_SUB1] > 0 || I.ef[P_SUB2] > 0;
+        d.subG1 = (float)I.ef[P_SUB1] * 0.005f; // a square of +-1 times half the level
+        d.subG2 = (float)I.ef[P_SUB2] * 0.005f;
+        d.famt = ((float)I.ef[P_FENV_AMT] - 50.0f) * 0.1f;
+        d.fenvOn = I.ef[P_FENV_AMT] != 50;
+        d.kFA = 1.0f - exp2fast(-kBlockSec * 1.4427f * 2.4f / (0.001f * exp2fast((float)I.ef[P_FENV_A] * 0.11f)));
+        d.kFD = 1.0f - exp2fast(-kBlockSec * 1.4427f * 4.6f / (0.005f * exp2fast((float)I.ef[P_FENV_D] * 0.11f)));
+        d.kFR = 1.0f - exp2fast(-kBlockSec * 1.4427f * 4.6f / (0.005f * exp2fast((float)I.ef[P_FENV_R] * 0.11f)));
+        d.fsus = (float)I.ef[P_FENV_S] * 0.01f;
+        d.fsus *= d.fsus;
+        d.svfOct = (I.sCut - 60.0f) * 0.1f + (dest == 2 ? lfo * 3.0f : 0.0f);
+        d.svfK = 2.0f - 1.96f * r * r;
+        d.ladK = 3.9f * r * r;
     }
 
     void renderVoice(Voice& vo, const Derived& d)
     {
         // both are per block constants: a predictable branch per sample instead of four copies of the loop (flash is tight)
         const bool ST = d.stereo, PU = d.pulse, WT = d.wt;
-        if (vo.stage == ST_RELEASE && vo.env == 0.0f)
+        if ((vo.stage == ST_RELEASE && vo.env == 0.0f) || (vo.kill && vo.g == 0.0f))
         {
             vo.clear(); // the last block ramped down to zero
             return;
@@ -709,6 +1051,23 @@ class Engine
                     vo.env = 0.0f;
                 break;
         }
+        // plan 019 B: the filter envelope (block rate, follows the gate like the amplitude envelope)
+        if (vo.gate)
+        {
+            if (vo.fatk)
+            {
+                vo.fenv += (1.15f - vo.fenv) * d.kFA;
+                if (vo.fenv >= 1.0f)
+                {
+                    vo.fenv = 1.0f;
+                    vo.fatk = 0;
+                }
+            }
+            else
+                vo.fenv += (d.fsus - vo.fenv) * d.kFD;
+        }
+        else
+            vo.fenv -= vo.fenv * d.kFR;
         vo.pitch += ((float)vo.note - vo.pitch) * d.glideK;
         if (d.glideK >= 1.0f)
             vo.pitch = (float)vo.note;
@@ -737,11 +1096,57 @@ class Engine
             vo.off = d.offTarget;
             vo.fresh = 0;
         }
-        const float a = vo.vel * vo.env;
+        const float a = vo.kill ? 0.0f : vo.vel * vo.env; // killed (governor): the amplitude ramps to zero over the block
         const float gT = 0.35f * a;
         float kT = a * a * d.cutGain;
+        if (d.fenvOn && d.ft == 0)
+            kT *= exp2fast(d.famt * vo.fenv); // the filter envelope moves the low pass gate's cutoff (octaves)
         if (kT > 1.0f)
             kT = 1.0f;
+        // SVF / ladder: coefficient g = tan(pi fc / fs), ramped over the block in steps of 32 samples
+        const int FT = d.ft;
+        if (vo.ftype != FT)
+        {
+            memset(vo.fs, 0, sizeof(vo.fs)); // another filter: clean states
+            vo.ftype = (uint8_t)FT;
+            vo.fg = 0.0f;
+        }
+        float fgS = 0.0f, fgE = 0.0f;
+        if (FT)
+        {
+            float oct = d.svfOct + (d.fenvOn ? d.famt * vo.fenv : 0.0f);
+            float fc = 1300.0f * exp2fast(oct);
+            fc = fc < 20.0f ? 20.0f : (fc > 13000.0f ? 13000.0f : fc);
+            fgE = tanPade(fc * (3.14159265f / kFs));
+            fgS = vo.fg > 0.0f ? vo.fg : fgE;
+            vo.fg = fgE;
+        }
+        // sub oscillators: squares one and two octaves below the pitch
+        const bool SUB = d.sub;
+        uint32_t sp0 = vo.sph[0], sp1 = vo.sph[1];
+        uint32_t spv0 = vo.spv[0], spv1 = vo.spv[1], spv2 = vo.spv[2], spv3 = vo.spv[3];
+        int32_t sd0 = 0, sd1 = 0;
+        float sgl1 = vo.sg1, sgl2 = vo.sg2;
+        float dsg1 = 0.0f, dsg2 = 0.0f;
+        if (SUB)
+        {
+            sd0 = semiToDphase(base - 12.0f);
+            sd1 = semiToDphase(base - 24.0f);
+            if (!vo.subOn)
+            {
+                spv0 = sp0;
+                spv1 = sp0 + 0x80000000u;
+                spv2 = sp1;
+                spv3 = sp1 + 0x80000000u;
+                sgl1 = d.subG1;
+                sgl2 = d.subG2;
+            }
+            dsg1 = (d.subG1 - sgl1) * (1.0f / kBlock);
+            dsg2 = (d.subG2 - sgl2) * (1.0f / kBlock);
+        }
+        vo.subOn = SUB;
+        float a1 = 0, a2 = 0, a3 = 0, fk = 0, G = 0, G2 = 0, G3 = 0, invD = 1.0f;
+        const float svfK = d.svfK, ladK = d.ladK;
         float g = vo.g, k = vo.k;
         const float dg = (gT - g) * (1.0f / kBlock), dk = (kT - k) * (1.0f / kBlock);
         const float res = d.res, nz = d.noise;
@@ -846,7 +1251,72 @@ class Engine
                     xR = blepSaw(ph1, (uint32_t)dp1, pv1) + blepSaw(ph3, (uint32_t)dp3, pv3);
                 }
             }
-            xL = (xL + n) * g;
+            xL += n;
+            if (SUB)
+            {
+                sp0 += (uint32_t)sd0;
+                sp1 += (uint32_t)sd1;
+                sgl1 += dsg1;
+                sgl2 += dsg2;
+                const float sb = (blepSaw(sp0, (uint32_t)sd0, spv0) - blepSaw(sp0 + 0x80000000u, (uint32_t)sd0, spv1)) * sgl1 +
+                                 (blepSaw(sp1, (uint32_t)sd1, spv2) - blepSaw(sp1 + 0x80000000u, (uint32_t)sd1, spv3)) * sgl2;
+                xL += sb;
+                xR += sb; // (only used with ST)
+            }
+            if (FT)
+            {
+                if ((i & 31) == 0)
+                {
+                    const float gg = fgS + (fgE - fgS) * ((float)i * (1.0f / kBlock));
+                    if (FT < 4)
+                    {
+                        fk = svfK;
+                        a1 = 1.0f / (1.0f + gg * (gg + fk));
+                        a2 = gg * a1;
+                        a3 = gg * a2;
+                    }
+                    else
+                    {
+                        G = gg / (1.0f + gg);
+                        G2 = G * G;
+                        G3 = G2 * G;
+                        invD = 1.0f / (1.0f + ladK * G2 * G2);
+                    }
+                }
+                float fL, fR = 0.0f;
+                if (FT < 4)
+                {
+                    fL = svfStep(xL, vo.fs, a1, a2, a3, fk, FT);
+                    if (ST)
+                    {
+                        xR += n;
+                        fR = svfStep(xR, vo.fs + 4, a1, a2, a3, fk, FT);
+                    }
+                }
+                else
+                {
+                    fL = ladderStep(xL, vo.fs, G, G2, G3, invD, ladK);
+                    if (ST)
+                    {
+                        xR += n;
+                        fR = ladderStep(xR, vo.fs + 4, G, G2, G3, invD, ladK);
+                    }
+                }
+                fL *= g;
+                if (ST)
+                {
+                    fR *= g;
+                    oL[i] += fL * d.sL + fR * d.sR;
+                    oR[i] += fR * d.sL + fL * d.sR;
+                }
+                else
+                {
+                    oL[i] += fL;
+                    oR[i] += fL;
+                }
+                continue;
+            }
+            xL = xL * g;
             y1L += (xL - (y2L - y1L) * res - y1L) * k;
             y1L *= 0.999f;
             y2L += (y1L - y2L) * k;
@@ -868,6 +1338,20 @@ class Engine
             }
         }
         rng = r;
+        vo.sph[0] = sp0;
+        vo.sph[1] = sp1;
+        vo.spv[0] = spv0;
+        vo.spv[1] = spv1;
+        vo.spv[2] = spv2;
+        vo.spv[3] = spv3;
+        vo.sg1 = SUB ? d.subG1 : 0.0f;
+        vo.sg2 = SUB ? d.subG2 : 0.0f;
+        for (int q = 0; q < 8; q++) // a corrupt filter state is cleared like the low pass gate's
+            if (!(vo.fs[q] > -1.0e4f && vo.fs[q] < 1.0e4f))
+            {
+                memset(vo.fs, 0, sizeof(vo.fs));
+                break;
+            }
         vo.s[0].ph = ph0;
         vo.s[1].ph = ph1;
         vo.s[2].ph = ph2;
@@ -888,6 +1372,8 @@ class Engine
         vo.y[1] = y2L;
         vo.y[2] = y1R;
         vo.y[3] = y2R;
+        if (vo.kill)
+            vo.clear();
     }
 };
 
