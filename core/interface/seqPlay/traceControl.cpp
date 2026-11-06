@@ -4,6 +4,8 @@
 
 #include "FT812.h"
 #include "display.h"
+#include "seqTraceStages.h"
+#include "seqTracks.h"
 
 namespace
 {
@@ -48,7 +50,7 @@ struct TraceCtx
 } // namespace
 
 cSeqTraceControl::cSeqTraceControl(strControlProperties* properties)
-  : cDisplayControl(controlIdSeqTraceView, 1)
+  : cDisplayControl(controlIdSeqTraceView, tracestage::kStages)
 {
     colorsCount = 0;
     if (properties == nullptr)
@@ -61,15 +63,41 @@ cSeqTraceControl::cSeqTraceControl(strControlProperties* properties)
     view = (const TraceViewData*)properties->data;
 }
 
-void cSeqTraceControl::update()
+// v0.3.9: the same drawing in two stages, each a FIFO burst of at most tracestage::kStageBytes (seqTraceStages.h); stage 1 continues
+// the display list of stage 0 (same RAM_G slot), the data stays frozen in between (busyMs)
+void cSeqTraceControl::drawStage(int stage)
 {
-    if (view == nullptr || view->kind == TraceViewData::NONE)
+    if (view == nullptr)
         return;
-    API_BLEND_FUNC(SRC_ALPHA, ZERO); // the opaque panel: what is below must not shine through
-    TraceCtx c;
+    if (view->kind == TraceViewData::NONE) // closed between the stages: nothing more to draw, the blend function back to normal
+    {
+        if (stage == tracestage::kStages - 1)
+            API_BLEND_FUNC(SRC_ALPHA, ONE_MINUS_SRC_ALPHA);
+        view->busyMs = 0;
+        return;
+    }
+    if (stage == 0)
+        API_BLEND_FUNC(SRC_ALPHA, ZERO); // the opaque panel: what is below must not shine through
+    TraceCtx out;
+    tracestage::Split<TraceCtx> c(out, stage);
     if (view->kind == TraceViewData::PITCH && view->pitch && view->range)
         pitchtrace::draw(c, *view->pitch, *view->range, view->title, view->hint);
     else if (view->kind == TraceViewData::AMP && view->amp)
         ampview::draw(c, *view->amp, view->title, view->hint);
-    API_BLEND_FUNC(SRC_ALPHA, ONE_MINUS_SRC_ALPHA);
+#ifdef DEBUG
+    if (stage == tracestage::kStages - 1) // FIFO bytes of the two stages and what was dropped (0 = nothing)
+    {
+        char buf[32];
+        snprintf(buf, sizeof buf, "%d+%d-%d", c.used[0], c.used[1], c.dropped);
+        API_COLOR(0x808080);
+        API_CMD_TEXT(4, 470, fonts[0].handle, OPT_CENTERY, buf);
+    }
+#endif
+    if (stage == tracestage::kStages - 1)
+        API_BLEND_FUNC(SRC_ALPHA, ONE_MINUS_SRC_ALPHA);
+    view->busyMs = stage == 0 ? (seqNowMs() | 1u) : 0u;
 }
+
+void cSeqTraceControl::update() { drawStage(0); }
+
+void cSeqTraceControl::update2() { drawStage(1); }

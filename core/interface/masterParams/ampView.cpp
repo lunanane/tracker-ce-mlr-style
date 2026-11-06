@@ -38,6 +38,7 @@ void AmpView::createControl()
     prop.h = 480;
     prop.data = &data_;
     data_.kind = TraceViewData::NONE;
+    data_.busyMs = 0;
     control_ = display.createControl<cSeqTraceControl>(&prop);
 }
 
@@ -126,6 +127,8 @@ void AmpView::update(bool pageOk)
     const uint32_t now = seqNowMs();
     if ((uint32_t)(now - lastMs_) < kRefreshMs)
         return;
+    if (data_.busyMs != 0 && (uint32_t)(now - data_.busyMs) < 200u)
+        return; // v0.3.9: the control is between its two display stages, both must draw the same history (seqTraceStages.h)
     lastMs_ = now;
 
     // the clock is the master ring (left): its new blocks since the last pass
