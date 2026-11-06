@@ -41,6 +41,7 @@ class UsbOutputStream : public AudioStream
     UsbOutputStream()
       : AudioStream(kInputChannelsCount, inputQueueArray)
     {
+        perfStage = seqcpu::S_IO; // plan 022 P1
         std::fill(std::begin(usbChannelToInput), std::end(usbChannelToInput), kChannelDisconnected);
     }
     virtual void update(void);

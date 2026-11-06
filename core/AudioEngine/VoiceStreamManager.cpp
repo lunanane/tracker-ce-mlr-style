@@ -1,9 +1,20 @@
 #include "VoiceStreamManager.h"
 #include "cr_section_macros.h"
 #include "seqMlr.h" // idle(): MLR cue cache / waveform work
+#include "seqCpu.h" // plan 022 P1: CPU monitor counters
 #include <string.h>
 
 extern strMtProject mtProject;
+uint32_t seqNowMs(); // seqTracks.h: free-running milliseconds
+
+namespace
+{
+// plan 022 P2: the MLR cue cache fill and the waveform probes are blocking SD reads of the main loop. They run only when no voice needs
+// a refill (scheduleNextVoiceJob found nothing), not within kIdleHoldoffMs of a note-on of a streamed voice (the jump's own refill and
+// the next jump come first) and at most once per kIdleGapMs (the main loop, display and stream polling get their turn in between).
+constexpr uint32_t kIdleHoldoffMs = 40;
+constexpr uint32_t kIdleGapMs = 6;
+} // namespace
 
 VoiceStreamManager voiceStreamManager;
 
@@ -12,9 +23,9 @@ static constexpr uint32_t kStagingBufferBytes =
   (VoiceStreamManager::kChunkFrames * sizeof(int16_t)) + (2 * kSectorSize);
 
 __NOINIT(EXTERNAL_RAM)
-__attribute__((aligned(32))) static int16_t
-  s_voiceRingBuffers[VoiceStreamManager::kVoiceCount][VoiceStreamManager::kMaxChannels]
-                    [VoiceStreamManager::kRingFrames];
+__attribute__((aligned(32))) int16_t
+  VoiceStreamManager::ring_[VoiceStreamManager::kVoiceCount][VoiceStreamManager::kMaxChannels]
+                           [VoiceStreamManager::kRingFrames]; // plan 022 P2: a class member (getSampleFast reads it inline); still raw storage, no constructor
 
 __NOINIT(EXTERNAL_RAM)
 __attribute__((aligned(32))) static int16_t
@@ -928,6 +939,7 @@ void VoiceStreamManager::notifyNoteOn(int voiceIdx,
             v.validStartFrame <= initValid && v.validEndFrame > initValid)
         {
             v.validStartFrame = initValid;
+            seqcpu::jump(false, sliceCachedFrames > 0);
             if (currentJob.inProgress && currentJob.voiceIdx == voiceIdx &&
                 currentJob.targetType == AsyncTargetType::kRingForward &&
                 mtProject.sampleMemory[currentJob.instrIdx].sampleHash == mem.sampleHash)
@@ -937,6 +949,7 @@ void VoiceStreamManager::notifyNoteOn(int voiceIdx,
         }
         else
         {
+            seqcpu::jump(true, sliceCachedFrames > 0);
             v.validStartFrame = initValid;
             v.validEndFrame = initValid;
             v.ringSampleHash = mem.sampleHash;
@@ -953,6 +966,7 @@ void VoiceStreamManager::notifyNoteOn(int voiceIdx,
     else
     {
         uint32_t initValid = (initialFrame < mem.preCacheFrames) ? mem.preCacheFrames : (initialFrame + 1);
+        seqcpu::jump(true, false);
         v.validStartFrame = initValid;
         v.validEndFrame = initValid;
         v.ringSampleHash = mem.sampleHash;
@@ -962,6 +976,7 @@ void VoiceStreamManager::notifyNoteOn(int voiceIdx,
     v.loopWrapStartFrame = 0;
     v.loopWrapEndFrame = 0;
     v.fadeInCounter = (initialFrame < effectivePreCache) ? 32 : 0;
+    jumpSeq_ = jumpSeq_ + 1; // plan 022 P2
     v.active = true;
 }
 
@@ -1037,7 +1052,7 @@ AUDIO_CORE_RAM int16_t VoiceStreamManager::getSample(int voiceIdx,
     uint32_t vEnd = v.validEndFrame;
     if (absFrame >= vStart && absFrame < vEnd)
     {
-        sampleVal = s_voiceRingBuffers[voiceIdx][ch][absFrame & kRingMask];
+        sampleVal = ring_[voiceIdx][ch][absFrame & kRingMask];
         hit = true;
     }
     else if (v.loopWrapReady)
@@ -1056,6 +1071,7 @@ AUDIO_CORE_RAM int16_t VoiceStreamManager::getSample(int voiceIdx,
         if (channel == 0)
         {
             v.fadeInCounter = 0;
+            seqcpu::ringMiss(); // plan 022 P1: an underrun (counted per sample, shown per window)
         }
         return 0;
     }
@@ -1078,6 +1094,19 @@ bool VoiceStreamManager::readInstrumentFramesBlocking(int instrIdx,
                                                       uint32_t startFrame,
                                                       uint32_t frameCount,
                                                       int16_t* dest)
+{
+    const seqcpu::Rd kind = seqcpu::takeKind(); // plan 022 P1: who asked (cue cache, waveform, stream fill, other), time spent
+    const uint32_t t0 = seqcpu::cyc();
+    const bool ok = readInstrumentFramesBlockingImpl(instrIdx, channel, startFrame, frameCount, dest);
+    seqcpu::readEnd(kind, seqcpu::cyc() - t0);
+    return ok;
+}
+
+bool VoiceStreamManager::readInstrumentFramesBlockingImpl(int instrIdx,
+                                                          int channel,
+                                                          uint32_t startFrame,
+                                                          uint32_t frameCount,
+                                                          int16_t* dest)
 {
     if (fs == nullptr || instrIdx < 0 || instrIdx >= kMaxInstruments || dest == nullptr ||
         frameCount == 0)
@@ -1238,7 +1267,7 @@ void VoiceStreamManager::completeChannelTransfer()
     }
     else
     {
-        int16_t* ring = s_voiceRingBuffers[vIdx][ch];
+        int16_t* ring = ring_[vIdx][ch];
         uint32_t ringStartIdx = startF & kRingMask;
         if (ringStartIdx + count <= kRingFrames)
         {
@@ -1319,9 +1348,11 @@ void VoiceStreamManager::fillJobSynchronously(const AsyncJob& job)
 
     uint32_t count = job.fetchFrameCount;
     uint32_t startF = job.fetchStartFrame;
+    seqcpu::syncFill();
 
     for (uint8_t ch = 0; ch < job.totalChannels; ++ch)
     {
+        seqcpu::readKind(seqcpu::R_SYNC);
         if (job.targetType == AsyncTargetType::kLoopWrap)
         {
             uint32_t lwCount = (count > kLoopWrapFrames) ? kLoopWrapFrames : count;
@@ -1333,7 +1364,7 @@ void VoiceStreamManager::fillJobSynchronously(const AsyncJob& job)
             int16_t* tempDest = reinterpret_cast<int16_t*>(s_dmaStagingBuffer);
             if (readInstrumentFramesBlocking(job.instrIdx, ch, startF, count, tempDest))
             {
-                int16_t* ring = s_voiceRingBuffers[vIdx][ch];
+                int16_t* ring = ring_[vIdx][ch];
                 uint32_t ringStartIdx = startF & kRingMask;
                 if (ringStartIdx + count <= kRingFrames)
                 {
@@ -1672,6 +1703,7 @@ bool VoiceStreamManager::scheduleNextVoiceJob(bool synchronous)
 
     currentJob = bestJob;
     currentJob.transferLaunched = false;
+    seqcpu::job();
     if (startAsyncSectorReadForJob(0))
     {
         currentJob.transferLaunched = true;
@@ -1731,7 +1763,18 @@ void VoiceStreamManager::update()
     {
         if (!scheduleNextVoiceJob(false))
         {
-            seqmlr::idle(); // nothing to stream: one chunk of the MLR cue cache / waveform (blocking read of ~6 KB)
+            // nothing to stream: one small chunk of the MLR cue cache / waveform (blocking read), at a quiet moment only (plan 022 P2)
+            const uint32_t now = seqNowMs();
+            if (jumpSeq_ != seenJumpSeq_)
+            {
+                seenJumpSeq_ = jumpSeq_;
+                quietUntilMs_ = now + kIdleHoldoffMs;
+            }
+            if ((int32_t)(now - quietUntilMs_) >= 0 && (uint32_t)(now - lastIdleMs_) >= kIdleGapMs)
+            {
+                lastIdleMs_ = now;
+                seqmlr::idle();
+            }
         }
     }
 }

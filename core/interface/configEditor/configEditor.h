@@ -235,6 +235,13 @@ class cConfigEditor : public ModuleBase
 
     void showBatteryInfo();
     void showDiagnosticInfo();
+
+    // plan 022 P1: Config > Info > CPU monitor (the Info text screen with live numbers, see seqCpu.h)
+    void openCpuMonitor();
+    void refreshCpuMonitor();
+    bool cpuMonitorOpen = false;
+    char cpuText[1100];
+    elapsedMillis cpuRefresh;
 };
 
 extern cConfigEditor configEditor;

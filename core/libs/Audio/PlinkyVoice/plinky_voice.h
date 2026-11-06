@@ -388,6 +388,8 @@ class Engine
     }
     // the CPU governor needs the load of the previous audio block (permille of the block period); 0 = not measured
     void setBlockLoad(uint32_t permille) { load = permille; }
+    // plan 022 P2: what one sounding voice costs (permille of the block, measured by the synth); 0 = unknown (the governor assumes a default)
+    void setVoiceCost(uint32_t permille) { voiceCost = permille; }
     int voiceCap() const { return gov.cap; }
     void resetGovernor() { gov.reset(); }
     Governor& governor() { return gov; }
@@ -471,7 +473,7 @@ class Engine
             return false;
         }
         // plan 019 A: the governor (measured load) and the pool cap: voices over the cap fade out within this block
-        enforceCap(gov.update(load, activeVoices()));
+        enforceCap(gov.update(load, activeVoices(), voiceCost));
         memset(o.dryL, 0, kBlock * sizeof(int16_t));
         memset(o.dryR, 0, kBlock * sizeof(int16_t));
         if (o.revL)
@@ -631,6 +633,7 @@ class Engine
     Voice v[kPool];
     Inst in[kInstances];
     Governor gov;
+    uint32_t voiceCost = 0;
     uint32_t load;
     Ev q[E_N];
     volatile uint32_t head, tail;

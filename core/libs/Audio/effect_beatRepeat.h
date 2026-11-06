@@ -14,6 +14,7 @@ class AudioEffectBeatRepeat : public AudioStream
     AudioEffectBeatRepeat(void)
       : AudioStream(2, inputQueueArray)
     {
+        perfStage = seqcpu::S_BEAT; // plan 022 P1
     }
     void begin(); // engine init: attaches the ring (after the SDRAM is up)
     // where the sequencer clock comes from (set once by the glue): fills the block clock; false = no clock (free run)

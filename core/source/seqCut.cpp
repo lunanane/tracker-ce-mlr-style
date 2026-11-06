@@ -146,7 +146,21 @@ View Cut::view(uint8_t track) const
     {
         v.flags = (uint8_t)(1 << VF_RATE_SHIFT); // rate 1; SYNC ALL done: shown as stock until the boundary / Play hands the track back
         if (secMode_ && hooks_.trackPos && hooks_.trackSteps)
-            sectionView(v, hooks_.trackPos(hooks_.user, track), hooks_.trackSteps(hooks_.user, track), 0, holdSec_[track], track);
+        {
+            // a snapped track (SYNC ALL done, still active until the boundary) is shown where the pads will act: at the STOCK position
+            // (apply() aligns the playhead there); its actual_pos is still the old CUT position
+            const bool snapped = ((activeMask_ >> track) & 1u) != 0 && stock_[track] >= 0;
+            sectionView(v, snapped ? stock_[track] : hooks_.trackPos(hooks_.user, track), hooks_.trackSteps(hooks_.user, track), 0,
+                        holdSec_[track], track);
+        }
+        return v;
+    }
+    // RSYNC pending: the playhead is aligned at the next boundary (a pad press aligns it at once), so the pads act on the section of
+    // the STOCK position - the flags stay the playhead's, the section fields follow the stock
+    if (secMode_ && rt_[track].resync && !rt_[track].stopped && stock_[track] >= 0 && hooks_.trackSteps)
+    {
+        v = views_[track];
+        sectionView(v, stock_[track], hooks_.trackSteps(hooks_.user, track), 0, holdSec_[track], track);
         return v;
     }
     return views_[track];
@@ -252,6 +266,22 @@ void Cut::apply(uint8_t t, uint8_t arg)
     Playhead& p = ph_[t];
     Rt& r = rt_[t];
     if (down && sub != SUB_RESYNC) setSnap(t, false); // a new gesture after SYNC ALL: the track is wanted off the grid again (a late release is not one)
+    // MLR section mapping: after SYNC ALL / RSYNC the screen shows the STOCK position (the playhead is aligned only at the next step
+    // boundary), so a pad pressed in that window used the stale playhead position: another section than the one on the screen, and the
+    // boundary's resync then wiped the press. Align the playhead first, with the same code the boundary would run.
+    if (down && wasActive && r.resync && !r.stopped && (sub == SUB_PAD || sub == SUB_REC) && hooks_.trackSteps)
+    {
+        const int steps = hooks_.trackSteps(hooks_.user, t);
+        const int pos = hooks_.trackPos ? hooks_.trackPos(hooks_.user, t) : 0;
+        if (steps > 0)
+        {
+            r.resync = false;
+            r.held = 0;
+            const uint32_t s = (uint32_t)(stock_[t] >= 0 && stock_[t] < steps ? stock_[t] : pos % steps);
+            p.resync(s);       // clears the loop, the take and the queue ...
+            p.restart(s + 1);  // ... and the next step lands on the stock successor of s (no jump flag), the section of s is the current one
+        }
+    }
     switch (sub)
     {
         case SUB_PAD:

@@ -1454,6 +1454,9 @@ int main()
     test_lane_draw_budget_and_bounds();
     test_mlr_grid_helpers();
     test_mlr_engine_sections();
+    test_mlr_section_sweep();
+    test_mlr_section_sweep2();
+    test_mlr_section_sweep3();
     test_mlr_leds();
     test_mlr_legend_words();
     test_cue_cache_logic();

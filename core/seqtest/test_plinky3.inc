@@ -330,7 +330,117 @@ static void test_x3_sends()
     CHECK(lp == lq);
 }
 
-// ---------------------------------------------------------------- governor
+// ---------------------------------------------------------------- governor (plan 022 P2: voices must come back)
+// A plant: the synth wants `want` voices, the load of a block is the background (MLR stream, reverb, ...) plus vc per sounding voice.
+struct GovPlant
+{
+    Governor g;
+    uint32_t base, vc;
+    int want;
+    GovPlant(uint32_t b, uint32_t v, int w) : base(b), vc(v), want(w) {}
+    int step(uint32_t spike = 0)
+    {
+        const int sounding = want < g.cap ? want : g.cap;
+        const uint32_t load = spike ? spike : base + vc * (uint32_t)sounding;
+        return g.update(load, sounding, vc);
+    }
+};
+static void test_x3_governor_recovery()
+{
+    // spike then recovery: an SD / stream catch-up pushes a few blocks over the limit, the load is back to normal right after. The cap
+    // drops (the dropout was real) and returns, one voice per ~0.67 s, to all 8 within 8 s - and never goes up and down while it does.
+    {
+        GovPlant p(400, 30, 8);
+        for (int i = 0; i < 1000; i++)
+            p.step();
+        CHECK(p.g.cap == 8);
+        for (int i = 0; i < 3; i++)
+            p.step(1200);
+        CHECK(p.g.cap < 8 && p.g.cap >= 6); // one cut, the hold-off keeps the spike from cutting again
+        int prev = p.g.cap, ups = 0, downs = 0, blocks = 0;
+        while (p.g.cap < 8 && blocks < 8 * 345)
+        {
+            p.step();
+            blocks++;
+            if (p.g.cap > prev) ups++;
+            if (p.g.cap < prev) downs++;
+            prev = p.g.cap;
+        }
+        CHECK(p.g.cap == 8 && downs == 0 && ups >= 1 && blocks < 8 * 345);
+        // one voice per kRestoreBlocks: not faster than 0.5 s, not slower than 1 s each
+        const int missing = 8 - 7;
+        CHECK(blocks >= Governor::kRestoreBlocks * missing && blocks <= 345 * missing + 100);
+    }
+    // a spike while 4 voices sound: the average is not poisoned (clamped), recovery is as fast
+    {
+        GovPlant p(300, 30, 4);
+        for (int i = 0; i < 500; i++)
+            p.step();
+        for (int i = 0; i < 5; i++)
+            p.step(60000); // absurd reading (a stalled timer): clamped in the average
+        CHECK(p.g.avg >> 4 < 800);
+    }
+    // sustained moderate load (an MLR stream at 45 %, 30 per voice): the cap settles at the number of voices that fit, stays there, and the
+    // load stays under the cut threshold. 45 % + 8 x 3 % = 69 %: all 8 fit.
+    {
+        GovPlant p(450, 30, 8);
+        for (int i = 0; i < 5000; i++)
+            p.step();
+        CHECK(p.g.cap == 8);
+    }
+    // 62 % background + 3 % per voice: 62 + 24 = 86 % >= the 80 % cut threshold; settles where the average is under it, and does not oscillate
+    {
+        GovPlant p(620, 30, 8);
+        for (int i = 0; i < 4000; i++)
+            p.step();
+        const int settled = p.g.cap;
+        CHECK(settled >= 5 && settled < 8);
+        int changes = 0;
+        for (int i = 0; i < 6000; i++)
+        {
+            const int before = p.g.cap;
+            p.step();
+            if (p.g.cap != before) changes++;
+        }
+        CHECK(changes == 0 && p.g.cap == settled);
+    }
+    // never stuck at 0: a background load at the limit cuts down to the minimum, not to nothing, and when the background goes away the
+    // voices come back (7 steps of 0.67 s)
+    {
+        GovPlant p(960, 30, 8);
+        for (int i = 0; i < 3000; i++)
+            p.step();
+        CHECK(p.g.cap >= Governor::kMinCap && p.g.cap <= Governor::kRiskFloor);
+        p.base = 200;
+        int blocks = 0;
+        while (p.g.cap < 8 && blocks < 20 * 345)
+        {
+            p.step();
+            blocks++;
+        }
+        CHECK(p.g.cap == 8 && blocks < 8 * 345);
+    }
+    // an overrun with a single sounding voice cannot take the last voice
+    {
+        Governor g;
+        g.cap = 1;
+        for (int i = 0; i < 400; i++)
+            g.update(1050, 1);
+        CHECK(g.cap == 1);
+    }
+    // the voice cost from the synth counts: expensive voices (10 % each) need more headroom than cheap ones (1 %)
+    {
+        Governor cheap, dear;
+        cheap.cap = dear.cap = 4;
+        for (int i = 0; i < 2000; i++)
+        {
+            cheap.update(650, 4, 10);
+            dear.update(650, 4, 100);
+        }
+        CHECK(cheap.cap == 8 && dear.cap < 8 && dear.cap >= 4);
+    }
+}
+
 static void test_x3_governor()
 {
     Governor g;
@@ -347,7 +457,8 @@ static void test_x3_governor()
     for (int i = 0; i < 10; i++)
         g.update(400, 7);
     CHECK(g.update(1010, 7) == 6);
-    // restore: 2 s (690 blocks) of average < 65 % and every block < 90 % gives one voice back
+    // restore (plan 022 P2: was 2 s / 690 blocks of average < 65 %): 0.67 s (230 blocks) of quiet blocks (< 90 %) with room for one more
+    // voice (predicted average < 77 %) gives one voice back
     Governor h;
     h.update(1100, 8);
     CHECK(h.cap == 7);
@@ -357,16 +468,31 @@ static void test_x3_governor()
         h.update(500, 7);
         blocks++;
     }
-    CHECK(h.cap == 8 && blocks >= 690 && blocks < 900);
-    // a block at 90 % breaks the stretch: the count starts again
+    CHECK(h.cap == 8 && blocks >= Governor::kRestoreBlocks && blocks < Governor::kRestoreBlocks + 60);
+    // a block near the limit (>= 95 %) breaks the stretch: the count starts again (was: a block at 90 %, now that one only delays the
+    // count). Within a second of the first overrun it is also the second risk block: one more voice goes.
     Governor k;
     k.update(1100, 8);
-    for (int i = 0; i < 600; i++)
+    for (int i = 0; i < Governor::kRestoreBlocks - 30; i++)
         k.update(500, 7);
-    k.update(910, 7);
-    for (int i = 0; i < 600; i++)
-        k.update(500, 7);
+    k.update(960, 7);
+    CHECK(k.cap == 6);
+    for (int i = 0; i < Governor::kRestoreBlocks - 30; i++)
+        k.update(500, 6);
+    CHECK(k.cap == 6);
+    for (int i = 0; i < 60; i++)
+        k.update(500, 6);
     CHECK(k.cap == 7);
+    // a block at 90 % delays the count by a quarter of it, it does not reset it
+    Governor k2;
+    k2.update(1100, 8);
+    for (int i = 0; i < Governor::kRestoreBlocks - 30; i++)
+        k2.update(500, 7);
+    k2.update(910, 7);
+    CHECK(k2.cap == 7);
+    for (int i = 0; i < 120; i++)
+        k2.update(500, 7);
+    CHECK(k2.cap == 8);
     // the risk rule: two blocks >= 95 % within a second cut one voice, but never below the floor
     Governor r;
     r.update(960, 8);
@@ -788,6 +914,7 @@ static void test_x3_all()
     test_x3_pool();
     test_x3_sends();
     test_x3_governor();
+    test_x3_governor_recovery();
     test_x3_file();
     test_x3_multi_edit();
     test_x3_instrument_order();

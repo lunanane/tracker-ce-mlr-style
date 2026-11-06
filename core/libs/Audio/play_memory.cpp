@@ -3,6 +3,7 @@
 #include "ampLogarythmicValues.h"
 #include "dspinst.h"
 #include "mtAudioEngine.h"
+#include "seqCpu.h" // plan 022 P1
 #include "util_math.h"
 #include <cr_section_macros.h>
 
@@ -139,8 +140,18 @@ AUDIO_CORE_RAM void AudioPlayMemory::update(void)
     }
 
     audio_block_t* block = nullptr;
+    perfStage = currentIsStreamed ? seqcpu::S_SMP_STR : seqcpu::S_SMP_RES; // plan 022 P1: CPU monitor stage
     if (warpV.active)
-        block = updateWarp(); // plan 016 B
+    {
+        if (seqcpu::active())
+        {
+            const uint32_t t0 = seqcpu::cyc();
+            block = updateWarp(); // plan 016 B
+            seqcpu::nestedAdd(seqcpu::S_WARP, seqcpu::cyc() - t0);
+        }
+        else
+            block = updateWarp(); // plan 016 B
+    }
     else
     switch (currentPlayMode)
     {

@@ -1,5 +1,6 @@
 #include "Platform.h"
 #include "Profiler.h"
+#include "seqCpu.h" // plan 022 P1
 #include "TrackerImpl.h"
 #include "mtWavetableEnvelopes.h"
 #include "core/interface.h"
@@ -133,6 +134,7 @@ void TrackerImpl::init(Platform* platform)
     padsBacklight.init(500, platform->getLeds());
     exporter.init(platform->getFileSystem());
     Profiler::getInstance()->init();
+    seqcpu::init(); // plan 022 P1: cycle counter for the CPU monitor
     newFileManager.setCrcCalculator(platform->getCrcCalculator());
 
     initConfig(platform);
@@ -164,6 +166,7 @@ void TrackerImpl::update()
         return;
     }
 
+    const uint32_t perfT0 = seqcpu::cyc(); // plan 022 P1: main loop pass time
     engine.updateSdStream();
     display.update();
     engine.updateSdStream();
@@ -177,6 +180,7 @@ void TrackerImpl::update()
     seqTracksUpdate();
     seqSessionUpdate();
     Profiler::getInstance()->sampleHeap(); // plan 010: lowest free heap (shown on the Config page)
+    seqcpu::passEnd(seqcpu::cyc() - perfT0);
 }
 
 void TrackerImpl::updateAudioBuffers(void* left, void* right, int length)
@@ -190,6 +194,7 @@ void TrackerImpl::updateAudioBuffers(void* left, void* right, int length)
         midiSetAudioBlockStartUs(platform->getTimer()->micros());
     }
     Profiler::getInstance()->startMeasuringAudio();
+    const uint32_t perfT0 = seqcpu::cyc(); // plan 022 P1
     midiUpdate();
 
     // Exact hardware I2S sample rate:
@@ -203,11 +208,19 @@ void TrackerImpl::updateAudioBuffers(void* left, void* right, int length)
 
     float updateIntervalSeconds = length / kAudioSampleRate;
     sequencer.tick(updateIntervalSeconds);
+    const uint32_t perfT1 = seqcpu::cyc();
 
     engine.update();
+    const uint32_t perfT2 = seqcpu::cyc();
 
     engine.updateAudioBuffers(left, right, length);
     Profiler::getInstance()->stopMeasuringAudio();
+    if (seqcpu::active()) // plan 022 P1: the control-rate and sequencer parts of the block (the streams are timed in update_all)
+    {
+        seqcpu::stageAdd(seqcpu::S_SEQ, perfT1 - perfT0);
+        seqcpu::stageAdd(seqcpu::S_CTRL, perfT2 - perfT1);
+    }
+    seqcpu::blockEnd(seqcpu::cyc() - perfT0);
 }
 
 void TrackerImpl::updateInputAudioBuffers(void* dataI2s, void* dataUsb, int length)

@@ -9,6 +9,7 @@ class AudioStereoToMono : public AudioStream
     AudioStereoToMono(void)
       : AudioStream(2, inputQueueArray)
     {
+        perfStage = seqcpu::S_IO; // plan 022 P1
     }
     virtual void update(void);
     enum OutSignalType

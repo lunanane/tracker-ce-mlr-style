@@ -1001,6 +1001,23 @@ Host tests: `core/seqtest/test_sampmem.cpp` (the refusal of the old rule is repr
 | 14 | Export the streamed instrument (sample export), copy / paste it to another slot | a full-length WAV / the copy plays |
 | 15 | Instrument picker popup and pattern editor | **SD** shows for streamed samples only, names are not cut mid-word beyond the end of the field |
 
+## 11p. v0.4.2: performance pass (plan 022, Original Tracker only)
+**P1 - the CPU monitor.** Config > Info > **CPU monitor** (no long press, no dev-mode file needed). Close: button 8. The numbers are per half second window, in percent of the audio block (2.90 ms); stage times are measured only while the monitor is open (the audio interrupt then times every stream with the cycle counter), everything else is counted all the time.
+
+| # | Action | Expected |
+|---|---|---|
+| 1 | Open Config > Info > CPU monitor on an idle project | "Audio ISR avg ..%" (a few percent), the stage lines near 0, "Main loop" a few ms with several hundred passes/s, no ring misses |
+| 2 | Start playback of a project with samples | Samples resident / streamed, voice chain and mixers rise; "other" stays small (a few percent): if "other" is large something is not accounted for, report it |
+| 3 | Play PolySynth chords | PolySynth rises; "PolySynth voices: cap N, sounding M" follows the notes, the own readout is about the PolySynth stage |
+| 4 | Switch the Delay / Reverb sends on, then Beat repeat | Delay, reverb and beat repeat stages show their cost; the reverb stage drops to ~0 when it has been silent for about a second |
+| 5 | MLR with a streamed long loop: jump around with the pads | "MLR jumps ... restarts / reused / from cue", "SD stream jobs/s", "Blocking reads" (cue cache / waveform / stream fill) and "ring misses" (underruns, the click you hear) |
+| 6 | Leave the monitor (Close) and use the page normally | No extra load: with the monitor closed only the ISR total, the main loop pass time and the stream counters are touched |
+| 7 | **Report to the owner** (same rehearsal as before): the screen of the MLR streaming case and of the synth case, before/after each later build | See the per item list at the end of plan 022 |
+
+**P2 - dropouts.** MLR with a streamed long loop (jump with the pads, also quickly): ring misses stay 0, "blocking reads" are short (longest well under 3 ms), the display and pads stay responsive. PolySynth under load (chords on all three synths with reverb and an MLR loop): when the "cap" falls (dropout), it climbs back by one voice about every 0.7 s as soon as the load allows; it never stays at 0 (minimum 1). After the pads were pressed after SYNC ALL / RSYNC the jump lands on the section shown on the screen.
+
+**P3 - speed.** Compare "Samples resident / streamed" and the ISR average with v0.4.1 on the same project: streamed voices about 2 % each cheaper, resident about 0.1-0.2 % each. Sound must be identical (the changes are bit-exact): play a project with one-shot and looped samples at several pitches and compare with v0.4.1 by ear / recording.
+
 ## 12. Stock behaviour (never enter Play mode, Session or the fader page)
 | Press | Expected |
 |---|---|

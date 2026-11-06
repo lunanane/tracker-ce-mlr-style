@@ -33,6 +33,7 @@
 
 #ifndef __ASSEMBLER__
 #include "config.h"
+#include "seqCpuLogic.h" // plan 022 P1: seqcpu::Stage
 #include <stdio.h>  // for NULL
 #include <string.h> // for memcpy
 #include <stdint.h>
@@ -165,6 +166,7 @@ class AudioStream
 #endif
     bool active;
     unsigned char num_inputs;
+    uint8_t perfStage = seqcpu::S_MIX; // plan 022 P1: CPU monitor stage of this stream; sample voices set it per block
     static audio_block_t* allocate(void);
     static void release(audio_block_t* block);
     void transmit(audio_block_t* block, unsigned char index = 0);

@@ -31,6 +31,7 @@
 #include "AudioStream.h"
 #include "config.h"
 #include "mtAudioEngine.h"
+#include "seqCpu.h" // plan 022 P1
 #include <mtAudioExport.h>
 
 #define MAX_AUDIO_MEMORY 229376
@@ -330,6 +331,22 @@ AUDIO_CORE_RAM void AudioStream::update_all(void)
         return;
 
     AudioStream* p;
+
+    if (seqcpu::g_on) // plan 022 P1: the CPU monitor is open: every stream is timed (nested stages, the warp, are taken out)
+    {
+        for (p = AudioStream::first_update; p; p = p->next_update)
+        {
+            if (p->active)
+            {
+                seqcpu::g_nestedCycles = 0;
+                const uint32_t t0 = seqcpu::cyc();
+                p->update();
+                const uint32_t dt = seqcpu::cyc() - t0;
+                seqcpu::stageAdd(p->perfStage, dt > seqcpu::g_nestedCycles ? dt - seqcpu::g_nestedCycles : 0);
+            }
+        }
+        return;
+    }
 
     for (p = AudioStream::first_update; p; p = p->next_update)
     {

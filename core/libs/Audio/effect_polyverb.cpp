@@ -40,6 +40,7 @@ static uint16_t sramReverbBuff2[Reverb::kBuffer2Words];
 AudioEffectPolyverb::AudioEffectPolyverb()
   : AudioStream(2, inputQueueArray)
 {
+    perfStage = seqcpu::S_REVERB; // plan 022 P1
     buffer = internalRamReverbBuff;
 #ifdef PLATFORM_IMX
     buffer2 = externalRamReverbBuff;

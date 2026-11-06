@@ -7,7 +7,7 @@
 class AudioSynthPlinky : public AudioStream
 {
   public:
-    AudioSynthPlinky() : AudioStream(0, NULL) {}
+    AudioSynthPlinky() : AudioStream(0, NULL) { perfStage = seqcpu::S_PLINKY; } // plan 022 P1
     virtual void update(void);
 
     plinkyvoice::Engine& engine() { return eng; }

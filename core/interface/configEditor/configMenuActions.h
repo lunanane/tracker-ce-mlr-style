@@ -23,6 +23,7 @@ void setMetronomValues();
 void setSlaveClockCompValue();
 
 void openCreditsAction();
+void openCpuMonitorAction(); // plan 022 P1
 
 void startFileTransferMode();
 

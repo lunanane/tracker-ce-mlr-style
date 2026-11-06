@@ -12,6 +12,7 @@ class AudioEffectLimiter : public AudioStream
     AudioEffectLimiter(void)
       : AudioStream(2, inputQueueArray)
     {
+        perfStage = seqcpu::S_LIMIT; // plan 022 P1
     }
 
     void begin();
