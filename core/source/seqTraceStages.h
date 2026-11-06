@@ -67,6 +67,52 @@ template <class C> struct Split
     void finish() {}
 };
 
+// The same split for the batching contexts of the session screens (laneView.cpp FtCtx: color, alpha, rect, disc, text, finish; rects and
+// discs are batched, BEGIN / END only when the primitive changes). The cost of a command includes the batch change it causes in a single
+// stage drawing (END 4, LINE_WIDTH + BEGIN(RECTS) 8, BEGIN(POINTS) 4; a disc is POINT_SIZE + VERTEX2F). The stage's own context opens its
+// batches itself, so a stage may use a few bytes more than counted: kBatchOwnBytes covers CMD_DLSTART, SAVE / RESTORE_CONTEXT, the batch
+// reopened at the start of stage 1 and the END of the last batch.
+enum { kBatchOwnBytes = 4 + 8 + 8 + 4 };
+template <class C> struct BatchSplit
+{
+    C& out;
+    int stage;
+    int used[2];
+    int dropped;
+    bool cut;
+    uint8_t prim; // the batch of the single stage drawing: 0 none, 1 RECTS, 2 POINTS
+    BatchSplit(C& o, int st) : out(o), stage(st), dropped(0), cut(false), prim(0) { used[0] = used[1] = kBatchOwnBytes; }
+    int change(uint8_t want)
+    {
+        if (prim == want) return 0;
+        const int b = (prim ? 4 : 0) + (want == 1 ? 8 : (want == 2 ? 4 : 0));
+        prim = want;
+        return b;
+    }
+    bool take(int bytes)
+    {
+        if (!cut && used[0] + bytes <= kStageBytes)
+        {
+            used[0] += bytes;
+            return stage == 0;
+        }
+        cut = true;
+        if (dropped == 0 && used[1] + bytes <= kStageBytes)
+        {
+            used[1] += bytes;
+            return stage == 1;
+        }
+        dropped += bytes;
+        return false;
+    }
+    void color(uint32_t rgb) { if (take(4)) out.color(rgb); }
+    void alpha(uint8_t a) { if (take(4)) out.alpha(a); }
+    void rect(int x0, int y0, int x1, int y1) { if (take(change(1) + 8)) out.rect(x0, y0, x1, y1); }
+    void disc(int cx, int cy, int r) { if (take(change(2) + 8)) out.disc(cx, cy, r); }
+    void text(int x, int y, int font, int opt, const char* s) { if (take(change(0) + textBytes(s))) out.text(x, y, font, opt, s); }
+    void finish() { change(0); }
+};
+
 } // namespace tracestage
 
 #endif

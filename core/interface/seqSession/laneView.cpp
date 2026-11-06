@@ -11,6 +11,7 @@
 #include "seqMlr.h"
 #include "mtSequencer.h"
 #include "seqSession/seqSession.h"
+#include "seqTraceStages.h"
 #include "seqTracks.h"
 #include "FT812.h" // last: its CMD_* macros clash with enumerators of the session headers
 
@@ -22,6 +23,7 @@ class cSeqLanes : public cDisplayControl
     cSeqLanes(strControlProperties* properties = nullptr);
     virtual ~cSeqLanes() {}
     virtual void update();
+    virtual void update2();
     virtual void setStyle(uint32_t style) { this->style = style; }
     virtual void setText(const char*) {}
     virtual void setValue(int) {}
@@ -29,6 +31,7 @@ class cSeqLanes : public cDisplayControl
     virtual void setData(void* data) { model = (const seqcut::MlrModel*)data; }
 
   private:
+    void drawStage(int stage);
     const seqcut::MlrModel* model;
 };
 
@@ -112,10 +115,13 @@ MlrModel s_lanes;
 MlrHeadModel s_heads;
 uint32_t s_lastStatic = 0, s_lastHead = 0;
 bool s_have = false; // the models hold a frame that was handed to the display
+// v0.3.9: the lanes are drawn in two display stages (seqTraceStages.h, the 4 KB command FIFO); between them s_lanes must not change
+uint32_t s_lanesMidMs = 0;      // != 0: stage 0 drawn at this ms, stage 1 not yet
+bool s_staticPending = false; // a change of the static part waits for the end of a half built frame
 } // namespace
 
 //----------------------------------------------------------------------------------------------
-cSeqLanes::cSeqLanes(strControlProperties* properties) : cDisplayControl(controlIdSeqLanes, 1), model(nullptr)
+cSeqLanes::cSeqLanes(strControlProperties* properties) : cDisplayControl(controlIdSeqLanes, tracestage::kStages), model(nullptr)
 {
     if (properties == nullptr)
         return;
@@ -127,16 +133,29 @@ cSeqLanes::cSeqLanes(strControlProperties* properties) : cDisplayControl(control
     setStyle(properties->style);
 }
 
-void cSeqLanes::update()
+// v0.3.9: two stages of at most tracestage::kStageBytes FIFO bytes (the busiest MLR screen is 4.1 KB, the FIFO 4 KB)
+void cSeqLanes::drawStage(int stage)
 {
     if (model == nullptr)
+    {
+        s_lanesMidMs = 0;
         return;
-    API_SAVE_CONTEXT();
-    FtCtx c;
+    }
+    if (stage == 0)
+        API_SAVE_CONTEXT();
+    FtCtx out;
+    tracestage::BatchSplit<FtCtx> c(out, stage);
     drawMlr(c, *model);
     c.finish();
-    API_RESTORE_CONTEXT();
+    out.finish();
+    if (stage == tracestage::kStages - 1)
+        API_RESTORE_CONTEXT();
+    s_lanesMidMs = stage == 0 ? (seqNowMs() | 1u) : 0u;
 }
+
+void cSeqLanes::update() { drawStage(0); }
+
+void cSeqLanes::update2() { drawStage(1); }
 
 cSeqPlayheads::cSeqPlayheads(strControlProperties* properties) : cDisplayControl(controlIdSeqPlayheads, 1), model(nullptr)
 {
@@ -167,6 +186,8 @@ void laneViewCreate()
     // Called once per module start (initDisplayControls): the display freed the controls of the last start, the old handles are void.
     s_hLanes = s_hHeads = -1;
     s_visible = false;
+    s_lanesMidMs = 0;
+    s_staticPending = false;
     // controls created first are drawn last (on top): the playheads go over the lanes
     memset(&s_lanes, 0, sizeof(s_lanes));
     memset(&s_heads, 0, sizeof(s_heads));
@@ -221,7 +242,9 @@ bool laneViewRefresh(bool force)
     uint8_t pos[kSlots], uStep[kSlots];
 
     // static part: rebuilt at most every 100 ms, redrawn only when it differs (the legend follows the playheads: its model holds them)
-    if (force || !s_have || (uint32_t)(now - s_lastStatic) >= 100)
+    if (s_lanesMidMs != 0 && (uint32_t)(now - s_lanesMidMs) >= 200u)
+        s_lanesMidMs = 0; // a frame that never got its second stage (the control went away) does not block the lanes
+    if (force || s_staticPending || !s_have || (uint32_t)(now - s_lastStatic) >= 100)
     {
         s_lastStatic = now;
         MlrModel m;
@@ -270,8 +293,11 @@ bool laneViewRefresh(bool force)
             sequencer.seqTrackPos(t, pos[k], uStep[k], last);
             m.legendPad[k] = padOfPos(pos[k], v.sec, l.spp);
         }
-        if (force || !s_have || memcmp(&m, &s_lanes, sizeof(m)) != 0)
+        if (s_lanesMidMs != 0)
+            s_staticPending = true; // v0.3.9: the lanes control is between its two stages: next pass
+        else if (force || s_staticPending || !s_have || memcmp(&m, &s_lanes, sizeof(m)) != 0)
         {
+            s_staticPending = false;
             s_lanes = m;
             display.refreshControl(s_hLanes);
             changed = true;

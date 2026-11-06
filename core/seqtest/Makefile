@@ -8,7 +8,7 @@ GLUE = ../source/seqTracksCore.cpp ../source/seqCut.cpp ../interface/seqSession/
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
 
 .PHONY: test clean preview amp-preview pitch-preview grid-preview
-test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE) build/seq_plinky_tests$(EXE) build/seq_trace_tests$(EXE) build/seq_amp_tests$(EXE) build/seq_warp_tests$(EXE) build/seq_stage_tests$(EXE)
+test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE) build/seq_plinky_tests$(EXE) build/seq_trace_tests$(EXE) build/seq_amp_tests$(EXE) build/seq_warp_tests$(EXE) build/seq_stage_tests$(EXE) build/seq_gridstage_tests$(EXE)
 	build/seq_cpu_tests$(EXE)
 	build/seq_glue_tests$(EXE)
 	build/seq_perform_tests$(EXE)
@@ -19,9 +19,10 @@ test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tes
 	build/seq_trace_tests$(EXE)
 	build/seq_amp_tests$(EXE)
 	build/seq_stage_tests$(EXE)
+	build/seq_gridstage_tests$(EXE)
 	build/seq_warp_tests$(EXE)
 
-build/seq_glue_tests$(EXE): test_main.cpp test_session.cpp test_cut.inc ../source/seqSessionLogic.h ../source/seqClipsLogic.h ../source/seqCut.h ../source/seqCutLogic.h ../interface/seqSession/cutLayer.h ../interface/seqSession/cutSessionLayer.h ../interface/seqSession/laneDraw.h ../interface/seqSession/mlrDraw.h ../source/seqMlrLogic.h ../source/seqCueCache.h ../source/seqPalette.h ../interface/seqSession/laneView.h ../source/seqTracksCore.h ../source/seqTracksLogic.h ../source/seqTracksRec.h ../source/seqRecLogic.h test_rec.inc test_hr.inc test_plinkyseq.inc ../source/seqPlinkySeqLogic.h ../source/seqPlinkyUiLogic.h $(GLUE) $(SEQ)
+build/seq_glue_tests$(EXE): test_main.cpp test_session.cpp test_cut.inc ../source/seqSessionLogic.h ../source/seqClipsLogic.h ../source/seqCut.h ../source/seqCutLogic.h ../interface/seqSession/cutLayer.h ../interface/seqSession/cutSessionLayer.h ../interface/seqSession/laneDraw.h ../interface/seqSession/mlrDraw.h ../source/seqMlrLogic.h ../source/seqCueCache.h ../source/seqPalette.h ../interface/seqSession/laneView.h ../source/seqTracksCore.h ../source/seqTracksLogic.h ../source/seqTracksRec.h ../source/seqRecLogic.h test_rec.inc test_hr.inc test_plinkyseq.inc ../source/seqPlinkySeqLogic.h ../source/seqPlinkyUiLogic.h ../source/seqTraceStages.h $(GLUE) $(SEQ)
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -I../libs/Audio test_main.cpp test_session.cpp $(GLUE) $(SEQ) -o $@
 
@@ -86,6 +87,11 @@ build/seq_amp_tests$(EXE): test_amp.cpp ../source/seqAmpViewLogic.h ../source/se
 build/seq_stage_tests$(EXE): test_stages.cpp ../source/seqTraceStages.h ../source/seqAmpViewLogic.h ../source/seqPitchTraceLogic.h ../libs/Audio/PlinkyVoice/plinky_voice.h ../source/seqPalette.h
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -O2 -I../libs/Audio/PlinkyVoice test_stages.cpp -o $@
+
+# v0.3.9: the launcher grid (the real clipGrid.cpp against fifostub/) in two display stages, FT81x command FIFO sizes
+build/seq_gridstage_tests$(EXE): test_gridstages.cpp fifostub/FT812.h fifostub/display.h ../interface/seqSession/clipGrid.cpp ../interface/seqSession/clipGrid.h ../source/seqSessionLogic.h ../source/seqTraceStages.h ../source/seqPalette.h
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) -Ififostub -I../interface test_gridstages.cpp -o $@
 
 # plan 016 B: Warp (time-stretch to the project tempo): grain engine (libs/Audio/warp_core.h, header only) + settings / sidecar. -O2: the cost lines are only meaningful optimised
 build/seq_warp_tests$(EXE): test_warp.cpp ../libs/Audio/warp_core.h ../source/seqWarpLogic.h ../source/seqSidecarLogic.h

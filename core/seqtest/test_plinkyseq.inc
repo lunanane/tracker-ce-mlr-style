@@ -42,6 +42,8 @@ struct PlCtx
         ensure(0);
         const int n = (int)strlen(s);
         words += n * 2 + 2;
+        textWords += n * 2 + 2;
+        fifoText += 12 + (n + 1 + 3) / 4 * 4; // v0.3.9: what the FT81x command FIFO gets for CMD_TEXT
         texts++;
         const int w = n * 9, h = 17;
         const int x0 = (opt & 1) ? x - w / 2 : ((opt & 4) ? x - w : x);
@@ -50,6 +52,9 @@ struct PlCtx
     }
     void finish() { ensure(0); }
     int bytes() const { return words * 4; }
+    // v0.3.9: bytes of the co-processor command FIFO (one stage = one burst, must stay under 4092; seqTraceStages.h)
+    int textWords = 0, fifoText = 0;
+    int fifo() const { return (words - textWords) * 4 + fifoText; }
 };
 } // namespace
 
@@ -440,7 +445,7 @@ static void test_note_band()
     CHECK(b.root == -1);
     // layout: inside the screen, above the strip labels (y 424), clear of the edge markers (x 14..82 and 714..782) and the type list / overlays
     Palette pal = { 1, 2, 3, 4, 5 };
-    int worst = 0;
+    int worst = 0, worstFifo = 0;
     for (int variant = 0; variant < 3; variant++)
     {
         Band v;
@@ -451,12 +456,14 @@ static void test_note_band()
         drawBand(c, v, pal);
         CHECK(c.minX >= 86 && c.maxX <= 710 && c.minY >= 400 && c.maxY <= 424);
         if (c.bytes() > worst) worst = c.bytes();
+            if (c.fifo() > worstFifo) worstFifo = c.fifo();
     }
     Band none;
     PlCtx e;
     drawBand(e, none, pal);
     CHECK(e.bytes() == 0 && e.rects == 0);
-    printf("  note band display list: worst %d bytes\n", worst);
+    printf("  note band display list: worst %d bytes (command FIFO %d)\n", worst, worstFifo);
+    CHECK(worstFifo <= 3840);
     CHECK(worst <= 600);
     // the voice row of the PolySynth overlay sits on the footer line 2 and stays clear of the "newer file" notice's line (only one of them is drawn)
     CHECK(kVoiceX + (kVoices - 1) * kVoiceStep + kVoiceBar + 44 + 40 <= 800 && kVoiceY - 4 >= 396 && kVoiceY + 4 <= 424);
@@ -485,7 +492,7 @@ static void test_plinky_overlay_draw_budget()
     m.channel = 16;
     m.cpu = 100;
     m.peak = 100;
-    int worst = 0, best = 99999;
+    int worst = 0, worstFifo = 0, best = 99999;
     for (int s = 0; s < kSections; s++)
         for (int i = 0; i < section((uint8_t)s).count; i++)
         {
@@ -494,6 +501,7 @@ static void test_plinky_overlay_draw_budget()
             PlCtx c;
             draw(c, m, pal);
             if (c.bytes() > worst) worst = c.bytes();
+            if (c.fifo() > worstFifo) worstFifo = c.fifo();
             if (c.bytes() < best) best = c.bytes();
             // inside the screen, below the stock title bar, above the screen button labels
             CHECK(c.minX >= 0 && c.maxX <= 800 && c.minY >= 30 && c.maxY <= 424);
@@ -508,6 +516,7 @@ static void test_plinky_overlay_draw_budget()
             PlCtx c;
             draw(c, m, pal);
             if (c.bytes() > worst) worst = c.bytes();
+            if (c.fifo() > worstFifo) worstFifo = c.fifo();
             CHECK(c.minX >= 0 && c.maxX <= 800 && c.minY >= 30 && c.maxY <= 424);
         }
     m = Model();
@@ -516,6 +525,8 @@ static void test_plinky_overlay_draw_budget()
     printf("  PolySynth overlay display list: worst %d bytes, empty bars %d bytes, %d rects, %d texts\n", worst, z.bytes(), z.rects, z.texts);
     // the frame holds the pattern editor under the overlay as well: the overlay keeps to a share of the 8172 bytes
     CHECK(worst <= 3600);
+    printf("  PolySynth overlay command FIFO: worst %d bytes (one stage, FIFO 4096)\n", worstFifo);
+    CHECK(worstFifo <= 3840); // v0.3.9: one display stage is one burst into the 4 KB FT81x command FIFO (seqTraceStages.h)
     // cells and rows do not overlap and fit: 7 cells in the widest row (the Voice row, plan 012)
     CHECK(kCellX0 + 6 * kCellStep + kCellW <= kBoxX1 && kCellW <= kCellStep);
     CHECK(kRowY0 + (kSections - 1) * kRowStep + kRowH <= 396);
