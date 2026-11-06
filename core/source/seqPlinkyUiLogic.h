@@ -31,7 +31,8 @@ inline const ParamInfo& uiInfo(int p)
     return p == P_MORPH ? m : paramInfo(p);
 }
 
-enum { kSections = 5, kMaxCells = 7 };
+// plan 019 B: eight sections, five rows visible at a time (the window follows the cursor)
+enum { kSections = 8, kVisible = 5, kMaxCells = 7 };
 struct Section
 {
     const char* name;
@@ -42,9 +43,12 @@ inline const Section& section(uint8_t i)
 {
     static const Section k[kSections] = {
         { "Oscillator", 4, { P_SHAPE, P_DETUNE, P_INTERVAL, P_NOISE, -1, -1, -1 } },
-        { "Filter", 3, { P_CUTOFF, P_RESO, P_DRIVE, -1, -1, -1, -1 } },
+        { "Sub", 2, { P_SUB1, P_SUB2, -1, -1, -1, -1, -1 } },
+        { "Filter", 4, { P_FTYPE, P_CUTOFF, P_RESO, P_DRIVE, -1, -1, -1 } },
+        { "Filter env", 5, { P_FENV_AMT, P_FENV_A, P_FENV_D, P_FENV_S, P_FENV_R, -1, -1 } },
         { "Envelope", 4, { P_ATTACK, P_DECAY, P_SUSTAIN, P_RELEASE, -1, -1, -1 } },
-        { "LFO", 3, { P_LFO_RATE, P_LFO_DEPTH, P_LFO_DEST, -1, -1, -1, -1 } },
+        { "LFO", 4, { P_LFO_WAVE, P_LFO_RATE, P_LFO_DEPTH, P_LFO_DEST, -1, -1, -1 } },
+        { "Chorus", 3, { P_CH_MIX, P_CH_RATE, P_CH_DEPTH, -1, -1, -1, -1 } },
         { "Voice", 7, { P_VOICES, P_GLIDE, P_WIDTH, P_LEVEL, P_REVERB, P_DELAY, P_MORPH } },
     };
     return k[i < kSections ? i : 0];
@@ -57,6 +61,8 @@ inline const char* cellName(int p)
     {
         case P_LFO_RATE: return "Rate";
         case P_LFO_DEPTH: return "Depth";
+        case P_CH_RATE: return "Rate";
+        case P_CH_DEPTH: return "Depth";
         case P_LFO_DEST: return "Target";
         case P_RESO: return "Reso";
         case P_MORPH: return "Morph";
@@ -67,8 +73,16 @@ inline const char* cellName(int p)
 struct Cursor
 {
     uint8_t sec = 0, idx = 0;
+    uint8_t top = 0; // first visible section (plan 019 B: five of the eight rows show)
     int param() const { return section(sec).param[idx]; }
-    void fix() { if (sec >= kSections) sec = 0; if (idx >= section(sec).count) idx = (uint8_t)(section(sec).count - 1); }
+    void fix()
+    {
+        if (sec >= kSections) sec = 0;
+        if (idx >= section(sec).count) idx = (uint8_t)(section(sec).count - 1);
+        if (sec < top) top = sec;
+        if (sec >= top + kVisible) top = (uint8_t)(sec - kVisible + 1);
+        if (top + kVisible > kSections) top = (uint8_t)(kSections - kVisible);
+    }
     // Left / Right: next parameter in the section (no wrap). true when the cursor moved
     bool horizontal(int dir)
     {
@@ -115,12 +129,20 @@ inline int allValue(int param, int cur, int delta)
 
 inline void valueText(int p, int v, char* out, size_t n)
 {
-    static const char* const kDest[3] = { "Pitch", "Shape", "Cutoff" };
+    static const char* const kDest[4] = { "Pitch", "Shape", "Cutoff", "Level" };
     switch (p)
     {
+        case P_FTYPE: snprintf(out, n, "%s", filterTypeName(v)); break;
+        case P_LFO_WAVE: snprintf(out, n, "%s", lfoWaveName(v)); break;
+        case P_FENV_AMT:
+        {
+            const int d = v - 50; // tenths of an octave
+            snprintf(out, n, "%c%d.%d oct", d < 0 ? '-' : '+', (d < 0 ? -d : d) / 10, (d < 0 ? -d : d) % 10);
+            break;
+        }
         case P_INTERVAL: snprintf(out, n, "%+d st", v - 12); break;
         case P_MORPH: plinkymorph::timeText(v, out, n); break;
-        case P_LFO_DEST: snprintf(out, n, "%s", kDest[v > 2 ? 2 : v]); break;
+        case P_LFO_DEST: snprintf(out, n, "%s", kDest[v > 3 ? 3 : v]); break;
         case P_SHAPE: shapeText(v, out, n); break;
         case P_WIDTH: if (v == 0) snprintf(out, n, "Mono"); else snprintf(out, n, "%d", v); break;
         default: snprintf(out, n, "%d", v); break;
@@ -128,7 +150,7 @@ inline void valueText(int p, int v, char* out, size_t n)
 }
 
 // the cell name; "Cutoff*" when the value differs from the inherited one (plan 012)
-inline const char* markedName(int p, uint32_t mark, char* out)
+inline const char* markedName(int p, plinkymorph::ParamMask mark, char* out)
 {
     if (p >= P_COUNT || !((mark >> p) & 1u))
         return cellName(p);
@@ -143,12 +165,13 @@ struct Model
     uint8_t track;   // 1..16
     uint8_t morphPat;    // plan 012: a morph is running towards this pattern (0 = none)
     uint16_t morphMs;    // ... and this much of it is left
-    uint32_t mark;       // bit per parameter whose value differs from the inherited one (plan 012)
+    plinkymorph::ParamMask mark; // bit per parameter whose value differs from the inherited one (plan 012)
     seqnotes::VoiceView voice[seqnotes::kVoices]; // the 4 voices (v0.3.3): note and envelope level
     uint8_t channel; // P_CHANNEL (not shown since v0.3.2)
     uint8_t cpu, peak;
     uint8_t newer;   // plinky.bin of a newer mod version: edits are not saved
     uint8_t inst;    // plan 019: the instance shown (0 .. 2)
+    uint8_t top;     // plan 019 B: first visible section
     uint8_t all;     // plan 019: Shift is held: a dial edit goes to ALL instances
     uint8_t cap;     // plan 019: voices the pool may sound now (the governor), 0 .. kPool
     Model() { memset(this, 0, sizeof(*this)); for (int i = 0; i < seqnotes::kVoices; i++) voice[i].note = 0xFF; }
@@ -173,6 +196,10 @@ template <class C> void draw(C& c, const Model& m, const Palette& p)
 {
     char buf[72], nm[16];
     const int selSec = m.sec < kSections ? m.sec : 0;
+    int top = m.top + kVisible <= kSections ? m.top : kSections - kVisible;
+    if (selSec < top) top = selSec; // the selected row is always in the window
+    if (selSec >= top + kVisible) top = selSec - kVisible + 1;
+    auto rowY = [&](int s) { return kRowY0 + (s - top) * kRowStep; };
     // ---- shapes ----
     c.color(p.bg);
     c.rect(0, kPanelY0, 800, kPanelY1);
@@ -194,22 +221,25 @@ template <class C> void draw(C& c, const Model& m, const Palette& p)
         c.rect(kAllX0, kTabY0, kAllX1, kTabY1);
     }
     c.color(p.panel);
-    for (int s = 0; s < kSections; s++)
-        c.rect(kBoxX0, kRowY0 + s * kRowStep, kBoxX1, kRowY0 + s * kRowStep + kRowH);
+    for (int s = top; s < top + kVisible && s < kSections; s++)
+        c.rect(kBoxX0, rowY(s), kBoxX1, rowY(s) + kRowH);
     c.color(p.accent); // current section strip + selected cell
-    c.rect(kBoxX0, kRowY0 + selSec * kRowStep, kBoxX0 + 4, kRowY0 + selSec * kRowStep + kRowH);
+    c.rect(kBoxX0, rowY(selSec), kBoxX0 + 4, rowY(selSec) + kRowH);
     {
-        const int cx = kCellX0 + m.idx * kCellStep, cy = kRowY0 + selSec * kRowStep;
+        const int cx = kCellX0 + m.idx * kCellStep, cy = rowY(selSec);
         c.rect(cx, cy + 2, cx + kCellW, cy + kRowH - 2);
     }
     c.color(p.bar);
-    for (int s = 0; s < kSections; s++)
+    c.rect(kBoxX1 + 2, kRowY0, kBoxX1 + 6, kRowY0 + kVisible * kRowStep - 4); // the scroll bar: the visible part of the eight sections
+    for (int s = top; s < top + kVisible && s < kSections; s++)
         for (int i = 0; i < section((uint8_t)s).count; i++)
-            c.rect(kCellX0 + i * kCellStep + 6, kRowY0 + s * kRowStep + 24, kCellX0 + i * kCellStep + 6 + kBarW, kRowY0 + s * kRowStep + 34);
+            c.rect(kCellX0 + i * kCellStep + 6, rowY(s) + 24, kCellX0 + i * kCellStep + 6 + kBarW, rowY(s) + 34);
+    c.color(p.accent);
+    c.rect(kBoxX1 + 2, kRowY0 + top * (kVisible * kRowStep - 4) / kSections, kBoxX1 + 6, kRowY0 + (top + kVisible) * (kVisible * kRowStep - 4) / kSections);
     for (int pass = 0; pass < 2; pass++) // bar fills: the selected one in the dark colour
     {
         c.color(pass == 0 ? p.fill : p.onAccent);
-        for (int s = 0; s < kSections; s++)
+        for (int s = top; s < top + kVisible && s < kSections; s++)
             for (int i = 0; i < section((uint8_t)s).count; i++)
             {
                 const bool sel = s == selSec && i == m.idx;
@@ -218,7 +248,7 @@ template <class C> void draw(C& c, const Model& m, const Palette& p)
                 const ParamInfo& pi = uiInfo(par);
                 const int w = pi.max > pi.min ? (m.v[par] - pi.min) * kBarW / (pi.max - pi.min) : 0;
                 if (w > 0)
-                    c.rect(kCellX0 + i * kCellStep + 6, kRowY0 + s * kRowStep + 24, kCellX0 + i * kCellStep + 6 + w, kRowY0 + s * kRowStep + 34);
+                    c.rect(kCellX0 + i * kCellStep + 6, rowY(s) + 24, kCellX0 + i * kCellStep + 6 + w, rowY(s) + 34);
             }
     }
     if (!m.newer)  // voice levels (the row sits on the footer line 2; the "newer file" notice needs that line)
@@ -268,23 +298,23 @@ template <class C> void draw(C& c, const Model& m, const Palette& p)
                 snprintf(vt, sizeof vt, m.voice[i].rel ? "~%s" : "%s", nn); // ~C3 = releasing
                 c.text(seqnotes::kVoiceX + i * seqnotes::kVoiceStep, seqnotes::kVoiceY, 1, 2, vt);
             }
-    for (int s = 0; s < kSections; s++)
+    for (int s = top; s < top + kVisible && s < kSections; s++)
         for (int i = 0; i < section((uint8_t)s).count; i++)
         {
             if (s == selSec && i == m.idx) continue;
             const int par = section((uint8_t)s).param[i];
-            const int x = kCellX0 + i * kCellStep + 6, y = kRowY0 + s * kRowStep;
+            const int x = kCellX0 + i * kCellStep + 6, y = rowY(s);
             valueText(par, m.v[par], buf, sizeof buf);
             c.text(x, y + 11, 3, 2, markedName(par, m.mark, nm));
             c.text(x, y + 48, 3, 2, buf);
         }
     c.color(p.section);
-    for (int s = 0; s < kSections; s++)
-        c.text(kBoxX0 + 12, kRowY0 + s * kRowStep + kRowH / 2, 3, 2, section((uint8_t)s).name);
+    for (int s = top; s < top + kVisible && s < kSections; s++)
+        c.text(kBoxX0 + 12, rowY(s) + kRowH / 2, 3, 2, section((uint8_t)s).name);
     c.color(p.onAccent);
     {
         const int par = section((uint8_t)selSec).param[m.idx];
-        const int x = kCellX0 + m.idx * kCellStep + 6, y = kRowY0 + selSec * kRowStep;
+        const int x = kCellX0 + m.idx * kCellStep + 6, y = rowY(selSec);
         valueText(par, m.v[par], buf, sizeof buf);
         c.text(x, y + 11, 3, 2, markedName(par, m.mark, nm));
         c.text(x, y + 48, 3, 2, buf);

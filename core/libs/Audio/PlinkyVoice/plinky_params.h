@@ -47,11 +47,25 @@ enum Param : uint8_t
     P_RELEASE,
     P_LFO_RATE,
     P_LFO_DEPTH,
-    P_LFO_DEST,  // 0 pitch, 1 shape, 2 cutoff
+    P_LFO_DEST,  // 0 pitch, 1 shape, 2 cutoff, 3 level (plan 019 B)
+    // ---- plan 019 B: engine extensions (appended; stored in the PLVI frames, the older frames hold the 21 above)
+    P_SUB1,      // square sub oscillator one octave down, level
+    P_SUB2,      // square sub oscillator two octaves down, level
+    P_FTYPE,     // 0 low pass gate (the Plinky filter), 1 SVF low pass, 2 SVF band pass, 3 SVF high pass, 4 ladder low pass 24 dB
+    P_FENV_AMT,  // filter envelope amount, 50 = none, 0 / 100 = -5 / +5 octaves of cutoff
+    P_FENV_A,
+    P_FENV_D,
+    P_FENV_S,
+    P_FENV_R,
+    P_LFO_WAVE,  // 0 sine, 1 triangle, 2 saw up, 3 saw down, 4 square, 5 sample & hold, 6 smooth random
+    P_CH_MIX,    // chorus (per instance): wet share
+    P_CH_RATE,
+    P_CH_DEPTH,
     P_COUNT
 };
 // plan 019: the parameters of the file formats before the engine extensions (plinky.bin version 1 frame and the PLVM trailer hold exactly these)
 constexpr int kLegacyCount = 21;
+constexpr int kFilterTypes = 5, kLfoWaves = 7;
 static_assert(P_COUNT >= kLegacyCount, "parameters are only ever appended");
 
 struct ParamInfo
@@ -68,7 +82,10 @@ inline const ParamInfo& paramInfo(int i)
         { 0, 100, 30, "Detune" },  { 0, 24, 12, "Interval" }, { 0, 100, 0, "Noise" },  { 0, 100, 60, "Cutoff" },
         { 0, 100, 20, "Reso" },    { 0, 100, 30, "Drive" },  { 0, 100, 10, "Attack" }, { 0, 100, 50, "Decay" },
         { 0, 100, 60, "Sustain" }, { 0, 100, 40, "Release" }, { 0, 100, 40, "LFO rate" }, { 0, 100, 0, "LFO depth" },
-        { 0, 2, 0, "LFO to" },
+        { 0, 3, 0, "LFO to" },
+        { 0, 100, 0, "Sub -1" },   { 0, 100, 0, "Sub -2" },   { 0, 4, 0, "Type" },      { 0, 100, 50, "Amount" },
+        { 0, 100, 10, "Atk" },     { 0, 100, 50, "Dec" },     { 0, 100, 60, "Sus" },    { 0, 100, 40, "Rel" },
+        { 0, 6, 0, "Wave" },       { 0, 100, 0, "Mix" },      { 0, 100, 40, "Rate" },   { 0, 100, 50, "Depth" },
     };
     return t[i < 0 ? 0 : (i >= P_COUNT ? P_COUNT - 1 : i)];
 }
@@ -97,6 +114,17 @@ inline void shapeText(int v, char* out, size_t n)
         else
             snprintf(out, n, "WT%d+%d%%", t + 1, (s * 100 + kWtSteps / 2) / kWtSteps);
     }
+}
+
+inline const char* filterTypeName(int t)
+{
+    static const char* const k[kFilterTypes] = { "LPG", "SVF LP", "SVF BP", "SVF HP", "Ladder" };
+    return k[t < 0 ? 0 : (t >= kFilterTypes ? kFilterTypes - 1 : t)];
+}
+inline const char* lfoWaveName(int t)
+{
+    static const char* const k[kLfoWaves] = { "Sine", "Tri", "Saw up", "Saw dn", "Square", "S&H", "Smooth" };
+    return k[t < 0 ? 0 : (t >= kLfoWaves ? kLfoWaves - 1 : t)];
 }
 
 inline uint8_t clampParam(int i, int v)

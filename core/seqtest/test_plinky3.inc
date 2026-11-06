@@ -470,6 +470,13 @@ static void fillSnap(plinkymorph::Store& st, int pat, int seed)
         v[i] = clampParam(i, paramInfo(i).def + seed + i);
     st.set(pat, v);
 }
+static void fillSnapLegacy(plinkymorph::Store& st, int pat, int seed)
+{
+    uint8_t v[P_COUNT];
+    for (int i = 0; i < P_COUNT; i++)
+        v[i] = i < kLegacyCount ? clampParam(i, paramInfo(i).def + seed + i) : paramInfo(i).def;
+    st.set(pat, v);
+}
 
 static void test_x3_file()
 {
@@ -482,10 +489,10 @@ static void test_x3_file()
     for (int k = 0; k < 3; k++)
     {
         cur[k] = instDefaults(k);
-        for (int i = 1; i < P_COUNT; i++)
+        for (int i = 1; i < (k == 0 ? kLegacyCount : P_COUNT); i++) // instance 0 first without the newer parameters (its PLVI frame is tested below)
             cur[k].v[i] = clampParam(i, paramInfo(i).def + 3 * k + i % 5);
     }
-    fillSnap(s0, 4, 2);
+    fillSnapLegacy(s0, 4, 2);
     fillSnap(s1, 9, 5);
     fillSnap(s1, 200, 1);
     fillSnap(s2, 255, 3);

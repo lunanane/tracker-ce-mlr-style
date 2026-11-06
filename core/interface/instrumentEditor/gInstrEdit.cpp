@@ -1998,6 +1998,7 @@ void cInstrumentEditor::plinkyUpdateView(bool force)
     m.all = buttons->isButtonPressed(interfaceButtonShift) ? 1 : 0;
     m.sec = plinkyCur.sec;
     m.idx = plinkyCur.idx;
+    m.top = plinkyCur.top;
     m.track = 0; // 0 = the instrument page (no track number, own hint line)
     if (!force && plinkyShownValid && plinkyShownMode == plinkyView.mode && memcmp(&plinkyShownModel, &m, sizeof(m)) == 0)
         return;
@@ -2048,14 +2049,14 @@ void cInstrumentEditor::showPlinkyParams()
     for (uint8_t i = 0; i < 8; i++)
     {
         display.setControlValue(label[i], 1);
-        display.setControlColors(label[i], (i < seqplinky::kSections && i == plinkyCur.sec) ? th.highlightedButtonLabelsColors : th.activeLabelsColors);
+        display.setControlColors(label[i], (i < seqplinky::kVisible && plinkyCur.top + i == plinkyCur.sec) ? th.highlightedButtonLabelsColors : th.activeLabelsColors);
         display.setRemoveControlStyle(label[i], controlStyleLimitTextWidth);
         display.setControlStyle2(label[i], controlStyleCenterX | controlStyleCenterY | controlStyleFont2);
         display.setRemoveControlStyle(label[i], controlStyleShowBitmap);
         display.setRemoveControlStyle(label[i], controlStyleSpecialFx2);
-        if (i < seqplinky::kSections)
+        if (i < seqplinky::kVisible) // plan 019 B: the buttons name the five visible sections (the window scrolls with the cursor)
         {
-            display.setControlText(label[i], seqplinky::section(i).name);
+            display.setControlText(label[i], seqplinky::section((uint8_t)(plinkyCur.top + i)).name);
             display.setControlText2(label[i], "");
         }
         else if (i == 6)
@@ -2179,9 +2180,9 @@ bool cInstrumentEditor::plinkyButton(uint8_t button, uint8_t state)
             plinkyTogglePitch();
             return true;
         }
-        if (button < seqplinky::kSections)
+        if (button < seqplinky::kVisible)
         {
-            plinkyCur.sec = button;
+            plinkyCur.sec = (uint8_t)(plinkyCur.top + button);
             plinkyCur.fix();
             showPlinkyParams();
         }

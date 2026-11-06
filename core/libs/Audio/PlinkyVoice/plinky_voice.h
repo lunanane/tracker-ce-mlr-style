@@ -46,6 +46,7 @@
 namespace plinkyvoice {
 
 constexpr int kMaxVoices = 4;  // per instance (the Voices limit)
+constexpr int kChLen = 1024; // chorus line length per side (power of two: 23 ms at 44.1 kHz)
 constexpr int kPool = 8;       // voices of all instances together (kInstances is in plinky_params.h)
 constexpr int kBlock = 128;
 constexpr float kFs = 44100.0f;
@@ -155,6 +156,65 @@ inline float wtSample(const int16_t* tb, uint32_t ph, int shift, float w)
     return (ya + (yb - ya) * w) * (1.0f / 1073741824.0f); // 16384 * 65536 = 2^30 -> 1.0
 }
 
+// LFO waveform at phase 0 .. 1, -1 .. +1 (before the depth). 0: the parabolic sine of v0.3.x (starts at 0, goes down first), 1 triangle (starts at
+// the bottom), 2 saw up, 3 saw down, 4 square (high first), 5 sample & hold (held = the value drawn at the last wrap), 6 smooth random
+// (a smoothstep from the previous to the current random value over the cycle)
+inline float lfoShape(int wave, float phase, float prev, float held)
+{
+    const float x = phase * 2.0f - 1.0f;
+    const float ax = x < 0 ? -x : x;
+    switch (wave)
+    {
+        case 1: return 1.0f - 2.0f * ax;
+        case 2: return x;
+        case 3: return -x;
+        case 4: return phase < 0.5f ? 1.0f : -1.0f;
+        case 5: return held;
+        case 6: return prev + (held - prev) * (phase * phase * (3.0f - 2.0f * phase));
+        default: return 4.0f * x * (1.0f - ax);
+    }
+}
+
+// tan(x) for x < 1.1 (Pade 3/4, error under 1 percent), the SVF and ladder coefficient g = tan(pi fc / fs)
+inline float tanPade(float x)
+{
+    const float x2 = x * x;
+    return x * (105.0f - 10.0f * x2) / (105.0f - 45.0f * x2 + x2 * x2);
+}
+
+// Plan 019 B filters (own implementation of the textbook topology-preserving transform, Zavalishin / Simper):
+// state variable filter, one sample. s[0], s[1] = the two integrator states; coefficients a1 = 1 / (1 + g (g + k)), a2 = g a1, a3 = g a2,
+// k = damping (2 .. 0.04). mode 1 = low pass, 2 = band pass (peak gain 1), 3 = high pass.
+inline float svfStep(float x, float* s, float a1, float a2, float a3, float k, int mode)
+{
+    const float v3 = x - s[1];
+    const float v1 = a1 * s[0] + a2 * v3;
+    const float v2 = s[1] + a2 * s[0] + a3 * v3;
+    s[0] = 2.0f * v1 - s[0];
+    s[1] = 2.0f * v2 - s[1];
+    return mode == 1 ? v2 : (mode == 2 ? k * v1 : x - k * v1 - v2);
+}
+// 4 pole ladder low pass, zero delay feedback solved in closed form (linear), soft clip on the loop input. G = g / (1 + g),
+// G2..G3 its powers, invD = 1 / (1 + kf G^4), kf = feedback 0 .. 3.9.
+inline float ladderStep(float x, float* s, float G, float G2, float G3, float invD, float kf)
+{
+    const float S = (1.0f - G) * (G3 * s[0] + G2 * s[1] + G * s[2] + s[3]);
+    float u = (x - kf * S) * invD;
+    u = softclip(u * 0.5f) * 2.0f;
+    float v = (u - s[0]) * G, y = v + s[0];
+    s[0] = y + v;
+    v = (y - s[1]) * G;
+    y = v + s[1];
+    s[1] = y + v;
+    v = (y - s[2]) * G;
+    y = v + s[2];
+    s[2] = y + v;
+    v = (y - s[3]) * G;
+    y = v + s[3];
+    s[3] = y + v;
+    return y;
+}
+
 struct Saw
 {
     uint32_t ph = 0, prev = 0;
@@ -175,11 +235,27 @@ struct Voice
     uint8_t inst = 0;     // the instance (synth) that owns the voice
     uint8_t kill = 0;     // the governor took the voice: it fades out within the next block and is freed
     uint8_t wtOn = 0;     // the last block was rendered by the wavetable oscillator (the saws' delayed samples are stale then)
-    Voice() { memset(y, 0, sizeof(y)); }
+    // plan 019 B: sub oscillators (two squares, each a saw pair), filter envelope, SVF / ladder states
+    float fenv = 0;       // filter envelope level
+    float fg = 0;         // SVF / ladder coefficient g at the end of the last block (0: none yet)
+    float sg1 = 0, sg2 = 0; // sub levels at the end of the last block
+    float fs[8];          // filter states of the SVF / ladder: left 0..3, right 4..7
+    uint32_t sph[2], spv[4];
+    uint8_t fatk = 0, ftype = 0, subOn = 0;
+    Voice()
+    {
+        memset(y, 0, sizeof(y));
+        memset(fs, 0, sizeof(fs));
+        memset(sph, 0, sizeof(sph));
+        memset(spv, 0, sizeof(spv));
+    }
     void clear()
     {
         memset(y, 0, sizeof(y));
         env = g = k = 0;
+        memset(fs, 0, sizeof(fs));
+        fenv = fg = sg1 = sg2 = 0;
+        fatk = ftype = subOn = 0;
         stage = ST_IDLE;
         gate = 0;
         relPend = 0;
@@ -196,6 +272,13 @@ struct Inst
     float sCut, sRes, sNoise, sDet, sShape, sLevel;
     float sWt, wtPrev; // wavetable position (0 .. 16) smoothed, and the position at the end of the last block (< 0: not in the mode)
     bool smoothed;
+    // plan 019 B: LFO random shapes, chorus
+    float lfoHeld, lfoPrev;
+    uint32_t lfoRng;
+    float chPhase;
+    int16_t* chMem;    // 2 * kChLen samples (left line, right line), raw storage owned by the caller; null = no chorus
+    uint16_t chPos;
+    bool chStale;      // the lines hold old audio (the instance was idle): cleared before the next use
     void init(int idx)
     {
         for (int i = 0; i < P_COUNT; i++)
@@ -206,6 +289,12 @@ struct Inst
         sWt = 0;
         wtPrev = -1.0f;
         smoothed = false;
+        lfoHeld = lfoPrev = 0;
+        lfoRng = 0x2545F491u + (uint32_t)idx * 7919u;
+        chPhase = 0;
+        chMem = nullptr;
+        chPos = 0;
+        chStale = true;
     }
 };
 
@@ -285,6 +374,16 @@ class Engine
     }
     uint8_t param(int i, int inst = 0) const { return in[inst].p[i]; }
     uint8_t effective(int i, int inst = 0) const { return in[inst].ef[i]; }
+    // plan 019 B: the chorus delay lines of an instance (2 * kChLen int16, left then right) live in memory the caller owns (EXTERNAL_RAM on the
+    // device); without it the instance has no chorus. Main loop / init only.
+    void setChorusMemory(int inst, int16_t* mem)
+    {
+        if (inst >= 0 && inst < kInstances)
+        {
+            in[inst].chMem = mem;
+            in[inst].chStale = true;
+        }
+    }
     // the CPU governor needs the load of the previous audio block (permille of the block period); 0 = not measured
     void setBlockLoad(uint32_t permille) { load = permille; }
     int voiceCap() const { return gov.cap; }
@@ -340,7 +439,10 @@ class Engine
         if (!any)
         {
             for (int k = 0; k < kInstances; k++)
+            {
                 in[k].lvlPrev = 0;
+                in[k].chStale = true;
+            }
             gov.update(load, 0);
             // v0.3.6: a note that began and ended between two trace samples (a stab) still gets its sample, and the line ends with a
             // closing sample (all off) where the engine went idle
@@ -386,6 +488,7 @@ class Engine
             if (!cnt)
             {
                 I.lvlPrev = 0;
+                I.chStale = true;
                 continue;
             }
             Derived d;
@@ -410,10 +513,44 @@ class Engine
             const float dl = (d.level - lv) * (1.0f / kBlock);
             const float sRev = 0.5f * (float)I.ef[P_REVERB] * 0.01f, sDly = 0.5f * (float)I.ef[P_DELAY] * 0.01f;
             const bool doRev = o.revL && sRev > 0.0f, doDly = o.dlyL && sDly > 0.0f;
+            const bool chorus = I.chMem && I.ef[P_CH_MIX] > 0;
+            if (chorus && I.chStale)
+            {
+                memset(I.chMem, 0, 2 * kChLen * sizeof(int16_t));
+                I.chPos = 0;
+                I.chStale = false;
+            }
+            const float chMix = (float)I.ef[P_CH_MIX] * 0.005f; // 0 .. 0.5 wet share
+            const float chDph = 0.2f * exp2fast((float)I.ef[P_CH_RATE] * 0.05f) * (1.0f / kFs);
+            const float chDepth = (float)I.ef[P_CH_DEPTH] * 2.2f; // +- 220 samples (5 ms) at full depth
             for (int i = 0; i < kBlock; i++)
             {
                 lv += dl;
-                const float yl = softclip(busL[i] * lv) * 32767.0f, yr = softclip(busR[i] * lv) * 32767.0f;
+                float yl = softclip(busL[i] * lv) * 32767.0f, yr = softclip(busR[i] * lv) * 32767.0f;
+                if (chorus)
+                {   // modulated delay per side (triangle LFOs half a cycle apart), linear interpolation, 10 ms centre
+                    I.chPhase += chDph;
+                    if (I.chPhase >= 1.0f)
+                        I.chPhase -= 1.0f;
+                    float pl = I.chPhase, pr = I.chPhase + 0.5f;
+                    if (pr >= 1.0f)
+                        pr -= 1.0f;
+                    const float tl = (pl < 0.5f ? pl : 1.0f - pl) * 4.0f - 1.0f, tr = (pr < 0.5f ? pr : 1.0f - pr) * 4.0f - 1.0f;
+                    I.chMem[I.chPos & (kChLen - 1)] = (int16_t)yl;
+                    I.chMem[kChLen + (I.chPos & (kChLen - 1))] = (int16_t)yr;
+                    const float dL = 441.0f + chDepth * tl, dR = 441.0f + chDepth * tr;
+                    const int iL = (int)dL, iR = (int)dR;
+                    const float fL = dL - (float)iL, fR = dR - (float)iR;
+                    const int16_t* lineL = I.chMem;
+                    const int16_t* lineR = I.chMem + kChLen;
+                    const float wl = (float)lineL[(I.chPos - iL) & (kChLen - 1)] +
+                                     ((float)lineL[(I.chPos - iL - 1) & (kChLen - 1)] - (float)lineL[(I.chPos - iL) & (kChLen - 1)]) * fL;
+                    const float wr = (float)lineR[(I.chPos - iR) & (kChLen - 1)] +
+                                     ((float)lineR[(I.chPos - iR - 1) & (kChLen - 1)] - (float)lineR[(I.chPos - iR) & (kChLen - 1)]) * fR;
+                    I.chPos++;
+                    yl += (wl - yl) * chMix;
+                    yr += (wr - yr) * chMix;
+                }
                 o.dryL[i] = (int16_t)sat16(o.dryL[i] + (int)yl);
                 o.dryR[i] = (int16_t)sat16(o.dryR[i] + (int)yr);
                 if (doRev)
@@ -468,6 +605,12 @@ class Engine
         bool wt, wtXF;
         int wtA0, wtA1;
         float wtW0, wtW1;
+        // plan 019 B
+        uint8_t ft;                  // filter type (0 low pass gate)
+        bool sub, fenvOn;
+        float subG1, subG2;          // sub oscillator levels
+        float famt, kFA, kFD, kFR, fsus; // filter envelope: octaves, one pole coefficients, sustain level
+        float svfOct, svfK, ladK;    // log2(fc / 1300 Hz) before the envelope, SVF damping, ladder feedback
     };
 
     Voice v[kPool];
@@ -742,6 +885,7 @@ class Engine
                 vo.s[i].prev = vo.s[i].ph;
         }
         vo.gate = 1;
+        vo.fatk = 1; // the filter envelope attacks again from where it is
         vo.stage = ST_ATTACK; // a steal or retrigger keeps level, phases and filter: the amplitude is continuous
     }
 
@@ -772,9 +916,13 @@ class Engine
         // shared LFO (parabolic sine), rate 0.1 .. 19 Hz
         I.lfoPhase += 0.1f * exp2fast((float)I.ef[P_LFO_RATE] * 0.076f) * kBlockSec;
         if (I.lfoPhase >= 1.0f)
+        {
             I.lfoPhase -= 1.0f;
-        const float x = I.lfoPhase * 2.0f - 1.0f;
-        float lfo = 4.0f * x * (1.0f - (x < 0 ? -x : x));
+            I.lfoPrev = I.lfoHeld; // a new random value per cycle (sample & hold, smooth random)
+            I.lfoRng = I.lfoRng * 1664525u + 1013904223u;
+            I.lfoHeld = (float)(int32_t)I.lfoRng * (1.0f / 2147483648.0f);
+        }
+        float lfo = lfoShape(I.ef[P_LFO_WAVE], I.lfoPhase, I.lfoPrev, I.lfoHeld);
         float depth = (float)I.ef[P_LFO_DEPTH] * 0.01f;
         if (I.mod > depth)
             depth = I.mod;
@@ -792,6 +940,8 @@ class Engine
         d.interval = (float)((int)I.ef[P_INTERVAL] - 12);
         const float lv = I.sLevel * 0.01f;
         d.level = lv * lv * 1.5f * (1.0f + (float)I.ef[P_DRIVE] * 0.03f);
+        if (dest == 3)
+            d.level *= 1.0f + lfo * 0.5f; // tremolo
 
         // envelope: per block one pole coefficients from the times (attack 1 ms .. 2 s, decay / release 5 ms .. 10 s)
         d.kA = 1.0f - exp2fast(-kBlockSec * 1.4427f * 2.4f / (0.001f * exp2fast((float)I.ef[P_ATTACK] * 0.11f)));
@@ -849,6 +999,22 @@ class Engine
         }
         else
             I.wtPrev = -1.0f;
+
+        // ---- plan 019 B: sub oscillators, filter type and envelope
+        d.ft = I.ef[P_FTYPE];
+        d.sub = I.ef[P_SUB1] > 0 || I.ef[P_SUB2] > 0;
+        d.subG1 = (float)I.ef[P_SUB1] * 0.005f; // a square of +-1 times half the level
+        d.subG2 = (float)I.ef[P_SUB2] * 0.005f;
+        d.famt = ((float)I.ef[P_FENV_AMT] - 50.0f) * 0.1f;
+        d.fenvOn = I.ef[P_FENV_AMT] != 50;
+        d.kFA = 1.0f - exp2fast(-kBlockSec * 1.4427f * 2.4f / (0.001f * exp2fast((float)I.ef[P_FENV_A] * 0.11f)));
+        d.kFD = 1.0f - exp2fast(-kBlockSec * 1.4427f * 4.6f / (0.005f * exp2fast((float)I.ef[P_FENV_D] * 0.11f)));
+        d.kFR = 1.0f - exp2fast(-kBlockSec * 1.4427f * 4.6f / (0.005f * exp2fast((float)I.ef[P_FENV_R] * 0.11f)));
+        d.fsus = (float)I.ef[P_FENV_S] * 0.01f;
+        d.fsus *= d.fsus;
+        d.svfOct = (I.sCut - 60.0f) * 0.1f + (dest == 2 ? lfo * 3.0f : 0.0f);
+        d.svfK = 2.0f - 1.96f * r * r;
+        d.ladK = 3.9f * r * r;
     }
 
     void renderVoice(Voice& vo, const Derived& d)
@@ -885,6 +1051,23 @@ class Engine
                     vo.env = 0.0f;
                 break;
         }
+        // plan 019 B: the filter envelope (block rate, follows the gate like the amplitude envelope)
+        if (vo.gate)
+        {
+            if (vo.fatk)
+            {
+                vo.fenv += (1.15f - vo.fenv) * d.kFA;
+                if (vo.fenv >= 1.0f)
+                {
+                    vo.fenv = 1.0f;
+                    vo.fatk = 0;
+                }
+            }
+            else
+                vo.fenv += (d.fsus - vo.fenv) * d.kFD;
+        }
+        else
+            vo.fenv -= vo.fenv * d.kFR;
         vo.pitch += ((float)vo.note - vo.pitch) * d.glideK;
         if (d.glideK >= 1.0f)
             vo.pitch = (float)vo.note;
@@ -916,8 +1099,54 @@ class Engine
         const float a = vo.kill ? 0.0f : vo.vel * vo.env; // killed (governor): the amplitude ramps to zero over the block
         const float gT = 0.35f * a;
         float kT = a * a * d.cutGain;
+        if (d.fenvOn && d.ft == 0)
+            kT *= exp2fast(d.famt * vo.fenv); // the filter envelope moves the low pass gate's cutoff (octaves)
         if (kT > 1.0f)
             kT = 1.0f;
+        // SVF / ladder: coefficient g = tan(pi fc / fs), ramped over the block in steps of 32 samples
+        const int FT = d.ft;
+        if (vo.ftype != FT)
+        {
+            memset(vo.fs, 0, sizeof(vo.fs)); // another filter: clean states
+            vo.ftype = (uint8_t)FT;
+            vo.fg = 0.0f;
+        }
+        float fgS = 0.0f, fgE = 0.0f;
+        if (FT)
+        {
+            float oct = d.svfOct + (d.fenvOn ? d.famt * vo.fenv : 0.0f);
+            float fc = 1300.0f * exp2fast(oct);
+            fc = fc < 20.0f ? 20.0f : (fc > 13000.0f ? 13000.0f : fc);
+            fgE = tanPade(fc * (3.14159265f / kFs));
+            fgS = vo.fg > 0.0f ? vo.fg : fgE;
+            vo.fg = fgE;
+        }
+        // sub oscillators: squares one and two octaves below the pitch
+        const bool SUB = d.sub;
+        uint32_t sp0 = vo.sph[0], sp1 = vo.sph[1];
+        uint32_t spv0 = vo.spv[0], spv1 = vo.spv[1], spv2 = vo.spv[2], spv3 = vo.spv[3];
+        int32_t sd0 = 0, sd1 = 0;
+        float sgl1 = vo.sg1, sgl2 = vo.sg2;
+        float dsg1 = 0.0f, dsg2 = 0.0f;
+        if (SUB)
+        {
+            sd0 = semiToDphase(base - 12.0f);
+            sd1 = semiToDphase(base - 24.0f);
+            if (!vo.subOn)
+            {
+                spv0 = sp0;
+                spv1 = sp0 + 0x80000000u;
+                spv2 = sp1;
+                spv3 = sp1 + 0x80000000u;
+                sgl1 = d.subG1;
+                sgl2 = d.subG2;
+            }
+            dsg1 = (d.subG1 - sgl1) * (1.0f / kBlock);
+            dsg2 = (d.subG2 - sgl2) * (1.0f / kBlock);
+        }
+        vo.subOn = SUB;
+        float a1 = 0, a2 = 0, a3 = 0, fk = 0, G = 0, G2 = 0, G3 = 0, invD = 1.0f;
+        const float svfK = d.svfK, ladK = d.ladK;
         float g = vo.g, k = vo.k;
         const float dg = (gT - g) * (1.0f / kBlock), dk = (kT - k) * (1.0f / kBlock);
         const float res = d.res, nz = d.noise;
@@ -1022,7 +1251,72 @@ class Engine
                     xR = blepSaw(ph1, (uint32_t)dp1, pv1) + blepSaw(ph3, (uint32_t)dp3, pv3);
                 }
             }
-            xL = (xL + n) * g;
+            xL += n;
+            if (SUB)
+            {
+                sp0 += (uint32_t)sd0;
+                sp1 += (uint32_t)sd1;
+                sgl1 += dsg1;
+                sgl2 += dsg2;
+                const float sb = (blepSaw(sp0, (uint32_t)sd0, spv0) - blepSaw(sp0 + 0x80000000u, (uint32_t)sd0, spv1)) * sgl1 +
+                                 (blepSaw(sp1, (uint32_t)sd1, spv2) - blepSaw(sp1 + 0x80000000u, (uint32_t)sd1, spv3)) * sgl2;
+                xL += sb;
+                xR += sb; // (only used with ST)
+            }
+            if (FT)
+            {
+                if ((i & 31) == 0)
+                {
+                    const float gg = fgS + (fgE - fgS) * ((float)i * (1.0f / kBlock));
+                    if (FT < 4)
+                    {
+                        fk = svfK;
+                        a1 = 1.0f / (1.0f + gg * (gg + fk));
+                        a2 = gg * a1;
+                        a3 = gg * a2;
+                    }
+                    else
+                    {
+                        G = gg / (1.0f + gg);
+                        G2 = G * G;
+                        G3 = G2 * G;
+                        invD = 1.0f / (1.0f + ladK * G2 * G2);
+                    }
+                }
+                float fL, fR = 0.0f;
+                if (FT < 4)
+                {
+                    fL = svfStep(xL, vo.fs, a1, a2, a3, fk, FT);
+                    if (ST)
+                    {
+                        xR += n;
+                        fR = svfStep(xR, vo.fs + 4, a1, a2, a3, fk, FT);
+                    }
+                }
+                else
+                {
+                    fL = ladderStep(xL, vo.fs, G, G2, G3, invD, ladK);
+                    if (ST)
+                    {
+                        xR += n;
+                        fR = ladderStep(xR, vo.fs + 4, G, G2, G3, invD, ladK);
+                    }
+                }
+                fL *= g;
+                if (ST)
+                {
+                    fR *= g;
+                    oL[i] += fL * d.sL + fR * d.sR;
+                    oR[i] += fR * d.sL + fL * d.sR;
+                }
+                else
+                {
+                    oL[i] += fL;
+                    oR[i] += fL;
+                }
+                continue;
+            }
+            xL = xL * g;
             y1L += (xL - (y2L - y1L) * res - y1L) * k;
             y1L *= 0.999f;
             y2L += (y1L - y2L) * k;
@@ -1044,6 +1338,20 @@ class Engine
             }
         }
         rng = r;
+        vo.sph[0] = sp0;
+        vo.sph[1] = sp1;
+        vo.spv[0] = spv0;
+        vo.spv[1] = spv1;
+        vo.spv[2] = spv2;
+        vo.spv[3] = spv3;
+        vo.sg1 = SUB ? d.subG1 : 0.0f;
+        vo.sg2 = SUB ? d.subG2 : 0.0f;
+        for (int q = 0; q < 8; q++) // a corrupt filter state is cleared like the low pass gate's
+            if (!(vo.fs[q] > -1.0e4f && vo.fs[q] < 1.0e4f))
+            {
+                memset(vo.fs, 0, sizeof(vo.fs));
+                break;
+            }
         vo.s[0].ph = ph0;
         vo.s[1].ph = ph1;
         vo.s[2].ph = ph2;

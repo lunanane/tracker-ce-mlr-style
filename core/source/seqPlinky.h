@@ -50,10 +50,10 @@ uint16_t seqPlinkyTraceHead();
 // ---- plan 012: snapshots per pattern and the timed morph ----
 // Parameter number kPlinkyMorphParam (= the engine parameter count) is the project morph time in half seconds (0 = jump .. 60 = 30 s);
 // seqPlinkyGet / Set / Default take it like any parameter. Edits are written into the snapshot of the playing (or shown) pattern.
-enum { kPlinkyMorphParam = 21 };
+enum { kPlinkyMorphParam = 33 }; // = plinkyvoice::P_COUNT (checked in seqPlinky.cpp)
 bool seqPlinkyMorphStatus(uint16_t* remainMs, uint8_t* pattern); // true while a morph runs
 bool seqPlinkyVoice(int i, uint8_t* note, uint8_t* level, uint8_t* releasing); // v0.3.3 display: voice i (0..3) sounds; level 0..60
-uint32_t seqPlinkyMarks();                                       // bit per parameter that differs from the inherited value (shown pattern)
+uint64_t seqPlinkyMarks();                                       // bit per parameter that differs from the inherited value (shown pattern)
 void seqPlinkyClipLaunched(uint8_t track, uint8_t pattern);      // main loop: a clip was queued on the track (morph to its source pattern)
 
 // TrackerImpl::init (after the SDRAM is up, before any other seqPlinky call that touches the morph state): constructs the

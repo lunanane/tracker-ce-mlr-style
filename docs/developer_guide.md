@@ -29,6 +29,10 @@ When extending the **Polyend Tracker Community Edition (CE)** firmware, adding n
 | **Plus / Mini (IMX) - `SRAM_OC` (`RAM3`)** | `32 KB` | `~22.7 KB` (`70.8%`) | **`~9.3 KB`** | — | Non-cacheable OCRAM used for USB/SDMA buffers and `audioRecBuff`. |
 | **Plus / Mini (IMX) - `EXTERNAL_RAM` (`RAM4`)** | `65,536 KB` | `~65,528 KB` (`99.99%`) | **`~8 KB`** | **`+29.0 MB`** *(up to `~29.0 MB` total)* | `60 MB` `SAMPLE_MEMORY_SIZE` (`45 MB` stereo sample pool + `15 MB` FX edit buffer) + `1.5 MB` delay + `768 KB` shared `externalRamScratchBuff` + `VoiceStreamManager` ring buffers + `64 KB` `g_wtEnvelopeBank`. |
 
+### Flash image limit (Original Tracker)
+
+The image must end below **0xFC000** (1,032,192 B); `platforms/mk66/check_image_size.sh` runs in the post-build step of `make original`, prints the image end and the margin, fails at the limit and warns below 16 KB of margin. (The old 0xF0000 rule came from a misreading; tracker-ff ships images up to 0xFBB90 and 0xFC2AC is known to boot.) Plan 019 step 0 freed 22.5 KB with more `-Os` (platform, effector, event-rate sequencer code) and word-wise `memcpy` / `memset` (`platforms/mk66/source/fastmem.S`). `SAMPLE_MEMORY_SIZE` is unchanged (11.25 MB; the PolySynth chorus lines need 12 KB of the 250 KB that are free).
+
 ### Theoretically Available `EXTERNAL_RAM` via `SAMPLE_MEMORY_SIZE` (Hybrid SD Streaming)
 
 By default, `SAMPLE_MEMORY_SIZE` in [`core/source/mtStructs.h`](../core/source/mtStructs.h) is left at its **full initial factory allocation** so nothing is restricted out of the box:

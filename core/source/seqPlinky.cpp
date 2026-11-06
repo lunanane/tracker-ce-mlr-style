@@ -46,6 +46,8 @@ bool s_newerFile = false;      // written by a newer mod version: left alone (no
 __NOINIT(EXTERNAL_RAM) alignas(plinkymorph::Controller) uint8_t s_ctlMem[kInstances][sizeof(plinkymorph::Controller)];
 inline plinkymorph::Controller& ctl(int k) { return *reinterpret_cast<plinkymorph::Controller*>(s_ctlMem[k]); }
 __NOINIT(EXTERNAL_RAM) uint8_t s_fbuf[plinkymorph::kFileMaxBank];
+// plan 019 B: the chorus delay lines (left and right, 4 KB per instance); raw storage without constructor, cleared by the engine before use
+__NOINIT(EXTERNAL_RAM) int16_t s_chorus[kInstances][2 * kChLen];
 int s_inst = 0; // the instance the UI shows and edits (main loop only)
 
 // hash of everything that is saved: the values, the morph time and the snapshots
@@ -70,7 +72,7 @@ uint16_t stateHash()
 inline int shownPattern() { return (int)mtProject.values.actualPattern; }
 
 // applies the values the morph / a snapshot changed to the engine (not a hand edit: the project is not marked changed)
-void applyMask(int k, const uint8_t* vals, uint32_t mask)
+void applyMask(int k, const uint8_t* vals, plinkymorph::ParamMask mask)
 {
     if (!mask)
         return;
@@ -256,6 +258,8 @@ int seqPlinkyCycleInst()
     return s_inst;
 }
 
+static_assert(kPlinkyMorphParam == P_COUNT, "the morph time follows the engine parameters");
+
 int seqPlinkyGet(int param)
 {
     if (param == kPlinkyMorphParam)
@@ -317,7 +321,7 @@ bool seqPlinkyVoice(int i, uint8_t* note, uint8_t* level, uint8_t* releasing)
     return true;
 }
 
-uint32_t seqPlinkyMarks()
+uint64_t seqPlinkyMarks()
 {
     return ctl(s_inst).store.marks(shownPattern());
 }
@@ -395,7 +399,10 @@ void seqPlinkyUpdate()
 void seqPlinkyInit()
 {
     for (int k = 0; k < kInstances; k++)
+    {
         new (s_ctlMem[k]) plinkymorph::Controller();
+        eng().setChorusMemory(k, s_chorus[k]);
+    }
 }
 
 void seqPlinkyLoadWorkspace()

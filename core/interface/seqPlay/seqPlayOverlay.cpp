@@ -837,6 +837,7 @@ void SeqPlayOverlay::refreshView()
         seqPlinkyFillModel(m); // shared with the instrument page
         m.sec = plinkyCur_.sec;
         m.idx = plinkyCur_.idx;
+        m.top = plinkyCur_.top;
         m.track = (uint8_t)(sel + 1);
         m.all = PE().buttons->isButtonPressed(interfaceButtonShift) ? 1 : 0;
 #endif

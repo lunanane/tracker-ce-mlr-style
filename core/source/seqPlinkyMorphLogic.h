@@ -23,7 +23,9 @@ using namespace plinkyvoice;
 enum { kPatterns = 256, kHalfSecDefault = 12 /* 6 s */, kHalfSecMax = 60 /* 30 s */, kMsPerHalfSec = 500 };
 
 // P_CHANNEL never takes part; stepped ones switch at the start of a morph
-inline bool isStepped(int p) { return p == P_VOICES || p == P_INTERVAL || p == P_LFO_DEST; }
+inline bool isStepped(int p) { return p == P_VOICES || p == P_INTERVAL || p == P_LFO_DEST || p == P_FTYPE || p == P_LFO_WAVE; }
+
+typedef uint64_t ParamMask; // plan 019 B: more than 32 parameters
 
 // ---------------------------------------------------------------- snapshots
 struct Store
@@ -95,15 +97,15 @@ struct Store
     {
         return has(p) && param > 0 && param < P_COUNT && v[p][param] != inherited(p)[param];
     }
-    uint32_t marks(int p) const
+    ParamMask marks(int p) const
     {
-        uint32_t m = 0;
+        ParamMask m = 0;
         if (!has(p))
             return 0;
         const uint8_t* in = inherited(p);
         for (int i = 1; i < P_COUNT; i++)
             if (v[p][i] != in[i])
-                m |= 1u << i;
+                m |= (ParamMask)1 << i;
         return m;
     }
 };
@@ -114,7 +116,7 @@ struct Morph
     bool running = false;
     uint8_t pattern = 0; // the target pattern (title)
     uint32_t t0 = 0, dur = 0;
-    uint32_t held = 0; // parameters taken out by hand
+    ParamMask held = 0; // parameters taken out by hand
     uint8_t start[P_COUNT];
     uint8_t target[P_COUNT];
     Morph() { memset(start, 0, sizeof(start)); memset(target, 0, sizeof(target)); }
@@ -122,9 +124,9 @@ struct Morph
     void stop() { running = false; held = 0; }
     // Moves `vals` (the current values, in / out) towards `tgt`. Stepped parameters, and everything when durMs is 0, switch now.
     // Returns the bit mask of the parameters whose value changed at once. A running morph is replaced: the new one starts from vals.
-    uint32_t begin(uint8_t* vals, const uint8_t* tgt, uint8_t pat, uint32_t now, uint32_t durMs)
+    ParamMask begin(uint8_t* vals, const uint8_t* tgt, uint8_t pat, uint32_t now, uint32_t durMs)
     {
-        uint32_t changed = 0;
+        ParamMask changed = 0;
         bool any = false;
         held = 0;
         for (int i = 1; i < P_COUNT; i++)
@@ -134,7 +136,7 @@ struct Morph
             if (durMs == 0 || isStepped(i))
             {
                 vals[i] = tgt[i];
-                changed |= 1u << i;
+                changed |= (ParamMask)1 << i;
             }
             else
             {
@@ -156,16 +158,16 @@ struct Morph
     void hold(int p)
     {
         if (p > 0 && p < P_COUNT)
-            held |= 1u << p;
+            held |= (ParamMask)1 << p;
     }
     // The values at `now` (wrap-safe time). Returns the mask of parameters whose value changed.
-    uint32_t step(uint8_t* vals, uint32_t now)
+    ParamMask step(uint8_t* vals, uint32_t now)
     {
         if (!running)
             return 0;
         uint32_t el = now - t0;
         const bool done = el >= dur;
-        uint32_t changed = 0;
+        ParamMask changed = 0;
         for (int i = 1; i < P_COUNT; i++)
         {
             if (start[i] == target[i] || ((held >> i) & 1u))
@@ -181,7 +183,7 @@ struct Morph
             if (nv != vals[i])
             {
                 vals[i] = nv;
-                changed |= 1u << i;
+                changed |= (ParamMask)1 << i;
             }
         }
         if (done)
@@ -223,7 +225,7 @@ struct Controller
         morph.stop();
     }
     // The playing pattern (or the shown one when stopped) as the main loop sees it. vals = engine values in / out. Returns the changed mask.
-    uint32_t onPattern(int pat, bool playing, uint8_t* vals, uint32_t now)
+    ParamMask onPattern(int pat, bool playing, uint8_t* vals, uint32_t now)
     {
         if (!Store::validPattern(pat))
             return 0;
@@ -244,7 +246,7 @@ struct Controller
         return morph.begin(vals, s, (uint8_t)pat, now, playing ? durMs() : 0);
     }
     // A clip was launched on a track: the sound of the clip's source pattern (last launch wins)
-    uint32_t onClip(int clipPattern, bool trackUsesVoice, bool playing, uint8_t* vals, uint32_t now)
+    ParamMask onClip(int clipPattern, bool trackUsesVoice, bool playing, uint8_t* vals, uint32_t now)
     {
         const uint8_t t = clipTarget(trackUsesVoice, clipPattern);
         const uint8_t* s = t ? store.get(t) : nullptr;
@@ -252,7 +254,7 @@ struct Controller
             return 0;
         return morph.begin(vals, s, t, now, playing ? durMs() : 0);
     }
-    uint32_t tick(uint8_t* vals, uint32_t now) { return morph.step(vals, now); }
+    ParamMask tick(uint8_t* vals, uint32_t now) { return morph.step(vals, now); }
     // A hand edit of `param` (already applied to the engine): out of the morph, into the snapshot of pattern `pat`.
     // Returns true when the snapshots changed (project dirty).
     bool edit(int pat, int param, int value, const uint8_t* cur)
