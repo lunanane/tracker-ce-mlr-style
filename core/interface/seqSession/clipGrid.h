@@ -14,11 +14,13 @@ class cSeqClipGrid : public cDisplayControl
     virtual ~cSeqClipGrid() {}
 
     virtual void update();
+    virtual void update2(); // v0.3.9: two display stages (the 4 KB command FIFO)
     virtual void setStyle(uint32_t style) { this->style = style; }
     virtual void setText(const char* text) { this->text = text; }
     virtual void setValue(int value) { this->value = value; }
     virtual void setColors(const uint32_t* colors) { this->colors = colors; }
     virtual void setData(void* data) { view = (const seqsession::clipgrid::View*)data; }
+    void drawStage(int stage); // 0, 1; -1 = the whole drawing in one (host check); draws the View snapshot of the last update()
 
   private:
     const seqsession::clipgrid::View* view = nullptr;

@@ -911,7 +911,7 @@ Host tests (`core/seqtest`, `make test`): `plinky`: `test_morph_math`, `test_mor
 
 ## 11m. v0.4 part A: three PolySynths, shared pool + governor, Shift multi-edit, synths first (plan 019, Original Tracker only)
 
-Host tests: `core/seqtest` `test_plinky3.inc` (old-sound identity against golden hashes of the v0.3.8 engine for Voices 1..4, instances, pool, sends, governor, plinky.bin with three instances, multi-edit values, instrument order), `test_plinkyseq.inc` (tabs, ALL tag, two FIFO stages), `test_trace.cpp` / `test_stages.cpp` (8 pool voices in the pitch view).
+Host tests: `core/seqtest` `test_plinky3.inc` (old-sound identity against golden hashes of the v0.3.8 engine for Voices 1..4, instances, pool, sends, governor, plinky.bin with three instances, multi-edit values, instrument order), `test_plinkyseq.inc` (tabs, ALL tag, exact command FIFO bytes of the view), `test_trace.cpp` / `test_stages.cpp` (8 pool voices in the pitch view).
 
 | # | Check on the device | Expected |
 | - | - | - |

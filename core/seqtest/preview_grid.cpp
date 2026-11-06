@@ -73,6 +73,7 @@ static void scene(const char* dir, const char* name, bool colors)
     strControlProperties pm = { 0, 29, 800, 394, 0, &m };
     cSeqClipMarks marks(&pm);
     grid.update();
+    grid.update2(); // v0.3.9: the grid draws in two display stages
     marks.update();
     fclose(g_ops);
     printf("%s: grid %u bytes, marks %u bytes\n", name, (unsigned)plan.cost, (unsigned)marksCost(m));

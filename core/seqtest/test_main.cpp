@@ -1374,6 +1374,7 @@ static void test_save_uses_critical_sections()
     delete e;
 }
 int sessionTests(int& checks);
+#include "seqTraceStages.h"
 #include "test_cut.inc"
 #include "test_rec.inc"
 #include "test_plinkyseq.inc"

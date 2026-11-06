@@ -5,7 +5,6 @@
 
 #include "FT812.h"
 #include "display.h"
-#include "seqTraceStages.h"
 
 #include <stdio.h>
 
@@ -20,7 +19,7 @@ constexpr int16_t kLegendCellH = 22;
 } // namespace
 
 cSeqPlayLegend::cSeqPlayLegend(strControlProperties* properties)
-  : cDisplayControl(controlIdSeqPlayLegend, tracestage::kStages)
+  : cDisplayControl(controlIdSeqPlayLegend, 1)
 {
     colorsCount = 0;
     if (properties == nullptr)
@@ -81,19 +80,6 @@ static void box(int16_t x, int16_t y, int16_t w, int16_t h)
     API_END();
 }
 
-void cSeqPlayLegend::update2()
-{
-    if (view == nullptr || view->mode != SeqPlayViewData::PLINKY)
-        return;
-    const Theme& th = display.getTheme();
-    seqplinky::Palette pal = { th.backgroundColor, th.grey_22, 0x555555, th.white, th.cyan, th.yellow, 0x000000, th.cyan };
-    PlinkyCtx c;
-    tracestage::Split<PlinkyCtx> sp(c, 1);
-    seqplinky::draw(sp, view->plinky, pal);
-    c.finish();
-    API_BLEND_FUNC(SRC_ALPHA, ONE_MINUS_SRC_ALPHA);
-}
-
 void cSeqPlayLegend::update()
 {
     if (view == nullptr || (view->mode == SeqPlayViewData::HIDDEN && view->edge == 0 && !view->notes.show))
@@ -134,13 +120,11 @@ void cSeqPlayLegend::update()
 
     if (view->mode == SeqPlayViewData::PLINKY)
     {
-        // v0.3.9 FIFO rule (seqTraceStages.h): the PolySynth view (tabs, five section rows, up to 3.9 KB) is drawn in two stages of at most
-        // tracestage::kStageBytes commands, the second one in update2()
+        // FIFO rule (v0.3.9, seqTraceStages.h): this is ONE display stage, a burst into the 4 KB FT81x command FIFO; the exact byte count of the worst
+        // case (tabs, all rows, ALL tag, morph title, voices) is measured by test_plinkyseq.inc and stays under 3840
         seqplinky::Palette pal = { th.backgroundColor, th.grey_22, 0x555555, th.white, th.cyan, th.yellow, 0x000000, th.cyan };
         PlinkyCtx c;
-        tracestage::Split<PlinkyCtx> sp(c, 0);
-        seqplinky::draw(sp, view->plinky, pal);
-        c.finish();
+        seqplinky::draw(c, view->plinky, pal);
         return;
     }
 
