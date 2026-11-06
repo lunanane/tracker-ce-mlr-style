@@ -980,6 +980,27 @@ Host tests: `core/seqtest/test_plinky4.inc` (defaults = old sound, subs and thei
 | 10 | Morph between two patterns with different Type / Chorus / Filter env | stepped values (Type, Wave) switch at the start, the others glide |
 | 11 | Save, reload, open in v0.3.8 | all values return; v0.3.8 plays PolySynth 1 with the old parameters |
 
+## 11o. Long samples stream automatically (plan 023 A, Original Tracker only)
+Host tests: `core/seqtest/test_sampmem.cpp` (the refusal of the old rule is reproduced, then the new decisions). Have WAV files of about 1 MB, 10 MB and 40 MB (mono and stereo, 44.1 kHz and another rate) and a project with the pool well used.
+
+| # | Check on the device | Expected |
+| - | - | - |
+| 1 | Sample import: select the 40 MB WAV, the memory bar | the bar grows only by the pre-cache (about 64 KB), the file is not blocked ("full" no longer shown) |
+| 2 | Import it into an empty slot | the progress bar runs (SD activity), the slot gets the name with **SD** in front, no crash; the waveform draws |
+| 3 | Play it from a pattern (One-Shot, then Forward Loop, Ping-Pong) | plays from the start without a gap, loops, no dropouts at idle load |
+| 4 | Import the stereo one, the one at another sample rate, and the 10 MB one with a selected range (start / end points) | right length, both channels, correct pitch, the range only |
+| 5 | Import a 100 KB sample while the pool is almost full | still refused as before (small samples must fit) |
+| 6 | Replace a slot that holds a streamed sample with a long WAV | works, the memory bar and `Free` figures stay consistent (no negative values) |
+| 7 | Import a multi-file selection (several long WAVs) into consecutive slots | all load as SD samples; the following slots keep their samples |
+| 8 | Save the project, power cycle, open it | the long sample is still **SD**, plays the same; the project folder holds the full `.pti` after Save As |
+| 9 | Open a project saved earlier with a long sample in Slice or Beat Slice mode that did not fit | it loads (no dropped instrument), keeps its mode, plays from the SD card |
+| 10 | Open a project with a Wavetable / Granular instrument that cannot be resident | the instrument loads as One-Shot; saving keeps that |
+| 11 | On a streamed sample change Play mode to Slice / Granular | if there is room it switches; if not the mode stays and the popup says "Streamed sample (SD) / too long for this mode"; no crash |
+| 12 | Sample editor on a streamed sample (long and short selections), Auto slice, effects | as for any streamed sample: works up to the edit buffer limit, otherwise the existing "too long" popup |
+| 13 | Warp On, then MLR cues (CUT page) on a long streamed sample | warps; the cue jumps play from the SD card; no hang, see plan 022 for the known CPU limits |
+| 14 | Export the streamed instrument (sample export), copy / paste it to another slot | a full-length WAV / the copy plays |
+| 15 | Instrument picker popup and pattern editor | **SD** shows for streamed samples only, names are not cut mid-word beyond the end of the field |
+
 ## 12. Stock behaviour (never enter Play mode, Session or the fader page)
 | Press | Expected |
 |---|---|

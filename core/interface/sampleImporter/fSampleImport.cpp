@@ -1,4 +1,5 @@
 #include "fileManager.h"
+#include "sampleMemLogic.h"
 #include "sampleImporter/sampleImporter.h"
 
 #include "core/interfaceMenuPopup.h"
@@ -821,7 +822,7 @@ void cSampleImporter::calcImportFreeMem()
 
     if (mtProject.instrument[selectedSlot].isActive)
     {
-        importMemoryFree = 2 * mtProject.instrument[selectedSlot].sample.length;
+        importMemoryFree = newFileManager.getSampleMemorySize(selectedSlot, selectedSlot);
     }
 
     importMemoryFree += mtProject.max_memory - mtProject.used_memory;
@@ -832,7 +833,8 @@ bool cSampleImporter::calcImportIsEnoughMemoryNormal()
     float sampleStartPoint = ((float)importSampleSamplesCount / MAX_16BIT) * importStartPoint;
     float sampleEndPoint = ((float)importSampleSamplesCount / MAX_16BIT) * importEndPoint;
 
-    return ((sampleEndPoint - sampleStartPoint) * 2) <
+    // long samples are streamed: only the pre-cache has to fit (plan 023)
+    return sampmem::importResidentBytes((uint32_t)(sampleEndPoint - sampleStartPoint), 1) <
            (importMemoryFree - 10000); // 10000B mniej dla bezpieczenstwa
 }
 
@@ -841,7 +843,8 @@ bool cSampleImporter::calcImportIsEnoughMemoryLoFi()
     float sampleStartPoint = ((float)importSampleSamplesCount / MAX_16BIT) * importStartPoint;
     float sampleEndPoint = ((float)importSampleSamplesCount / MAX_16BIT) * importEndPoint;
 
-    return (sampleEndPoint - sampleStartPoint) <
+    // lo-fi import halves the stored length; long samples are streamed (plan 023)
+    return sampmem::importResidentBytes((uint32_t)(sampleEndPoint - sampleStartPoint) / 2, 1) <
            (importMemoryFree - 10000); // 10000B mniej dla bezpieczenstwa
 }
 //==============================================================================================================
@@ -1415,9 +1418,13 @@ void cSampleImporter::listInstrumentSlots()
 
         if (mtProject.instrument[i].isActive)
         {
+            if (mtProject.sampleMemory[i].isStreamed) // plan 023: long sample kept on the SD card
+            {
+                strcat(&interfaceGlobals.intrumentsNames[i][0], "SD ");
+            }
             strncat(&interfaceGlobals.intrumentsNames[i][0],
                     mtProject.instrument[i].sample.file_name,
-                    SAMPLE_NAME_SIZE);
+                    SAMPLE_NAME_SIZE + 5 - strlen(&interfaceGlobals.intrumentsNames[i][0]));
         }
 
         interfaceGlobals.ptrIntrumentsNames[i] = &interfaceGlobals.intrumentsNames[i][0];
@@ -1472,8 +1479,8 @@ void cSampleImporter::calculateFileMemUsage()
         {
             if (mtProject.instrument[i].isActive)
             {
-                tempInstrumentMemorySize += mtProject.instrument[i].sample.length *
-                                            (newFileManager.isInstrumentStereo(i) ? 4 : 2);
+                // pool bytes actually held (a streamed sample only holds its pre-cache)
+                tempInstrumentMemorySize += newFileManager.getSampleMemorySize(i, i);
             }
         }
 
@@ -1485,7 +1492,7 @@ void cSampleImporter::calculateFileMemUsage()
 
         if (mtProject.instrument[selectedSlot].isActive)
         {
-            currentSelectMemorySize -= 2 * mtProject.instrument[selectedSlot].sample.length;
+            currentSelectMemorySize -= newFileManager.getSampleMemorySize(selectedSlot, selectedSlot);
         }
     }
 }
@@ -1855,7 +1862,7 @@ uint8_t cSampleImporter::willCopyInstrFit(uint8_t length)
     {
         if (mtProject.instrument[i].isActive)
         {
-            memoryUsedBySelection += 2 * mtProject.instrument[i].sample.length;
+            memoryUsedBySelection += newFileManager.getSampleMemorySize(i, i);
         }
     }
 
@@ -1863,7 +1870,7 @@ uint8_t cSampleImporter::willCopyInstrFit(uint8_t length)
     {
         if (mtProject.instrument[i].isActive)
         {
-            pasteLocationMemUsage += 2 * mtProject.instrument[i].sample.length;
+            pasteLocationMemUsage += newFileManager.getSampleMemorySize(i, i);
         }
     }
 

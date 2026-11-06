@@ -45,6 +45,9 @@ class FileManagerOperation
 
         uint16_t destChannelCount;
         uint32_t destSampleCountPerChannel;
+
+        // plan 023: converted straight to the workspace .pti in chunks (never fully resident)
+        bool streamImport;
     };
 
   protected:

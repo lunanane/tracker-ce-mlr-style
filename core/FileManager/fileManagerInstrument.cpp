@@ -8,6 +8,7 @@
 #include "fileTransfer.h"
 #include "instrumentFileValidation.h"
 #include "log.h"
+#include "sampleMemLogic.h"
 #include "mtFileManagerOldVersionRecovery.h"
 #include "util_string.h"
 
@@ -142,9 +143,26 @@ bool cFileManager::startNewInstrumentSampleLoad(int idx,
     {
         bool stereo = isStereo && stereoSampleMode;
         uint32_t channels = stereo ? 2 : 1;
-        uint32_t totalBytes = mtProject.instrument[idx].sample.length * channels * sizeof(int16_t);
-        bool shouldStream = (totalBytes >= kStreamThresholdBytes) &&
-                            isPlayModeStreamable(mtProject.instrument[idx].playMode);
+        // plan 023: a sample that is not streamable by its play mode but does not fit the free
+        // pool is streamed instead of dropped (wavetable / granular fall back to One-Shot)
+        const uint8_t loadPlayMode = mtProject.instrument[idx].playMode;
+        const sampmem::Placement placement = sampmem::decideLoad(
+          mtProject.instrument[idx].sample.length,
+          channels,
+          isPlayModeStreamable(loadPlayMode),
+          playModeNeedsResident(loadPlayMode),
+          mtProject.max_memory > mtProject.used_memory
+            ? mtProject.max_memory - mtProject.used_memory
+            : 0);
+        bool shouldStream = placement == sampmem::Placement::Streamed ||
+                            placement == sampmem::Placement::StreamedOneShot;
+
+        if (placement == sampmem::Placement::StreamedOneShot)
+        {
+            mtProject.instrument[idx].playMode = playModeSingleShot;
+            mtProject.instrument[idx].sample.type = mtSampleTypeWaveFile;
+            setInstrumentStructChanged(idx);
+        }
 
         if (shouldStream)
         {
@@ -386,7 +404,10 @@ bool cFileManager::loadSampleData(int idx,
     return false;
 }
 
-void cFileManager::setInstrumentSampleAddress(int idx, uint16_t channelCount, uint32_t samplesCount)
+void cFileManager::setInstrumentSampleAddress(int idx,
+                                              uint16_t channelCount,
+                                              uint32_t samplesCount,
+                                              uint32_t streamPreCacheFrames)
 {
     assert(idx >= 0 && idx < kSampleInstrumentsCount);
 
@@ -394,10 +415,12 @@ void cFileManager::setInstrumentSampleAddress(int idx, uint16_t channelCount, ui
 
     // for safety
     mtProject.instrument[idx].sample.length = samplesCount;
-    mtProject.sampleMemory[idx].isStreamed = false;
+    // a streamed slot only reserves its pre-cache in the pool (plan 023)
+    const uint32_t slotFrames = streamPreCacheFrames > 0 ? streamPreCacheFrames : samplesCount;
+    mtProject.sampleMemory[idx].isStreamed = streamPreCacheFrames > 0;
     mtProject.sampleMemory[idx].isStereo = (channelCount == 2);
-    mtProject.sampleMemory[idx].ramFrames = samplesCount;
-    mtProject.sampleMemory[idx].preCacheFrames = samplesCount;
+    mtProject.sampleMemory[idx].ramFrames = slotFrames;
+    mtProject.sampleMemory[idx].preCacheFrames = slotFrames;
 
     int activeBeforeIdx = idx - 1;
 
@@ -446,13 +469,11 @@ void cFileManager::setInstrumentSampleAddress(int idx, uint16_t channelCount, ui
 
     if (channelCount == 2)
     {
-        assert(mtProject.sampleMemory[idx].address[strSampleMemory::Channel::kLeft] +
-                 mtProject.instrument[idx].sample.length <
+        assert(mtProject.sampleMemory[idx].address[strSampleMemory::Channel::kLeft] + slotFrames <
                externalRamSampleMemory + SAMPLE_MEMORY_SIZE / 2);
 
         mtProject.sampleMemory[idx].address[strSampleMemory::Channel::kRight] =
-          mtProject.sampleMemory[idx].address[strSampleMemory::Channel::kLeft] +
-          mtProject.instrument[idx].sample.length;
+          mtProject.sampleMemory[idx].address[strSampleMemory::Channel::kLeft] + slotFrames;
     }
     else
     {

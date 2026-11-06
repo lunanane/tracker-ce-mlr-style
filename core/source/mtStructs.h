@@ -777,6 +777,12 @@ static constexpr uint32_t kStreamPreCacheFrames = 32768;      // 32768 frames (~
 static constexpr uint32_t kWaveformPeakPoints = 600;
 static constexpr uint32_t kClmtElementCount = 64;
 
+// Modes that read straight from the resident sample (no streaming support at all).
+inline bool playModeNeedsResident(uint8_t playMode)
+{
+    return playMode == playModeWavetable || playMode == playModeGranular;
+}
+
 inline bool isPlayModeStreamable(uint8_t playMode)
 {
     if (playMode == playModeWavetable || playMode == playModeGranular)

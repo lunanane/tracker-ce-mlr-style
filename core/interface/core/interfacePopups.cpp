@@ -1020,6 +1020,10 @@ int InterfacePopups::listInstruments(enumStepPopups mode)
 
             if (mtProject.instrument[i].isActive)
             {
+                if (mtProject.sampleMemory[i].isStreamed) // plan 023: long sample on the SD card
+                {
+                    strcat(&interfaceGlobals.intrumentsNames[instrIdx][0], "SD ");
+                }
                 strncat(&interfaceGlobals.intrumentsNames[instrIdx][0],
                         mtProject.instrument[i].sample.file_name,
                         SAMPLE_NAME_SIZE);

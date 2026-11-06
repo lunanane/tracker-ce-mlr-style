@@ -1807,6 +1807,8 @@ static void changePlayModeSelection(int16_t value)
         if (!newFileManager.promoteStreamedInstrumentToRam(mtProject.values.lastUsedInstrument))
         {
             SP->editorInstrument->playMode = prevPlayMode;
+            // plan 023: say why the mode did not change
+            mtPopups.show(2, "Streamed sample (SD)", "too long for this mode");
         }
     }
     else if (SP->editorInstrument->playMode != prevPlayMode &&
