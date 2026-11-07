@@ -118,6 +118,15 @@ void cSeqPlayLegend::update()
         return;
     }
 
+    if (view->mode == SeqPlayViewData::PARAMS)
+    {
+        // plan 025: the sequencer settings page, one display stage (its own control, drawn below the legend control)
+        seqparams::Palette pal = { th.backgroundColor, th.grey_22, 0x555555, th.white, th.cyan, th.yellow, 0x000000, th.cyan };
+        PlinkyCtx c;
+        seqparams::draw(c, view->prm, pal);
+        return;
+    }
+
     if (view->mode == SeqPlayViewData::PLINKY)
     {
         // FIFO rule (v0.3.9, seqTraceStages.h): this is ONE display stage, a burst into the 4 KB FT81x command FIFO; the exact byte count of the worst

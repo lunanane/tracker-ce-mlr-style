@@ -1033,6 +1033,22 @@ and thinning bounds. Nothing below is device-tested yet. Replaces the rows "Leav
 | Config > Info > CPU monitor, eight tracks playing, view closed vs. v0.4.2 | ISR | About 1 % more while playing (the taps now run everywhere); idle tracks cost nothing. |
 | Same with the view open | Main loop | A bit more than v0.4.2 while open (host: about 1.7 x the drawing time with 8 tracks), nothing when closed. |
 
+## 11m. Sequencer settings page + Latch (plan 025, v0.4.5)
+| Do | Look at | Expected |
+|---|---|---|
+| Play mode, a Chord/Arp track selected, tap its screen button again | Screen | The pad legend as before, and above it the **settings page** (T3 Chord/Arp, four rows: Play, Pitch, Feel, Groove). The pattern is hidden while it shows. |
+| Left / Right / Up / Down | Cursor | The yellow cell moves like on the PolySynth page (Up / Down keep the column as far as the row has it). |
+| Jog wheel | Value | Changes the cell (Type, Speed ...), the bar follows; the sound changes at once (Speed / Dir / Size while a chord is held). Shift + jog = single steps on the wide ranges (Velocity). |
+| **Delete** | Value | The cell goes back to its default (Latch: Off for Chord/Arp, On for the HR scripts that always latched). |
+| Tap the track button again / another track | Screen | The page closes with the legend; another track opens nothing until its legend is tapped. |
+| Repeat on Mono, Strings, every HR type | Rows | Mono: Time + Pitch rows; Strings: Root Scale Octave Interval Latch; HR types: their own rows, Euclid / Grid Seq / Step Follow have **no Latch** cell. |
+| Chord/Arp: set **Latch On**, press a root, let go | Sound | The chord keeps playing. Press another root (new gesture): it switches. Press the same root again: it stops. |
+| Latch On, transport playing, press **Stop** | Sound | The chord falls silent but stays latched. Press **Play**: it sounds again with the **same chord**. |
+| Latch On, set **Latch Off** | Sound | The latched chord ends. With Latch Off the old behaviour (sounds while held). |
+| Strings with Latch On: press a pad, let go; press two pads together; press one of them again | Sound | The note rings on after the release; the two-pad group replaces it; one of the group again switches all off. The Setup pad is never latched. |
+| HR Chord Stabs / Arp Lines / Arp Seq: Latch **Off** | Sound | A root sounds only while its pad is held. On = tap to latch, tap again to stop (as before). |
+| Save, re-open the project | Settings | All values and the Latch settings are back. A project whose Latches are all default saves as before (older mod versions still read it). |
+
 ## 12. Stock behaviour (never enter Play mode, Session or the fader page)
 | Press | Expected |
 |---|---|

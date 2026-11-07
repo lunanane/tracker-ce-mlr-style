@@ -19,6 +19,9 @@ class HrArpSeq : public HrScript {
   void tick() override;
   void stop() override { stopSounding(); }
   bool live() const override { return latched_ != 0 || playing_; }
+  bool hasLatch() const override { return true; }
+  bool latch() const override { return !hold_; }
+  void setLatch(bool on) override { hold_ = on ? 0 : 1; if (!on && manual_) unlatchRoot(); }
   int getParam(int id) const override;
   void setParam(int id, int v) override;
   size_t serialize(uint8_t* buf, size_t cap) const override;
@@ -38,6 +41,7 @@ class HrArpSeq : public HrScript {
   void stopSounding();
   void soundLatched();
   void pressRoot(int pc);
+  void unlatchRoot() { stopSounding(); latched_ = 0; manual_ = 0; poolN_ = 0; }
   void toggleQuality();
   void pressCycle(int c);
   void selectChord(int key);
@@ -58,6 +62,7 @@ class HrArpSeq : public HrScript {
   Step steps_[8];
   uint8_t start_, end_, current_, playing_;
   uint8_t heldSteps_, gestureN_, gFirst_, gLo_, gHi_;
+  uint8_t hold_ = 0;  // Latch off: a root sounds while its pad is held
 };
 
 }  // namespace seqgen

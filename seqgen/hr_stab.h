@@ -23,6 +23,9 @@ class HrStab : public HrScript {
   void start() override { pos_ = 0; }
   void stop() override { stopVoices(); }
   bool live() const override { return latched_ != 0; }
+  bool hasLatch() const override { return true; }
+  bool latch() const override { return !hold_; }
+  void setLatch(bool on) override { hold_ = on ? 0 : 1; if (!on) unlatchRoot(); }
   int getParam(int id) const override;
   void setParam(int id, int v) override;
   size_t serialize(uint8_t* buf, size_t cap) const override;
@@ -49,6 +52,7 @@ class HrStab : public HrScript {
   void publishScale();
   void publishRoot(int pc);
   void pressRoot(int pc);
+  void unlatchRoot() { if (latched_) { stopVoices(); latched_ = 0; blink_ = 0; } }
   void pressQuality(int q);
   void pressChord(int i);
   void fireStep(int index);  // 1-based
@@ -65,6 +69,7 @@ class HrStab : public HrScript {
   uint16_t published_;  // signature of the scale published last (0 = none), like the script's `published_scale`
   Voice voices_[6];
   uint8_t nv_;
+  uint8_t hold_ = 0;  // Latch off: a root sounds while its pad is held
 };
 
 }  // namespace seqgen
