@@ -372,7 +372,7 @@ static void test_br_sidecar()
     p.step[BP_VARIATION] = 5;
     p.mode = beatrepeat::MODE_INSERT;
     const size_t n = p.save(buf, sizeof(buf));
-    CHECK(n == (size_t)BrParams::kFileMax && memcmp(buf, "SBRP", 4) == 0 && buf[4] == 1);     // oldest version that fits: 1
+    CHECK(n == (size_t)BrParams::kPayload + seqsidecar::kOverhead && memcmp(buf, "SBRP", 4) == 0 && buf[4] == 1);     // oldest version that fits: 1
     BrParams q;
     bool newer = true;
     CHECK(q.load(buf, n, &newer) && !newer && q == p && q.hash() == p.hash());
@@ -397,7 +397,7 @@ static void test_br_sidecar()
     // a newer file is flagged and never read; a corrupt one and another magic are refused; nothing changes on a failure
     uint8_t nf[32];
     memcpy(nf, buf, n);
-    nf[4] = 2;
+    nf[4] = 3; // newer than the reader (the reader knows versions 1 and 2)
     uint16_t c = seqsidecar::crc16(nf, seqsidecar::kHeader + BrParams::kPayload);
     nf[seqsidecar::kHeader + BrParams::kPayload] = (uint8_t)(c & 255);
     nf[seqsidecar::kHeader + BrParams::kPayload + 1] = (uint8_t)(c >> 8);

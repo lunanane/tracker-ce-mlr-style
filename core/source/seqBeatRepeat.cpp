@@ -1,5 +1,6 @@
 // Sequencer tracks mod (plan 021) - PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 #include "seqBeatRepeat.h"
+#include "seqHooks.h"
 #include "seqSidecar.h"
 #include "seqModLogic.h"
 #include "seqTracksLogic.h"
@@ -249,6 +250,7 @@ void seqBrLoadWorkspace()
     s_wsWritePending = false;
     s_dirty.dirty = false;
     seqBrPush();
+    seqCutLoadSettings(s_ui.prm.mlrQuant, s_ui.prm.mlrSlotA, s_ui.prm.mlrSlotB); // plan 026: the MLR page settings of the project
 }
 
 void seqBrSaveWorkspace()

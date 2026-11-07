@@ -30,11 +30,46 @@ inline bool argIsSyncAll(uint8_t a) { return argSub(a) == SUB_RESET && argCol(a)
 // col 2 + mode. step = the next step, off = at once (the next audio tick, in the middle of the step if need be),
 // beat = the next beat (4 steps), bar = the next bar (16 steps, or the whole pattern when its length is not a multiple of 16). Default
 // beat. The grid is counted in steps from the pattern start (the track's own stock position, Cut::boundary).
-enum Quant : uint8_t { Q_OFF = 0, Q_STEP = 1, Q_BEAT = 2, Q_BAR = 3, Q_COUNT = 4, Q_DEFAULT = Q_BEAT };
-inline uint8_t packQuant(uint8_t mode) { return packArg(SUB_RESET, false, (uint8_t)(2 + (mode % Q_COUNT))); }
-inline bool argIsQuant(uint8_t a) { return argSub(a) == SUB_RESET && argCol(a) >= 2 && argCol(a) < 2 + Q_COUNT; }
-inline uint8_t argQuant(uint8_t a) { return (uint8_t)(argCol(a) - 2); }
-inline uint8_t quantSteps(uint8_t mode) { return mode == Q_BAR ? 16 : (mode == Q_BEAT ? 4 : 1); }
+enum Quant : uint8_t
+{
+    Q_OFF = 0, Q_STEP = 1, Q_BEAT = 2, Q_BAR = 3,
+    Q_32 = 4,   // plan 026: 1/32 (half a step: the jump waits for the next step start or the middle of the step)
+    Q_8 = 5,    // 1/8 (2 steps)
+    Q_HALF = 6, // 1/2 (8 steps)
+    Q_COUNT = 7, Q_DEFAULT = Q_BEAT
+};
+// The ring byte: modes 0..3 in cols 2..5 (as ever), the plan 026 modes in cols 10..12 (cols 6..9 are grid / hold, 13 = engage).
+inline uint8_t packQuant(uint8_t mode)
+{
+    mode = (uint8_t)(mode % Q_COUNT);
+    return packArg(SUB_RESET, false, (uint8_t)(mode < 4 ? 2 + mode : 6 + mode));
+}
+inline bool argIsQuant(uint8_t a) { return argSub(a) == SUB_RESET && ((argCol(a) >= 2 && argCol(a) < 6) || (argCol(a) >= 10 && argCol(a) <= 12)); }
+inline uint8_t argQuant(uint8_t a) { return (uint8_t)(argCol(a) < 6 ? argCol(a) - 2 : argCol(a) - 6); }
+inline uint8_t quantSteps(uint8_t mode)
+{
+    return mode == Q_BAR ? 16 : (mode == Q_HALF ? 8 : (mode == Q_BEAT ? 4 : (mode == Q_8 ? 2 : 1)));
+}
+// Hold time of the two pads that start a loop (plan 026; the owner's exception to the no-long-press rule, only for this).
+enum { kEngageMs = 350 };
+// Engage (plan 026): the two-pad loop of the held pads of the track starts now (the layer sends it after both were held ~0.35 s).
+inline uint8_t packEngage() { return packArg(SUB_RESET, false, 13); }
+inline bool argIsEngage(uint8_t a) { return argSub(a) == SUB_RESET && argCol(a) == 13; }
+// The order the jog wheel dials the quantise through (plan 026): off, 1/32, 1/16, 1/8, 1/4, 1/2, 1 bar.
+inline uint8_t quantDialIndex(uint8_t mode)
+{
+    static const uint8_t order[Q_COUNT] = { Q_OFF, Q_32, Q_STEP, Q_8, Q_BEAT, Q_HALF, Q_BAR };
+    for (uint8_t i = 0; i < Q_COUNT; i++)
+        if (order[i] == mode) return i;
+    return 0;
+}
+// One jog detent: dir > 0 = coarser, < 0 = finer; stops at both ends (off .. 1 bar).
+inline uint8_t quantDial(uint8_t mode, int dir)
+{
+    static const uint8_t order[Q_COUNT] = { Q_OFF, Q_32, Q_STEP, Q_8, Q_BEAT, Q_HALF, Q_BAR };
+    int i = quantDialIndex(mode) + (dir > 0 ? 1 : (dir < 0 ? -1 : 0));
+    return order[i < 0 ? 0 : (i >= Q_COUNT ? Q_COUNT - 1 : i)];
+}
 // The grid of a track of `steps` steps: beat = 4, bar = 16 when the pattern is a whole number of bars; otherwise a bar is the whole
 // pattern (so the grid never drifts against the pattern start; patterns longer than 64 steps that are not a multiple of 16 use 64).
 inline uint8_t quantStepsFor(uint8_t mode, int steps)
@@ -43,10 +78,15 @@ inline uint8_t quantStepsFor(uint8_t mode, int steps)
     if (steps % 16 == 0) return 16;
     return (uint8_t)(steps < 1 ? 1 : (steps > 64 ? 64 : steps));
 }
-inline uint8_t quantNext(uint8_t mode) { return (uint8_t)((mode + 1) % Q_COUNT); }
+// The screen button taps through off -> 1/16 -> 1/4 -> 1 bar (as ever); a jog dialled value goes on from its nearest of the four.
+inline uint8_t quantNext(uint8_t mode)
+{
+    return mode == Q_OFF || mode == Q_32 ? Q_STEP : (mode == Q_STEP || mode == Q_8 ? Q_BEAT : (mode == Q_BEAT || mode == Q_HALF ? Q_BAR : Q_OFF));
+}
 inline const char* quantName(uint8_t mode)
 {
-    return mode == Q_OFF ? "off" : (mode == Q_STEP ? "step" : (mode == Q_BEAT ? "beat" : "bar"));
+    static const char* const n[Q_COUNT] = { "off", "1/16", "1/4", "1 bar", "1/32", "1/8", "1/2" };
+    return n[mode % Q_COUNT];
 }
 
 // Screen button (0-based) of SYNC ALL in the CUT layer: button 6 = seqsession::kButtonLayer (the layer's own button; static_assert in
@@ -149,7 +189,8 @@ enum ViewFlags : uint8_t
     VF_REVERSE = 4,
     VF_REC = 8,       // a take is being recorded
     VF_RECORDED = 16, // a recorded playhead loop is replaying
-    VF_RATE_SHIFT = 5 // bits 5..6: 0 = 1/2, 1 = 1, 2 = 2
+    VF_RATE_SHIFT = 5, // bits 5..6: 0 = 1/2, 1 = 1, 2 = 2
+    VF_RATCHET = 128  // plan 026: a held pad is ratcheting (retriggering its position at the quantise rate)
 };
 inline uint8_t viewRate(const View& v) { return (uint8_t)((v.flags >> VF_RATE_SHIFT) & 3); }
 

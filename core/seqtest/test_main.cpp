@@ -12,7 +12,7 @@ using namespace seqlogic;
 static seqcut::Cut g_cutObj;
 seqtracks::Engine seqEngine;
 seqlogic::TapDetector seqPatternTap;
-void seqCutInit() { g_cutObj.setSectionMode(true); seqEngine.setCut(&g_cutObj); } // as seqTracks.cpp: MLR slots on the musical grid
+void seqCutInit() { g_cutObj.setSectionMode(true); g_cutObj.setDeliberate(true); seqEngine.setCut(&g_cutObj); } // as seqTracks.cpp: MLR slots on the musical grid
 static uint16_t g_mutedMask = 0;
 bool seqCutTrackMuted(uint8_t t) { return ((g_mutedMask >> t) & 1u) != 0; }
 void seqCutToggleMute(uint8_t t) { g_mutedMask ^= (uint16_t)(1u << t); }
@@ -1379,6 +1379,7 @@ int sessionTests(int& checks);
 #include "test_cut.inc"
 #include "test_br.inc"
 #include "test_rec.inc"
+#include "test_mlr26.inc"
 #include "test_plinkyseq.inc"
 #include "test_params.inc"
 
@@ -1459,6 +1460,7 @@ int main()
     test_mlr_section_sweep();
     test_mlr_section_sweep2();
     test_mlr_section_sweep3();
+    test_plan26();
     test_mlr_leds();
     test_mlr_legend_words();
     test_cue_cache_logic();

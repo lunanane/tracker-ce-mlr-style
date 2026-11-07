@@ -45,7 +45,8 @@ class Cut
     StepPlan boundary(uint8_t track, int steps, int globalPos, bool frozen = false);
     bool mid(uint8_t track, int steps, StepPlan& out, bool frozen = false);
     // Quantise "off": a pad gesture is played at the next audio tick, between two step boundaries (uStep != 1). true = jump now.
-    bool now(uint8_t track, int steps, StepPlan& out, bool frozen = false);            // µstep 25 of a rate-2 step: start the second half-step
+    // Quantise 1/32 (plan 026): called only in the middle of a step (µstep 25), applies a pad gesture that waits for the next half-step.
+    bool now(uint8_t track, int steps, StepPlan& out, bool frozen = false);
     bool consumeRetrigger(uint8_t track, StepPlan& out);          // play_microStep, uStep == 1: pending retrigger
     bool holding(uint8_t track) const { return track < kCutTracks && (((holdMask_ >> track) & 1u) != 0); } // second half of a rate-1/2 position
     bool stopped(uint8_t track) const { return track < kCutTracks && (((stopMask_ >> track) & 1u) != 0); } // STOP: nothing plays
@@ -63,6 +64,11 @@ class Cut
     bool sectionMode() const { return secMode_; }
     uint8_t grid(uint8_t track) const { return track < kCutTracks ? gridMode_[track] : 0; }
     int holdSection(uint8_t track) const { return track < kCutTracks ? holdSec_[track] : -1; }
+    // Plan 026 behaviour (set by seqCutInit): deliberate two-pad loops - a second pad pressed while another is held is a jump, the loop starts
+    // with the engage command (packEngage) the layer sends after both pads were held ~0.35 s - and the ratchet (a held pad retriggers its
+    // position at the quantise rate). Off (default) = the earlier instant loop without ratchet (engine tests of plans 002-016).
+    void setDeliberate(bool on) { gate_ = on; }
+    bool deliberate() const { return gate_; }
     uint8_t quant() const { return quant_; } // jump quantise mode (seqcut::Quant), audio context writes it, any context may read it
     // Mask for the audio hooks: driven tracks plus tracks whose hand-back retrigger is still to be played (see consumeRetrigger).
     uint16_t hookMask() const { return (uint16_t)(activeMask_ | handMask_); }
@@ -82,6 +88,7 @@ class Cut
         View view;
     };
     void activate(uint8_t t);
+    void applyQuant(seqgen::Playhead& p);
     void syncAll();
     void setSnap(uint8_t t, bool s);
     void deactivate(uint8_t t);
@@ -105,6 +112,7 @@ class Cut
     volatile uint8_t quant_; // the engine starts on every step; the CUT layer (cutLayer.cpp) sets the user's default (beat) when it is first used
     View views_[kCutTracks];
     bool secMode_;
+    bool gate_;
     uint8_t gridMode_[kCutTracks];
     int8_t holdSec_[kCutTracks]; // held section of the track, -1 = follow
 };

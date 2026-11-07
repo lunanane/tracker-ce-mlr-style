@@ -253,6 +253,7 @@ bool laneViewRefresh(bool force)
         m.recHeld = cutRecHeld() ? 1 : 0;
         m.legend = cutLegendShown() ? 1 : 0;
         m.pickSlot = (uint8_t)cutPickSlot();
+        m.quant = cutQuantMode();
         if (cutBrActive())
         {
             m.brMode = 1; // plan 021: the beat repeat screen replaces the lanes (the MLR state underneath keeps running)
@@ -276,6 +277,7 @@ bool laneViewRefresh(bool force)
             l.picking = cutPickSlot() == (int8_t)k;
             l.muted = seqCutTrackMuted(t);
             l.rec = cutTrackRecArmed(t) ? 1 : 0;
+            l.engage = (uint8_t)((cutEngagePercent(k) + 9) / 10 * 10); // steps of 10 %: a redraw per step at most
             l.has = has;
             l.cacheMask = seqmlr::cacheMask(k);
             const WaveCol* w = seqmlr::wave(k);

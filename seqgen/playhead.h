@@ -43,6 +43,16 @@ class Playhead {
   void setRate(Rate r);
   void setReverse(bool rev);
   void setImmediate(bool on);      // gestures take effect at once (applyNow) instead of at the next step boundary
+  // Deliberate loops (plan 026): with the gate on, a second pad pressed while another is held is only a JUMP to that pad (jamming stays
+  // instant); the two-pad loop starts when the caller says so with engage() (the layer does after both pads were held ~0.35 s).
+  void setDeliberate(bool on) { gate_ = on; }
+  bool deliberate() const { return gate_; }
+  bool engage();                   // held pads (>= 2) -> loop over their range; false = fewer than two pads are down
+  bool engaged() const { return engaged_; }
+  // Ratchet (plan 026): a single pad held at the quantise rate retriggers its position at every quantise boundary; `half` = the quantise is
+  // 1/32 (half a step): the second half-step retriggers too (a rate-2 style second half-step on the same position). Off with quantise off.
+  void setRatchet(bool on, bool half);
+  bool ratcheting() const { return ratchetOn_ && ratchetPos_ >= 0 && !loopActive_ && !engaged_ && ((held_ >> ratchetPad_) & 1u); }
   void setGridPos(uint32_t pos);   // the position the quantise grid is counted in (default: the step counter); call before step()
   int length() const { return length_; }
   int columns() const { return columns_; }
@@ -98,6 +108,7 @@ class Playhead {
   void heldRange(int& a, int& b) const;
   int succ(int p, int lo, int hi) const;
   void closeRecording();
+  void armRatchet(int target);
 
   uint16_t length_, recLen_, recIdx_, recCount_;
   uint8_t columns_, quant_, rate_, spc_;
@@ -117,6 +128,9 @@ class Playhead {
   bool recording_, recActive_;
   bool recWait_, recClosing_;        // a take waits for its first applied gesture / closes at the next grid boundary
   bool pendClr_, immediate_, gridSet_;
+  bool gate_, engaged_, ratchetOn_, ratchetHalf_;
+  int16_t ratchetPos_;               // position the held pad retriggers, -1 = none armed
+  uint8_t ratchetPad_, lastPad_;     // the pad that carries the ratchet / the pad pressed last
   uint32_t recStart_, gridG_;        // step counter value the take started at / grid position given by setGridPos
   uint32_t gstep_;                   // index of the next step() (quantise boundaries)
   uint8_t recBuf_[kMaxRec];
