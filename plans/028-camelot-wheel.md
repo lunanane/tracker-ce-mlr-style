@@ -16,3 +16,11 @@ wheel on screen.
   ≤ 3840 B (fifostub test).
 - Followers' scale (from the lead, plan 011, later) can reuse the same wheel.
 - Builds on plan 025 (sequencer parameter page) — start after it is merged. Flash: report the delta.
+
+## Match indicator (owner 2026-11-07: "no matter if lead or follower we will know whether we are doing good matched")
+- Every sequencer track, lead or follower, shows how its playing key/chord sits against the others on the wheel:
+  **match** (same Camelot position), **good** (±1 or A/B switch — harmonic neighbour), **clash** (anything further),
+  in tracker colours (green / amber / red is the provisional mapping) on the wheel, in the strip cell and in the
+  parameter page. The reference is the lead's live key when there is a lead (plan 011), otherwise the other
+  sequencer tracks that are sounding right now; a track compared with nothing shows no mark.
+- Pure logic in a host-testable header (Camelot distance, mark per track), with tests.
