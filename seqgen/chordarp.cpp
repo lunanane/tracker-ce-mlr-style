@@ -1,6 +1,7 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 // Chord/Arp engine, port of c34 page 3 without the arranger. See README.md for the mapping.
 #include "chordarp.h"
+#include <stdio.h>
 
 namespace seqgen {
 
@@ -26,6 +27,42 @@ static const uint8_t kArpSq[8] = {1, 3, 2, 4, 3, 5, 4, 6};
 static const uint8_t kPnLut[6] = {5, 6, 9, 11, 14, 15};  // eased note pulse, index = distance from the cycle edge
 
 template <typename T> static inline T clampv(T v, T lo, T hi) { return v < lo ? lo : (v > hi ? hi : v); }
+
+// ---- Camelot helper (camelot.h): one copy of the code ----------------------------------------------
+namespace cam {
+void build(Scale& s, int tonic, uint8_t sc) {
+  const uint16_t m = scaleMask(sc);
+  s.sc = sc;
+  s.minor = scaleIsB(sc) ? 0 : 1;
+  s.tonic = (uint8_t)(((tonic % 12) + 12) % 12);
+  s.num = numOfMajor(s.tonic + 12 - scaleOff(sc));
+  s.n = 0;
+  for (uint8_t i = 0; i < 12; i++)
+    if ((m >> i) & 1u) s.iv[s.n++] = i;
+}
+void resolve(Scale& s, int pc, bool minor, uint8_t tA, uint8_t tB) {
+  const uint8_t sc = typeScale(minor, minor ? tA : tB);
+  const int cb = (((minor ? pc + 3 : pc) % 12) + 12) % 12;
+  build(s, cb + scaleOff(sc), sc);
+}
+void marks(const Snap* t, int n, int lead, uint8_t* out) {
+  for (int i = 0; i < n; i++) {
+    out[i] = M_NONE;
+    if (!t[i].valid || !t[i].sounding) continue;
+    for (int j = 0; j < n; j++) {
+      if (j == i || !t[j].valid || !t[j].sounding || (lead >= 0 && j != lead)) continue;
+      const uint8_t m = markOf(t[i].s, t[j].s);
+      if (m > out[i]) out[i] = m;
+    }
+  }
+}
+void label(char* out, size_t cap, const Scale& s) {
+  static const char* const kMaj[12] = {"C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"};
+  static const char* const kMin[12] = {"C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"};
+  static const char* const kAbbr[SC_COUNT] = {"", "m", " DOR", " PHR", " LYD", " MIX", "m PNT", " PNT", " BLU", " HMI"};
+  snprintf(out, cap, "%d%c %s%s", s.num, s.minor ? 'A' : 'B', (scaleIsB(s.sc) ? kMaj : kMin)[s.tonic % 12], kAbbr[s.sc % SC_COUNT]);
+}
+}  // namespace cam
 
 // ---- SeqContext ------------------------------------------------------------------------------
 void SeqContext::scale(int& root, bool& minor) const {

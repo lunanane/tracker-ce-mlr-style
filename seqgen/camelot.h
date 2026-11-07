@@ -57,26 +57,10 @@ struct Scale
 };
 
 // the scale with this tonic: its Camelot position follows from the key signature
-inline void build(Scale& s, int tonic, uint8_t sc)
-{
-    const uint16_t m = scaleMask(sc);
-    s.sc = sc;
-    s.minor = scaleIsB(sc) ? 0 : 1;
-    s.tonic = (uint8_t)(((tonic % 12) + 12) % 12);
-    s.num = numOfMajor(s.tonic + 12 - scaleOff(sc));
-    s.n = 0;
-    for (uint8_t i = 0; i < 12; i++)
-        if ((m >> i) & 1u)
-            s.iv[s.n++] = i;
-}
+void build(Scale& s, int tonic, uint8_t sc); // (out of line, chordarp.cpp: one copy of the code)
 
 // the pad key (pc = tonic of the major / minor key on the wheel, minor = side A) played with this track's A / B types
-inline void resolve(Scale& s, int pc, bool minor, uint8_t tA, uint8_t tB)
-{
-    const uint8_t sc = typeScale(minor, minor ? tA : tB);
-    const int cb = (((minor ? pc + 3 : pc) % 12) + 12) % 12;
-    build(s, cb + scaleOff(sc), sc);
-}
+void resolve(Scale& s, int pc, bool minor, uint8_t tA, uint8_t tB); // (chordarp.cpp)
 
 // note of degree d over a root note (anchor: the root note sits on the scale's tonic)
 inline int degreeNote(const Scale& s, int root, int d) { return root + 12 * floordiv(d, s.n) + s.iv[floormod(d, s.n)]; }
@@ -102,29 +86,10 @@ struct Snap
 // The match mark of every track against the others (plan 028): a track that sounds and has a key is compared with the lead's live key when
 // there is a lead (lead = track index, -1 none; plan 011 will set it), else with the other tracks that sound now and have a key. The mark is
 // the worst relation found (MATCH only when it matches all of them); nothing to compare with = M_NONE.
-inline void marks(const Snap* t, int n, int lead, uint8_t* out)
-{
-    for (int i = 0; i < n; i++)
-    {
-        out[i] = M_NONE;
-        if (!t[i].valid || !t[i].sounding) continue;
-        for (int j = 0; j < n; j++)
-        {
-            if (j == i || !t[j].valid || !t[j].sounding || (lead >= 0 && j != lead)) continue;
-            const uint8_t m = markOf(t[i].s, t[j].s);
-            if (m > out[i]) out[i] = m;
-        }
-    }
-}
+void marks(const Snap* t, int n, int lead, uint8_t* out); // (chordarp.cpp)
 
 // "8A Am", "8A D DOR", "5B Eb", "8B C PNT": position, tonic and the scale (as the Model:Samples indicator)
-inline void label(char* out, size_t cap, const Scale& s)
-{
-    static const char* const kMaj[12] = { "C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
-    static const char* const kMin[12] = { "C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B" };
-    static const char* const kAbbr[SC_COUNT] = { "", "m", " DOR", " PHR", " LYD", " MIX", "m PNT", " PNT", " BLU", " HMI" };
-    snprintf(out, cap, "%d%c %s%s", s.num, s.minor ? 'A' : 'B', (scaleIsB(s.sc) ? kMaj : kMin)[s.tonic % 12], kAbbr[s.sc % SC_COUNT]);
-}
+void label(char* out, size_t cap, const Scale& s); // (chordarp.cpp)
 
 }  // namespace cam
 }  // namespace seqgen
