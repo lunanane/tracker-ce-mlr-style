@@ -27,16 +27,19 @@ wheel on screen.
 
 ## Scale flavour per ring (owner 2026-11-07: "go beyond minor and major scales … per sequencer selecting which of the
 ## minor/major type scales is used for either A or B")
-- Two per-track settings in the sequencer parameter page (plan 025): **A scale** (minor family: natural minor/aeolian
-  default, dorian, phrygian, harmonic minor, melodic minor, minor pentatonic, …) and **B scale** (major family:
-  major/ionian default, lydian, mixolydian, major pentatonic, …). Whenever the track plays an A key it uses its A
-  scale, a B key its B scale — so jumping around the wheel keeps the chosen colour.
-- Applies to every scale-using sequencer (Chord/Arp chords and arps are built from the scale's degrees, HR types,
-  Strings, Mono, followers). Defaults = today's behaviour (bit-exact with the current tests).
-- Labels show the flavour: `8A Am dor`. Matching (above) is computed from the actual notes: the mode's parent key on
-  the wheel (A dorian = the notes of 9B/6A … i.e. one step), so a "good" mark stays honest for modes; harmonic/melodic
-  minor and pentatonics map to their nearest wheel position (document the rule).
-- Saved per track (seqtracks.bin new version, oldest-version rule). The Model:Samples implementation is private and
-  not on this PC — built from scratch.
+Reference: the owner's Model:Samples firmware already does this (local clone E:\claude\custom-modelsamples, private —
+read only, never copy its files into this public repo; reimplement). See mod/src/rc3e/rc3e_ref.py `CAM_TYPES`,
+`cam_root_b`, `scale_decode`, and port/arp/ref.py `SCALES`. Its rule, which we keep:
+- Camelot number c = 1..12, root of cB = (11 + 7 (c - 1)) mod 12 (8B = C), cA = relative minor (cB - 3 semitones).
+- A scale type keeps the **Camelot number = the key signature** and moves the tonic: NATURAL (B major on cB / A natural
+  minor on cA), DORIAN (+2), PHRYGIAN (+4), MIXOLYDIAN (+7), PENTA (B major penta on cB / A minor penta on cA),
+  BLUES (minor blues on cA), HARM MINOR (on cA). So `8A D DOR`, `7A C MIX` — the wheel position and the match marks
+  stay exact for modes. We add LYDIAN (+5) on the B side.
+- New for the Tracker (owner): two per-track settings, **A type** (used whenever the track plays an A key: NATURAL,
+  DORIAN, PHRYGIAN, PENTA, BLUES, HARM MINOR) and **B type** (whenever it plays a B key: NATURAL, LYDIAN, MIXOLYDIAN,
+  PENTA), so jumping around the wheel keeps the chosen colour per side. Defaults NATURAL = today (bit-exact tests).
+- Applies to every scale-using sequencer (Chord/Arp chords/arps built from the scale degrees, HR types, Strings, Mono,
+  followers). Labels as Model:Samples' indicator: `8A Am`, `8A D DOR`, `5B Eb`.
+- Saved per track (seqtracks.bin new version, oldest-version rule).
 - Owner 2026-11-07: the A/B scale choice is NOT on the pads — only in the on-screen parameter page (jog / screen
   buttons). The pad layouts stay as they are.
