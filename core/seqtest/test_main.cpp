@@ -2,6 +2,7 @@
 #include "seqTracksCore.h"
 #include <stdio.h>
 #include <string.h>
+#include <algorithm>
 #include <vector>
 
 using namespace seqtracks;
@@ -1379,6 +1380,7 @@ int sessionTests(int& checks);
 #include "test_br.inc"
 #include "test_rec.inc"
 #include "test_plinkyseq.inc"
+#include "test_params.inc"
 
 int main()
 {
@@ -1495,6 +1497,7 @@ int main()
     test_plinky_overlay_logic();
     test_plinky_overlay_draw_budget();
     test_note_band();
+    test_params_all();
     printf("%d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

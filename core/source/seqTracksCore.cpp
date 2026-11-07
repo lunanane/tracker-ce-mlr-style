@@ -9,13 +9,15 @@ namespace seqtracks {
 using namespace seqlogic;
 
 static_assert((int)seqlogic::kHrScripts == (int)seqgen::HR_COUNT, "kHrScripts (seqTracksLogic.h) must equal seqgen::HR_COUNT");
+static_assert((int)seqgen::HR_CHORD_ARP == 3 && (int)seqgen::HR_BASS == 4, "latchKind / isNotePad (seqTracksLogic.h) assume the HrType order");
 
 enum
 {
     CMD_PAD = 1,
     CMD_TYPE = 2,
     CMD_REC = 3,
-    CMD_CUT = 4
+    CMD_CUT = 4,
+    CMD_PARAM = 5
 };
 
 Engine::Engine()
@@ -45,6 +47,9 @@ void Engine::initTrack(uint8_t i)
     memset(t.sounding, 0, sizeof(t.sounding));
     t.grpNote = -1;
     t.grpEpoch = 0;
+    t.pl = seqlogic::PadLatch();
+    t.latch = 0;
+    t.quiet = false;
     t.hr.clear();
     t.ca.setChannel(i);
     t.mo.setChannel(i);
@@ -78,6 +83,15 @@ bool Engine::postType(uint8_t track, uint8_t type)
     if (track >= kTracks || type >= TYPE_COUNT)
         return false;
     Cmd c = { CMD_TYPE, track, type, 0 };
+    return push(c);
+}
+
+bool Engine::postParam(uint8_t track, uint8_t idx, int value)
+{
+    const seqparams::Tab* tb = track < kTracks ? seqparams::tab(t_[track].type) : 0;
+    if (!tb || idx >= tb->nTotal)
+        return false;
+    Cmd c = { CMD_PARAM, track, idx, (uint8_t)(int8_t)seqparams::clampTo(seqparams::desc(*tb, idx), value) };
     return push(c);
 }
 
@@ -166,6 +180,10 @@ void Engine::drain()
         else if (c.kind == CMD_REC)
         {
             applyRec(c.track, c.a);
+        }
+        else if (c.kind == CMD_PARAM)
+        {
+            applyParam(c.track, c.a, (int8_t)c.b);
         }
         else if (c.kind == CMD_CUT)
         {
@@ -260,7 +278,36 @@ void Engine::scanMono(Track& t)
         }
 }
 
+// plan 025: with the engine latch on, a note pad press toggles / switches the held pads (PadLatch) and releases are swallowed; the
+// generator sees the same press / release stream a player holding the pads would produce.
 void Engine::applyPad(uint8_t track, uint8_t pad, bool down, uint8_t velo)
+{
+    if (track >= kTracks || pad >= kPads)
+        return;
+    Track& t = t_[track];
+    if (t.latch && seqlogic::latchKind(t.type) == seqlogic::LATCH_ENGINE && isNotePad(t.type, pad) && !(t.type == TYPE_PLINKY && plMenu_))
+    {
+        if (down)
+        {
+            bool press;
+            const uint64_t rel = t.pl.down(pad, &press);
+            t.quiet = false; // a new press wakes a paused Chord/Arp
+            for (uint8_t q = 0; rel >> q; q++)
+                if ((rel >> q) & 1u)
+                    applyPadRaw(track, q, false, 0);
+            if (press)
+                applyPadRaw(track, pad, true, velo);
+        }
+        else
+            t.pl.up(pad);
+        return;
+    }
+    if (t.type == TYPE_PLINKY && down && seqplinky::isMenuPad(pad))
+        t.pl.held = 0; // the setup view ends the held notes
+    applyPadRaw(track, pad, down, velo);
+}
+
+void Engine::applyPadRaw(uint8_t track, uint8_t pad, bool down, uint8_t velo)
 {
     if (track >= kTracks || pad >= kPads)
         return;
@@ -407,6 +454,9 @@ void Engine::applyType(uint8_t track, uint8_t type)
                 t.hr.get()->pad(padCol((uint8_t)pad), padRow((uint8_t)pad), false);
         }
     memset(t.padBits, 0, sizeof(t.padBits));
+    t.pl = seqlogic::PadLatch();
+    t.latch = 0;
+    t.quiet = false;
     if (t.type == TYPE_PLINKY)
         plMenu_ = false;
     if (t.type == TYPE_CHORDARP)
@@ -502,7 +552,12 @@ void Engine::setPlaying(bool p)
             t.needStart = false;
             epoch_++;
             if (t.type == TYPE_MONO)
-                t.mo.stop(); // Chord/Arp keeps running while stopped (free-running clock)
+                t.mo.stop(); // Chord/Arp keeps running while stopped (free-running clock) ...
+            else if (t.type == TYPE_CHORDARP && t.latch && t.pl.held != 0)
+            {
+                t.quiet = true; // ... but a latched one stops with the transport (plan 025): silent, still latched, resumes with Play
+                t.ca.stop();
+            }
             else if (isHrType(t.type) && t.hr.get())
             {
                 // every HYPER_RASP script: starting is selective (followsTransport), stopping is not (pad_script.py Transport._set_playback)
@@ -530,8 +585,15 @@ void Engine::pulseAll()
     for (int i = 0; i < kTracks; i++)
         if (t_[i].type == TYPE_CHORDARP)
         {
+            Track& t = t_[i];
+            // plan 025: Stop pauses a latched Chord/Arp (silent, still latched, same chord; setPlaying); Play resumes it. A new press ends the pause.
+            if (t.quiet && !playing_)
+                continue;
+            if (t.quiet)
+                t.ca.retrigger(); // Play again: the latched chord sounds again
+            t.quiet = false;
             epoch_++;
-            t_[i].ca.pulse();
+            t.ca.pulse();
             refresh((uint8_t)i);
         }
     if (playing_)
@@ -792,6 +854,140 @@ void Engine::recFeedOff(uint8_t track)
 }
 
 // ------------------------------------------------------------------ project sidecar
+// ------------------------------------------------------------------ plan 025: parameters + latch
+bool Engine::latchOn(uint8_t track) const
+{
+    if (track >= kTracks)
+        return false;
+    const Track& t = t_[track];
+    switch (seqlogic::latchKind(t.type))
+    {
+        case seqlogic::LATCH_ENGINE: return t.latch != 0;
+        case seqlogic::LATCH_SCRIPT: return t.hr.get() && t.hr.get()->latch();
+        default: return false;
+    }
+}
+
+void Engine::latchRelease(uint8_t track)
+{
+    Track& t = t_[track];
+    const uint64_t rel = t.pl.clear();
+    for (uint8_t q = 0; rel >> q; q++)
+        if ((rel >> q) & 1u)
+            applyPadRaw(track, q, false, 0);
+}
+
+void Engine::applyLatch(uint8_t track, bool on)
+{
+    Track& t = t_[track];
+    epoch_++;
+    switch (seqlogic::latchKind(t.type))
+    {
+        case seqlogic::LATCH_ENGINE:
+            if ((t.latch != 0) == on)
+                return;
+            t.latch = on ? 1 : 0;
+            if (on)
+            {
+                // the pads held now stay held (a lifted finger no longer ends them)
+                t.pl.phys = 0;
+                t.pl.held = 0;
+                for (uint8_t q = 0; q < kPads; q++)
+                    if (((t.padBits[q >> 3] >> (q & 7)) & 1u) && isNotePad(t.type, q))
+                        t.pl.held |= (uint64_t)1 << q;
+            }
+            else
+            {
+                latchRelease(track);
+                t.quiet = false;
+            }
+            break;
+        case seqlogic::LATCH_SCRIPT:
+            if (t.hr.get())
+                t.hr.get()->setLatch(on);
+            break;
+        default: return;
+    }
+    refresh(track);
+}
+
+int Engine::getById(const Track& t, uint8_t id) const
+{
+    switch (id)
+    {
+        case seqparams::ID_LATCH:
+            switch (seqlogic::latchKind(t.type))
+            {
+                case seqlogic::LATCH_ENGINE: return t.latch != 0;
+                case seqlogic::LATCH_SCRIPT: return t.hr.get() ? t.hr.get()->latch() : 0;
+                default: return 0;
+            }
+        case seqparams::ID_PL_ROOT: return pl_.root;
+        case seqparams::ID_PL_SCALE: return pl_.scale;
+        case seqparams::ID_PL_OCTAVE: return pl_.octave;
+        case seqparams::ID_PL_INTERVAL: return pl_.interval;
+        default: break;
+    }
+    if (t.type == TYPE_CHORDARP)
+        return t.ca.getParam(id);
+    if (t.type == TYPE_MONO)
+        return t.mo.getParam(id);
+    if (t.hr.get())
+        return t.hr.get()->getParam(id);
+    return 0;
+}
+
+void Engine::setById(uint8_t track, uint8_t id, int v)
+{
+    Track& t = t_[track];
+    switch (id)
+    {
+        case seqparams::ID_LATCH: applyLatch(track, v != 0); return;
+        case seqparams::ID_PL_ROOT: pl_.root = (uint8_t)v; return;
+        case seqparams::ID_PL_SCALE: pl_.scale = (uint8_t)v; return;
+        case seqparams::ID_PL_OCTAVE: pl_.octave = (uint8_t)v; return;
+        case seqparams::ID_PL_INTERVAL: pl_.interval = (uint8_t)v; return;
+        default: break;
+    }
+    if (t.type == TYPE_CHORDARP)
+        t.ca.setParam(id, v);
+    else if (t.type == TYPE_MONO)
+        t.mo.setParam(id, v);
+    else if (t.hr.get())
+        t.hr.get()->setParam(id, v);
+}
+
+void Engine::applyParam(uint8_t track, uint8_t idx, int value)
+{
+    if (track >= kTracks)
+        return;
+    const seqparams::Tab* tb = seqparams::tab(t_[track].type);
+    if (!tb || idx >= tb->nTotal)
+        return;
+    epoch_++;
+    const seqparams::Desc& d = seqparams::desc(*tb, idx);
+    setById(track, d.id, seqparams::clampTo(d, value));
+    refresh(track);
+}
+
+void Engine::paramValues(uint8_t track, int8_t out[seqparams::kMaxParams]) const
+{
+    memset(out, 0, seqparams::kMaxParams);
+    if (track >= kTracks)
+        return;
+    const Track& t = t_[track];
+    uint32_t cs = host_ ? host_->critEnter() : 0;
+    const seqparams::Tab* tb = seqparams::tab(t.type);
+    if (tb)
+        for (uint8_t i = 0; i < tb->nTotal && i < seqparams::kMaxParams; i++)
+        {
+            const seqparams::Desc& d = seqparams::desc(*tb, i);
+            out[i] = (int8_t)seqparams::clampTo(d, getById(t, d.id));
+        }
+    if (host_)
+        host_->critExit(cs);
+}
+
 static uint16_t crc16Update(uint16_t c, const uint8_t* b, size_t n)
 {
     for (size_t i = 0; i < n; i++)
@@ -817,10 +1013,15 @@ size_t Engine::saveState(uint8_t* buf, size_t cap) const
     buf[1] = 'Q';
     buf[2] = 'T';
     buf[3] = 'R';
-    bool anyHr = false;
+    bool anyHr = false, anyLatch = false;
     for (int i = 0; i < kTracks; i++)
+    {
         anyHr = anyHr || isHrType(t_[i].type) || t_[i].type == TYPE_PLINKY; // a PolySynth setup needs the trailer
-    buf[4] = anyHr ? kSidecarVersion : kSidecarVersionV1;
+        // plan 025: a Latch that differs from the type's default needs version 3 (an older mod then reads the file as unknown)
+        anyLatch = anyLatch || (seqlogic::latchKind(t_[i].type) != seqlogic::LATCH_NONE && latchOn((uint8_t)i) != seqlogic::latchDefault(t_[i].type));
+    }
+    buf[4] = anyLatch ? kSidecarVersionV3 : anyHr ? kSidecarVersion : kSidecarVersionV1;
+    anyHr = anyHr || anyLatch; // version 3 keeps the HR trailer (empty blocks)
     buf[5] = kTracks;
     size_t p = 8;
     for (int i = 0; i < kTracks; i++)
@@ -856,6 +1057,9 @@ size_t Engine::saveState(uint8_t* buf, size_t cap) const
             if (host_)
                 host_->critExit(cs);
         }
+    if (anyLatch)
+        for (int i = 0; i < kTracks; i++)
+            buf[p++] = (uint8_t)(latchOn((uint8_t)i) ? 1 : 0); // [latch] per track
     size_t plen = p - 8;
     buf[6] = (uint8_t)(plen & 0xFF);
     buf[7] = (uint8_t)(plen >> 8);
@@ -911,6 +1115,11 @@ uint16_t Engine::stateHash() const
         c = crc16Update(c, hblk, nh); // HYPER_RASP script: settings only (its serialize leaves out the runtime and view state)
         if (plinky)
             c = crc16Update(c, pb, sizeof(pb));
+        if (seqlogic::latchKind(type) != seqlogic::LATCH_NONE)
+        {
+            const uint8_t lb = latchOn((uint8_t)i) ? 1 : 0; // plan 025: the Latch setting is a project setting
+            c = crc16Update(c, &lb, 1);
+        }
     }
     return c;
 }
@@ -943,7 +1152,7 @@ void Engine::resetState()
 
 bool Engine::loadState(const uint8_t* buf, size_t len)
 {
-    if (!buf || len < 10 || buf[0] != 'S' || buf[1] != 'Q' || buf[2] != 'T' || buf[3] != 'R' || (buf[4] != kSidecarVersionV1 && buf[4] != kSidecarVersion) ||
+    if (!buf || len < 10 || buf[0] != 'S' || buf[1] != 'Q' || buf[2] != 'T' || buf[3] != 'R' || (buf[4] != kSidecarVersionV1 && buf[4] != kSidecarVersion && buf[4] != kSidecarVersionV3) ||
         buf[5] != kTracks)
         return false;
     size_t plen = (size_t)buf[6] | ((size_t)buf[7] << 8);
@@ -984,9 +1193,17 @@ bool Engine::loadState(const uint8_t* buf, size_t len)
                     return false;
                 p += n;
             }
+            if (buf[4] == kSidecarVersionV3) // plan 025: one Latch byte per track
+            {
+                if (p + kTracks != end)
+                    return false;
+                p = end;
+            }
             if (p != end)
                 return false;
         }
+        else if (buf[4] == kSidecarVersionV3)
+            return false; // version 3 always has its trailers
     }
     // where the trailer starts (0 = none): after the 16 track records
     size_t trailer = 0;
@@ -999,6 +1216,14 @@ bool Engine::loadState(const uint8_t* buf, size_t len)
             p += 1 + buf[p];
         }
         trailer = p < end ? p : 0;
+    }
+    // where the Latch bytes start (version 3 only): after the 16 HR blocks
+    size_t latchAt = 0;
+    if (buf[4] == kSidecarVersionV3 && trailer)
+    {
+        latchAt = trailer;
+        for (int i = 0; i < kTracks; i++)
+            latchAt += 1 + buf[latchAt];
     }
 
     // pass 2: apply; a track whose type or blocks are invalid is left Off with fresh state, the others load
@@ -1044,7 +1269,17 @@ bool Engine::loadState(const uint8_t* buf, size_t len)
         if (!ok)
             initTrack(i); // invalid block: this track Off, defaults
         else if (type != TYPE_OFF)
+        {
             applyType(i, type);
+            if (latchAt && seqlogic::latchKind(type) != seqlogic::LATCH_NONE)
+            {
+                t_[i].latch = 0;
+                if (seqlogic::latchKind(type) == seqlogic::LATCH_ENGINE)
+                    t_[i].latch = buf[latchAt + i] ? 1 : 0;
+                else if (t_[i].hr.get())
+                    t_[i].hr.get()->setLatch(buf[latchAt + i] != 0);
+            }
+        }
     }
     SEQ_COMPILER_BARRIER();
     loading_ = false;

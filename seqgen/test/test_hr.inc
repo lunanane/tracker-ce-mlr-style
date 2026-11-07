@@ -661,3 +661,61 @@ TEST(hr_euclid_helper_matches_the_recursive_original_for_every_k_and_n) {
       for (int i = 0; i < n; ++i) CHECK_EQ(a[i], b[i]);
     }
 }
+
+// ======================= plan 025: Latch (hold mode) and the Arp Seq parameters =======================
+TEST(hr_stab_latch_off_sounds_only_while_the_root_is_held) {
+  HrRig r(HR_CHORD_STABS);
+  CHECK(r.s->hasLatch() && r.s->latch());                 // default: a tap latches, as ever
+  r.s->setLatch(false);
+  CHECK(!r.s->latch());
+  r.s->pad(0, 0, true);
+  CHECK(r.s->live() && countOn() == 3);
+  clearEv();
+  r.s->pad(0, 0, false);                                  // lifted: it ends and the voices stop
+  CHECK(!r.s->live() && countOff() == 3 && countOn() == 0);
+  r.s->pad(0, 0, true); r.s->pad(2, 0, true);             // two roots: the last one counts
+  r.s->pad(0, 0, false);
+  CHECK(r.s->live() && r.s->getParam(HrStab::P_ROOT) == 3);
+  r.s->pad(2, 0, false);
+  CHECK(!r.s->live());
+  r.s->setLatch(true);                                    // back to latching
+  r.tap(0, 0);
+  CHECK(r.s->live());
+  r.s->setLatch(false);                                   // Latch off ends a latched sequence
+  CHECK(!r.s->live());
+}
+TEST(hr_arpseq_latch_off_and_parameters) {
+  HrRig r(HR_ARP_SEQ);
+  CHECK(r.s->hasLatch() && r.s->latch());
+  r.tap(0, 0);
+  CHECK(r.s->live() && r.s->getParam(HrArpSeq::P_ROOT) == 1);
+  r.s->setParam(HrArpSeq::P_SPEED, 1);
+  r.s->setParam(HrArpSeq::P_DIR, 4);
+  r.s->setParam(HrArpSeq::P_OCT, 3);
+  r.s->setParam(HrArpSeq::P_MODE, 2);
+  r.s->setParam(HrArpSeq::P_GROOVE, 12);
+  r.s->setParam(HrArpSeq::P_QUALITY, 2);
+  CHECK_EQ(r.s->getParam(HrArpSeq::P_SPEED), 1); CHECK_EQ(r.s->getParam(HrArpSeq::P_DIR), 4); CHECK_EQ(r.s->getParam(HrArpSeq::P_OCT), 3);
+  CHECK_EQ(r.s->getParam(HrArpSeq::P_MODE), 2); CHECK_EQ(r.s->getParam(HrArpSeq::P_GROOVE), 12); CHECK_EQ(r.s->getParam(HrArpSeq::P_QUALITY), 2);
+  r.s->setParam(HrArpSeq::P_SPEED, 99);                   // clamped
+  CHECK_EQ(r.s->getParam(HrArpSeq::P_SPEED), 4);
+  r.s->setLatch(false);                                   // ends the latched root
+  CHECK(!r.s->live());
+  r.s->pad(1, 0, true);
+  CHECK(r.s->live());
+  r.s->pad(1, 0, false);
+  CHECK(!r.s->live());
+  uint8_t b[HrScript::kMaxSerial];                        // the parameters are part of the script's settings
+  CHECK(r.s->serialize(b, sizeof b) > 0);
+  HrRig q(HR_ARP_SEQ);
+  CHECK(q.s->deserialize(b, sizeof b));
+  CHECK_EQ(q.s->getParam(HrArpSeq::P_DIR), 4); CHECK_EQ(q.s->getParam(HrArpSeq::P_QUALITY), 2);
+}
+TEST(hr_chordarp_latch_is_the_script_latch_param) {
+  HrRig r(HR_CHORD_ARP);
+  CHECK(r.s->hasLatch() && r.s->latch() && r.s->getParam(HrChordArp::P_LATCH) == 2);
+  r.s->setLatch(false);
+  CHECK(!r.s->latch() && r.s->getParam(HrChordArp::P_LATCH) == 1);
+  HrRig b(HR_BASS), e(HR_EUCLID);
+  CHECK(!b.s->hasLatch() && !e.s->hasLatch());            // the Bass latch is the engine's; the step sequencers have none
+}
