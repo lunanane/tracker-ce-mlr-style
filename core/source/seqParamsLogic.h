@@ -270,12 +270,7 @@ inline void valueText(const Desc& d, int v, char* out, size_t n)
             else snprintf(out, n, "%s", r);
             break;
         }
-        case F_MSPEED:
-        {
-            static const char* const k[12] = { "1/1", "1/2", "1/2T", "1/4", "1/4T", "1/8", "1/8T", "1/16", "1/16T", "1/32", "1/32T", "1/96" };
-            snprintf(out, n, "%s", k[v - 1]);
-            break;
-        }
+        case F_MSPEED: snprintf(out, n, "%s", seqplay::speedName((uint8_t)v)); break;
         default: snprintf(out, n, "%d", v); break;
     }
 }

@@ -11,12 +11,13 @@
 #include "seqPlayLogic.h"
 #include "seqNotesViewLogic.h"
 #include "seqPlinkyUiLogic.h"
+#include "seqParamsLogic.h"
 #include "seqRecLogic.h"
 
 // What the overlay control draws (written by the overlay, read by the control on the display refresh).
 struct SeqPlayViewData
 {
-    enum Mode : uint8_t { HIDDEN = 0, LIST = 1, LEGEND = 2, PLINKY = 3 };
+    enum Mode : uint8_t { HIDDEN = 0, LIST = 1, LEGEND = 2, PLINKY = 3, PARAMS = 4 };
     uint8_t mode = HIDDEN;
     uint8_t type = 0; // LEGEND: sequencer type of the selected track
     uint8_t cell = 0; // LIST: strip cell (0..7) the list sits above
@@ -35,6 +36,7 @@ struct SeqPlayViewData
     seqplinky::Setup plSetup;  // LEGEND (Plinky): root / scale / octave / string interval
     uint8_t plMenu = 0;        // LEGEND (Plinky): setup view shown
     seqplinky::Model plinky;   // PLINKY: the parameter overlay
+    seqparams::Model prm;      // PARAMS (plan 025): the sequencer settings above the pad legend (second control)
     seqplay::HrSnap hr = {}; // LEGEND (HYPER_RASP types): title, help and cells reported by the script
     uint8_t edge = 0;  // 0 none; 1 / 2: the selected track is on the higher / lower strip page than the one shown (edge marker)
     uint8_t edgeTrack = 0; // that track's number 1..16
@@ -106,6 +108,13 @@ class SeqPlayOverlay
     void plinkyJog(int16_t value);
     void plinkyDefault();
     void plinkyClose();
+    // plan 025: the sequencer settings page above the pad legend
+    bool paramsOpen() const;
+    void paramsNav(uint8_t button);
+    void paramsJog(int16_t value);
+    void paramsDefault();
+    void paramsPost(uint8_t flat, int value);
+    void refreshParams(uint8_t sel);
     void syncPattern();   // v0.3.6 A1: the pattern control is not drawn while the PolySynth view is shown
     bool editKey(uint8_t button, uint8_t state);
     bool paramsKey(uint8_t state);
@@ -116,6 +125,18 @@ class SeqPlayOverlay
     uint8_t stripPage_ = 0;
     uint8_t lastTrack_ = 0xFF;
     int8_t control_ = -1;
+    int8_t controlP_ = -1;          // plan 025: second cSeqPlayLegend control, mode PARAMS (created after the legend = drawn below it)
+    SeqPlayViewData viewP_;
+    SeqPlayViewData viewPShown_;
+    bool viewPShownValid_ = false;
+    seqparams::Cursor prmCur_;
+    uint8_t prmTrack_ = 0xFF, prmType_ = 0xFF;
+    int8_t prmVals_[seqparams::kMaxParams];
+    int8_t prmPendVal_ = 0;         // a value just posted: shown (and the next jog starts from it) until the audio side has taken it
+    uint8_t prmPendIdx_ = 0xFF, prmPendTrack_ = 0xFF;
+    uint32_t prmPendUntil_ = 0;
+    bool prmShown_ = false;         // the settings page is on screen (the pattern control is hidden then)
+    bool delTaken_ = false;         // a Delete press was taken as "reset the value" (its hold / release are too)
     seqplay::ScreenHold hold_; // screen buttons whose press the overlay took (their release is taken too), the list's button
     seqplay::TypeList list_;
     seqplay::LegendGate legend_;

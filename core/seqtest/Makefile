@@ -7,7 +7,7 @@ HRSRC = ../../seqgen/hr.cpp ../../seqgen/hr_stab.cpp ../../seqgen/hr_arpseq.cpp 
 GLUE = ../source/seqTracksCore.cpp ../source/seqCut.cpp ../interface/seqSession/cutLayer.cpp
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
 
-.PHONY: test clean preview amp-preview pitch-preview grid-preview
+.PHONY: test clean preview amp-preview pitch-preview grid-preview legend-preview
 test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE) build/seq_plinky_tests$(EXE) build/seq_trace_tests$(EXE) build/seq_amp_tests$(EXE) build/seq_warp_tests$(EXE) build/seq_stage_tests$(EXE) build/seq_gridstage_tests$(EXE) build/seq_br_tests$(EXE) build/seq_pitchdevice_tests$(EXE) build/seq_sampmem_tests$(EXE) build/seq_cpumon_tests$(EXE) build/seq_kernel_tests$(EXE)
 	build/seq_cpu_tests$(EXE)
 	build/seq_glue_tests$(EXE)
@@ -76,6 +76,13 @@ pitch-preview: build/seq_trace_tests$(EXE)
 	mkdir -p build/preview
 	SEQ_PITCH_PREVIEW=build/preview build/seq_trace_tests$(EXE)
 	python amp_preview.py build/preview
+
+# PNG previews of the Play legend with the sequencer settings page above it (plan 025): the real seqPlayLegend.cpp against stubbed display list macros (needs Pillow)
+legend-preview: preview_legend.cpp legendstub/FT812.h ../interface/seqPlay/seqPlayLegend.cpp ../source/seqParamsLogic.h ../source/seqPlayLogic.h
+	mkdir -p build/preview
+	$(CXX) $(CXXFLAGS) -Ilegendstub -I../interface -I../libs/Audio $(SEQ) preview_legend.cpp -o build/preview_legend$(EXE)
+	build/preview_legend$(EXE) build/preview
+	python legend_preview.py build/preview
 
 build/seq_play_tests$(EXE): test_play.cpp ../source/seqPlayLogic.h ../source/seqTracksLogic.h $(HRSRC)
 	mkdir -p build
