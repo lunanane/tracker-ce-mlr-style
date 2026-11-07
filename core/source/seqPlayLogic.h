@@ -684,7 +684,7 @@ inline const char* legendHelp(const LegendState& st)
             case 1: return "Groove: rhythm. Param: random groove on/off. Gate: note length. Swg: swing.";
             case 2: return "Vel: loudness (2 pads = blend). Lane: accent gates. Rng: arp octaves. Size: chord notes.";
             case 3: return "Key: follows root. Locked: hold + tap a root. Grid: scale pads. Tran: shift. Off: silent.";
-            default: return "Hold a root. Type: chord shape (hold Root + type = more). 2 fingers on Speed/Dir: more.";
+            default: return "Hold a root, then tap a chord Type.";
         }
     }
     if (st.type == seqlogic::TYPE_MONO)

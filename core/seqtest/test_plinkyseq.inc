@@ -36,6 +36,12 @@ struct PlCtx
         rects++;
         bound(x0, y0, x1, y1);
     }
+    void disc(int cx, int cy, int r) // plan 029: one self-contained point
+    {
+        ensure(0); // stateless: BEGIN POINTS, POINT_SIZE, VERTEX2F, END
+        words += 4;
+        bound(cx - r, cy - r, cx + r, cy + r);
+    }
     void textPhase() { ensure(0); words++; phase = true; }
     void text(int x, int y, int, int opt, const char* s)
     {

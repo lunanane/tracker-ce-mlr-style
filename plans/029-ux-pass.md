@@ -63,3 +63,35 @@ Files: core/interface/seqPerform/faderView.cpp (palette, layout), masterParams/m
 (note and footer strings), seqSession/mlrDraw.h, source/seqAmpViewLogic.h, seqPlay/seqPlayLegend.cpp, docs/seq-ui-colours.md.
 Tests: no expectation changed. seqtest `make test` and seqgen `make test`: 0 failures. Master fader stages 488..1276 B
 (limit 3840). Flash: image end 1,016,260 B before, 1,015,900 B after (-360 B); margin 15,932 -> 16,292 B.
+
+## As built (part 2: Camelot wheel, settings page, Play legend)
+
+Files: core/source/seqWheelLogic.h (wheel), core/source/seqParamsLogic.h (settings page), core/source/seqPlayLogic.h (legend help),
+core/interface/seqPlay/seqPlayLegend.cpp (palettes, `disc` in the drawing context), docs/seq-ui-colours.md.
+
+Audit (ux-expert method, owner decisions recorded, nothing asked):
+1. Major - the wheel was 124 x 136 px of 20 x 16 px tiles: numerals touched the tile edges, labels collided with markers, no ring was readable
+   as a ring, the lit key was yellow (focus colour) and neighbours cyan (value colour).
+2. Major - on the settings page every cell name and value carried the colour of the last text drawn: the Camelot key text (yellow / amber / red).
+   A bug of plan 028 (colour state leaked), not a design: the names and values of all cells took the match colour.
+3. Minor - group labels cyan, hint white, legend help three sentences.
+
+Wheel (seqwheel): region x 662..798, y 270..422 (starts under the pattern playhead row, clear of the strip at 424). Two rings of discs (FT81x
+POINTS): B outside (radius 56, disc 12 px, number inside), A inside (radius 33, disc 7 px). The playing key is a disc 2 px bigger in its
+match colour (green match, orange near, red clash; number in dark text). Harmonic neighbours (number +-1 on the same ring, or the other ring)
+get a quiet 2 px grey outline, their numbers turn white; every other number is grey. Other sounding tracks: a small white square on the
+hub side rim of their disc, the 3-key trail: a small dim disc there (both clear of the numeral). The key label ("8A D DOR") is bold 14 px under
+the wheel in the match colour. `markColor`: near is now orange (th.orange), not yellow (plan 029 spec; yellow is focus only).
+Settings page: group labels near-white (0xD8D8D8, cyan only stays on the value bars), names grey, values white, the hint "Arrows move, jog edits,
+Del resets" grey (Palette gets a `hint` field), and the leaked colour fixed (names/values no longer take the key colour). Play legend help
+for Chord/Arp page "Play": "Hold a root, then tap a chord Type." (first sentence kept; the dropped "Type: hold Root + type = more. 2 fingers on
+Speed/Dir: more." belongs to the Help, i.e. the Shift legend of that page, which still shows the pads). Root pad labels "12A C#m" fit the 60 px
+cells (checked in the preview, 7 characters of the bold 14 px font).
+Tests: no expectation changed. Test fixtures: `PlCtx` (test_plinkyseq.inc) gets `disc()` (counts BEGIN POINTS, POINT_SIZE, VERTEX) so the wheel
+stage is still measured: worst case 952 FIFO bytes (was 904; limit 3840). legendstub/FT812.h and legend_preview.py gain POINTS (preview only),
+preview_legend.cpp renders three wheel scenes (match, near, clash). seqtest `make test` and seqgen `make test`: 0 failures.
+Previews: E:/claude/ux-shots/ux2-before and ux2-after (legend_wheel, legend_wheel_match, legend_wheel_clash, legend_chordarp, legend_hr_chordarp ...).
+Open: not seen on a device; the 12 outer discs are 24 px wide at 800 x 480, which is the largest the region allows without covering the playhead row.
+Flash: image end 1,021,284 B (seq-tracks, margin 10,908 B) -> 1,021,268 B (margin 10,924 B): -16 B. Reached by one disc call site in the wheel loop, the
+neighbours as a bit mask computed from the position code (no 24 x neighbour() calls), the key colour computed once in the legend, a dead
+API_COLOR removed; `seqwheel::neighbour` stays (tests use it, it is not linked otherwise). Stateless `disc` (BEGIN POINTS / POINT_SIZE / VERTEX / END).

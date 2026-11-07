@@ -60,10 +60,10 @@ static void scene(const char* dir, const char* name, uint8_t type, uint8_t sec, 
     printf("%s\n", path);
 }
 
-static void wheel(const char* dir)
+static void wheel(const char* dir, const char* name, uint8_t cur, uint8_t mark, const char* label)
 {
     char path[512];
-    snprintf(path, sizeof path, "%s/legend_wheel.ops", dir);
+    snprintf(path, sizeof path, "%s/legend_%s.ops", dir, name);
     g_ops = fopen(path, "w");
     if (!g_ops)
         return;
@@ -72,11 +72,11 @@ static void wheel(const char* dir)
     v.mode = SeqPlayViewData::WHEEL;
     seqwheel::Model& m = v.wheel;
     m.on = 1;
-    m.cur = 14 + 1; // 8A
-    m.mark = 2;
-    m.trail[0] = 14; m.trail[1] = 16;
-    m.others = (1u << 14) | (1u << 4) | (1u << 23);
-    snprintf(m.label, sizeof m.label, "8A D DOR");
+    m.cur = cur;
+    m.mark = mark;
+    m.trail[0] = (uint8_t)((cur + 2) % 24); m.trail[1] = (uint8_t)((cur + 5) % 24);
+    m.others = (1u << ((cur + 2) % 24)) | (1u << 4) | (1u << 23);
+    snprintf(m.label, sizeof m.label, "%s", label);
     strControlProperties pp = { 0, 0, 800, 480, 0, &v, nullptr };
     cSeqPlayLegend ctl(&pp);
     ctl.update();
@@ -92,6 +92,8 @@ int main(int argc, char** argv)
     scene(dir, "strings", seqlogic::TYPE_PLINKY, 0, 4, true);
     scene(dir, "hr_chordarp", seqlogic::TYPE_HR_FIRST + seqgen::HR_CHORD_ARP, 1, 2, true);
     scene(dir, "hr_stabs", seqlogic::TYPE_HR_FIRST + seqgen::HR_CHORD_STABS, 1, 3, true);
-    wheel(dir);
+    wheel(dir, "wheel", 15, 2, "8A D DOR");           // 8A, neighbour of another track
+    wheel(dir, "wheel_match", 14, 1, "8B C");
+    wheel(dir, "wheel_clash", 21, 3, "11A F#m");
     return 0;
 }

@@ -334,6 +334,7 @@ struct Palette
 {
     uint32_t bg, panel, bar, text, section, accent, onAccent, fill;
     uint32_t mark; // colour of the key text (the match colour, plan 028)
+    uint32_t hint; // plan 029: grey hint text (not focus, not a value)
 };
 
 enum { kPanelY0 = 30, kPanelY1 = 424, kHeadY = 41, kRowY0 = 56, kRowH = 52, kRowStep = 56, kBoxX0 = 8, kBoxX1 = 792, kCellX0 = 112, kCellStep = 96,
@@ -379,6 +380,7 @@ template <class C> void draw(C& c, const Model& m, const Palette& p)
     c.color(p.text);
     snprintf(buf, sizeof buf, "T%d  %s", m.track, seqplay::typeName(m.type));
     c.text(kBoxX0 + 4, kHeadY, 3, 2, buf);
+    c.color(p.hint);
     c.text(kBoxX1, kHeadY, 1, 2 | 4, "Arrows move, jog edits, Del resets");
     if (m.key[0])
     {
@@ -393,7 +395,9 @@ template <class C> void draw(C& c, const Model& m, const Palette& p)
             const Desc& d = desc(*tb, flat);
             const int x = kCellX0 + i * kCellStep + 6, y = kRowY0 + s * kRowStep;
             valueText(d, m.v[flat], buf, sizeof buf);
+            c.color(p.hint); // plan 029: the name grey, the value white (cyan is only the bar)
             c.text(x, y + 10, 3, 2, d.name);
+            c.color(p.text);
             c.text(x, y + 40, 3, 2, buf);
         }
     c.color(p.section);
