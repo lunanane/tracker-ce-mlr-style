@@ -65,6 +65,13 @@ static void tCutPad(uint8_t col, uint8_t row, bool down, bool shift = false)
     const uint8_t pr = down ? tPrep(row, col) : (uint8_t)((row & 1) * 2);
     cutPad(col, pr, down, shift);
 }
+// Plan 026: a two-pad loop starts only after both pads were held kEngageMs; the clock of the layer is advanced past it (cutUpdate(now) posts the engage command).
+static uint32_t g_nowMs = 1000;
+static void tHoldBoth()
+{
+    g_nowMs += seqcut::kEngageMs + 20;
+    cutUpdate(g_nowMs);
+}
 static void tAPad(seqsession::CutSessionLayer& a, uint8_t col, uint8_t row, bool down)
 {
     const uint8_t pr = down ? tPrep(row, col) : (uint8_t)((row & 1) * 2);
@@ -496,6 +503,7 @@ static void test_cut_layer()
     tSetGroup(0);
     tCutPad(1, 0, true);
     tCutPad(4, 0, true);
+    tHoldBoth();
     seqEngine.idleTick();
     CHECK(c->view(0).loopLo == 1 && c->view(0).loopHi == 4);
     cutLeds(leds);
@@ -2027,6 +2035,7 @@ seqcut::MlrModel mlrScene(int scene)
     MlrModel m;
     memset(&m, 0, sizeof(m));
     m.pickSlot = 0xFF;
+    m.quant = Q_STEP;
     m.legendPad[0] = m.legendPad[1] = 0xFF;
     for (int k = 0; k < kSlots; k++)
     {
@@ -2067,6 +2076,16 @@ seqcut::MlrModel mlrScene(int scene)
             s.cacheMask = 0xFFFF;
             s.track = 15;
         }
+        m.quant = Q_32;
+        m.slot[0].engage = 60; // plan 026: "hold both" bar (worst case of the budget)
+    }
+    if (scene == 4)                  // plan 026: slot A ratchets (a held pad), slot B is about to engage a loop; quantise 1/8
+    {
+        m.quant = Q_8;
+        m.slot[0].flags = (uint8_t)(VF_ACTIVE | VF_RATCHET | (1 << VF_RATE_SHIFT));
+        m.slot[0].flags2 = V2_GRID8;
+        m.slot[0].spp = 2;
+        m.slot[1].engage = 60;
     }
     if (scene == 2)                  // slot A is the track picker
     {
@@ -2094,10 +2113,10 @@ seqcut::MlrModel mlrScene(int scene)
 static void test_mlr_screen_budget_and_bounds()
 {
     using namespace seqcut;
-    CHECK(kMlrLaneX + kMlrLaneW < kMlrBlockX && kMlrBlockX + 2 * 49 <= 800 && kMlrLaneW == 16 * kMlrPadW && kMlrPadW * 4 == 152 && kWaveCols == 152);
+    CHECK(kMlrLaneX + kMlrLaneW < kMlrBlockX && kMlrBlockX + 4 * kMlrCellPitch <= 800 && kMlrLaneW == 16 * kMlrPadW && kWaveCols == 152);
     CHECK(kMlrLaneTop >= kHeaderY1 + 4 && kMlrLaneStride >= kMlrLaneH + 2 && kMlrLaneTop + kMlrLaneStride + kMlrLaneH <= 424);
     int worst = 0, worstHeads = 0;
-    for (int scene = 0; scene < 4; scene++)
+    for (int scene = 0; scene < 5; scene++)
     {
         const MlrModel m = mlrScene(scene);
         CountCtx w;
@@ -2188,7 +2207,7 @@ static void test_mlr_screen_budget_and_bounds()
     if (const char* dir = getenv("SEQ_LANE_PREVIEW")) // `make preview`: dump the draw ops of the scenes for lane_preview.py
     {
         char path[512];
-        for (int scene = 0; scene < 4; scene++)
+        for (int scene = 0; scene < 5; scene++)
         {
             snprintf(path, sizeof(path), "%s/mlr%d.ops", dir, scene);
             FILE* fp = fopen(path, "w");
