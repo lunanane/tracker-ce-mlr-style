@@ -50,6 +50,7 @@ void Engine::initTrack(uint8_t i)
     t.pl = seqlogic::PadLatch();
     t.latch = 0;
     t.quiet = false;
+    t.camA = t.camB = 0;
     t.hr.clear();
     t.ca.setChannel(i);
     t.mo.setChannel(i);
@@ -153,6 +154,7 @@ void Engine::createHr(uint8_t track, uint8_t type)
     if (!s)
         return;
     s->setBus(&hrBus_);
+    s->setCam(t.camA, t.camB);
     s->setChannel(track);
     s->setSink(&Engine::sink, this);
 }
@@ -911,10 +913,32 @@ void Engine::applyLatch(uint8_t track, bool on)
     refresh(track);
 }
 
+// plan 028: the A / B type of a track goes to every generator it may use (the Chord/Arp is the key of the Mono and the followers)
+void Engine::applyCam(uint8_t track)
+{
+    Track& t = t_[track];
+    t.ca.setCam(t.camA, t.camB);
+    t.mo.setCam(t.camA, t.camB);
+    if (t.hr.get())
+    {
+        t.hr.get()->setCam(t.camA, t.camB);
+        t.hr.get()->camChanged();
+    }
+}
+
+void Engine::setCam(uint8_t track, bool minor, int v)
+{
+    Track& t = t_[track];
+    (minor ? t.camA : t.camB) = (uint8_t)v;
+    applyCam(track);
+}
+
 int Engine::getById(const Track& t, uint8_t id) const
 {
     switch (id)
     {
+        case seqparams::ID_CAM_A: return t.camA;
+        case seqparams::ID_CAM_B: return t.camB;
         case seqparams::ID_LATCH:
             switch (seqlogic::latchKind(t.type))
             {
@@ -943,6 +967,8 @@ void Engine::setById(uint8_t track, uint8_t id, int v)
     switch (id)
     {
         case seqparams::ID_LATCH: applyLatch(track, v != 0); return;
+        case seqparams::ID_CAM_A: setCam(track, true, v); return;
+        case seqparams::ID_CAM_B: setCam(track, false, v); return;
         case seqparams::ID_PL_ROOT: pl_.root = (uint8_t)v; return;
         case seqparams::ID_PL_SCALE: pl_.scale = (uint8_t)v; return;
         case seqparams::ID_PL_OCTAVE: pl_.octave = (uint8_t)v; return;
@@ -988,6 +1014,34 @@ void Engine::paramValues(uint8_t track, int8_t out[seqparams::kMaxParams]) const
         host_->critExit(cs);
 }
 
+void Engine::camSnapshot(seqgen::cam::Snap out[seqlogic::kTracks], uint8_t marks[seqlogic::kTracks]) const
+{
+    uint32_t cs = host_ ? host_->critEnter() : 0;
+    for (uint8_t i = 0; i < kTracks; i++)
+    {
+        const Track& t = t_[i];
+        seqgen::cam::Snap& o = out[i];
+        memset(&o, 0, sizeof(o));
+        bool ok = false;
+        if (t.type == TYPE_CHORDARP)
+            ok = t.ca.camKey(o.s);
+        else if (t.type == TYPE_MONO)
+            ok = ctx_.chord && ctx_.chord->camKey(o.s, t.camA, t.camB);
+        else if (t.type == TYPE_PLINKY)
+        {
+            seqgen::cam::build(o.s, pl_.root, pl_.scale);
+            ok = true;
+        }
+        else if (isHrType(t.type) && t.hr.get())
+            ok = t.hr.get()->camKey(o.s);
+        o.valid = ok ? 1 : 0;
+        o.sounding = ok && (t.nSounding > 0 || t.pl.held != 0 || (t.hr.get() && isHrType(t.type) && t.hr.get()->live())) ? 1 : 0;
+    }
+    if (host_)
+        host_->critExit(cs);
+    seqgen::cam::marks(out, kTracks, leadTrack_ < kTracks ? (int)leadTrack_ : -1, marks);
+}
+
 static uint16_t crc16Update(uint16_t c, const uint8_t* b, size_t n)
 {
     for (size_t i = 0; i < n; i++)
@@ -1013,15 +1067,17 @@ size_t Engine::saveState(uint8_t* buf, size_t cap) const
     buf[1] = 'Q';
     buf[2] = 'T';
     buf[3] = 'R';
-    bool anyHr = false, anyLatch = false;
+    bool anyHr = false, anyLatch = false, anyCam = false;
     for (int i = 0; i < kTracks; i++)
     {
+        anyCam = anyCam || (seqlogic::hasCam(t_[i].type) && (t_[i].camA || t_[i].camB)); // plan 028: needs version 4
         anyHr = anyHr || isHrType(t_[i].type) || t_[i].type == TYPE_PLINKY; // a PolySynth setup needs the trailer
         // plan 025: a Latch that differs from the type's default needs version 3 (an older mod then reads the file as unknown)
         anyLatch = anyLatch || (seqlogic::latchKind(t_[i].type) != seqlogic::LATCH_NONE && latchOn((uint8_t)i) != seqlogic::latchDefault(t_[i].type));
     }
-    buf[4] = anyLatch ? kSidecarVersionV3 : anyHr ? kSidecarVersion : kSidecarVersionV1;
-    anyHr = anyHr || anyLatch; // version 3 keeps the HR trailer (empty blocks)
+    buf[4] = anyCam ? kSidecarVersionV4 : anyLatch ? kSidecarVersionV3 : anyHr ? kSidecarVersion : kSidecarVersionV1;
+    anyHr = anyHr || anyLatch || anyCam; // versions 3 and 4 keep the HR trailer (empty blocks)
+    anyLatch = anyLatch || anyCam;       // ... and the Latch bytes
     buf[5] = kTracks;
     size_t p = 8;
     for (int i = 0; i < kTracks; i++)
@@ -1060,6 +1116,9 @@ size_t Engine::saveState(uint8_t* buf, size_t cap) const
     if (anyLatch)
         for (int i = 0; i < kTracks; i++)
             buf[p++] = (uint8_t)(latchOn((uint8_t)i) ? 1 : 0); // [latch] per track
+    if (anyCam)
+        for (int i = 0; i < kTracks; i++)
+            buf[p++] = seqlogic::hasCam(t_[i].type) ? (uint8_t)(t_[i].camA | (t_[i].camB << 4)) : 0; // [A | B << 4] per track
     size_t plen = p - 8;
     buf[6] = (uint8_t)(plen & 0xFF);
     buf[7] = (uint8_t)(plen >> 8);
@@ -1120,6 +1179,11 @@ uint16_t Engine::stateHash() const
             const uint8_t lb = latchOn((uint8_t)i) ? 1 : 0; // plan 025: the Latch setting is a project setting
             c = crc16Update(c, &lb, 1);
         }
+        if (seqlogic::hasCam(type) && (t.camA || t.camB))
+        {
+            const uint8_t cb = (uint8_t)(t.camA | (t.camB << 4)); // plan 028 (hashed only when set: the default projects keep their hash)
+            c = crc16Update(c, &cb, 1);
+        }
     }
     return c;
 }
@@ -1152,7 +1216,7 @@ void Engine::resetState()
 
 bool Engine::loadState(const uint8_t* buf, size_t len)
 {
-    if (!buf || len < 10 || buf[0] != 'S' || buf[1] != 'Q' || buf[2] != 'T' || buf[3] != 'R' || (buf[4] != kSidecarVersionV1 && buf[4] != kSidecarVersion && buf[4] != kSidecarVersionV3) ||
+    if (!buf || len < 10 || buf[0] != 'S' || buf[1] != 'Q' || buf[2] != 'T' || buf[3] != 'R' || (buf[4] != kSidecarVersionV1 && buf[4] != kSidecarVersion && buf[4] != kSidecarVersionV3 && buf[4] != kSidecarVersionV4) ||
         buf[5] != kTracks)
         return false;
     size_t plen = (size_t)buf[6] | ((size_t)buf[7] << 8);
@@ -1193,17 +1257,17 @@ bool Engine::loadState(const uint8_t* buf, size_t len)
                     return false;
                 p += n;
             }
-            if (buf[4] == kSidecarVersionV3) // plan 025: one Latch byte per track
+            if (buf[4] >= kSidecarVersionV3) // plan 025: one Latch byte per track (plan 028, version 4: and one A / B type byte per track)
             {
-                if (p + kTracks != end)
+                if (p + (buf[4] == kSidecarVersionV4 ? 2 : 1) * kTracks != end)
                     return false;
                 p = end;
             }
             if (p != end)
                 return false;
         }
-        else if (buf[4] == kSidecarVersionV3)
-            return false; // version 3 always has its trailers
+        else if (buf[4] >= kSidecarVersionV3)
+            return false; // versions 3 and 4 always have their trailers
     }
     // where the trailer starts (0 = none): after the 16 track records
     size_t trailer = 0;
@@ -1219,7 +1283,7 @@ bool Engine::loadState(const uint8_t* buf, size_t len)
     }
     // where the Latch bytes start (version 3 only): after the 16 HR blocks
     size_t latchAt = 0;
-    if (buf[4] == kSidecarVersionV3 && trailer)
+    if (buf[4] >= kSidecarVersionV3 && trailer)
     {
         latchAt = trailer;
         for (int i = 0; i < kTracks; i++)
@@ -1271,6 +1335,13 @@ bool Engine::loadState(const uint8_t* buf, size_t len)
         else if (type != TYPE_OFF)
         {
             applyType(i, type);
+            if (latchAt && buf[4] == kSidecarVersionV4 && seqlogic::hasCam(type))
+            {
+                const uint8_t cb = buf[latchAt + kTracks + i];
+                t_[i].camA = (cb & 15) < seqgen::cam::kTypesA ? (cb & 15) : 0;
+                t_[i].camB = (cb >> 4) < seqgen::cam::kTypesB ? (cb >> 4) : 0;
+                applyCam(i);
+            }
             if (latchAt && seqlogic::latchKind(type) != seqlogic::LATCH_NONE)
             {
                 t_[i].latch = 0;

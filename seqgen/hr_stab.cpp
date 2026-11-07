@@ -78,12 +78,12 @@ void HrStab::ageVoices() {
 void HrStab::scaleContext(uint8_t* scale, int* n, int* root) const {
   const HrBus& b = bus();
   int r = b.root >= 0 ? b.root : 60;
-  if (b.nScale == 0) {
+  const int ns = busScale(scale);
+  if (ns == 0) {
     for (int i = 0; i < 12; ++i) scale[i] = (uint8_t)((r + i) % 12);
     *n = 12;
   } else {
-    for (int i = 0; i < b.nScale; ++i) scale[i] = b.scale[i];
-    *n = b.nScale;
+    *n = ns;
   }
   *root = r;
 }
@@ -155,17 +155,18 @@ void HrStab::revoice() {
 void HrStab::publishScale() {
   if (arp() && role_ != ROLE_LEADER) return;
   if (!latched_) return;
-  static const uint8_t kMaj[7] = {0, 2, 4, 5, 7, 9, 11}, kMin[7] = {0, 2, 3, 5, 7, 8, 10};
-  const uint8_t* iv = quality_ == 2 ? kMin : kMaj;
   int tonic = (latched_ - 1) % 12;
-  uint16_t sig = (uint16_t)(1 + tonic * 2 + (quality_ == 2 ? 1 : 0));
+  uint16_t sig = (uint16_t)(1 + tonic * 2 + (quality_ == 2 ? 1 : 0) + 25 * camA_ + 150 * camB_);
   if (sig == published_) return;
   published_ = sig;
-  if (bus_) {
-    uint8_t pcs[7];
-    for (int i = 0; i < 7; ++i) pcs[i] = (uint8_t)((tonic + iv[i]) % 12);
-    bus_->setScale(pcs, 7);
-  }
+  if (bus_) bus_->setKey(tonic, quality_ == 2, camA_, camB_);
+}
+
+bool HrStab::camKey(cam::Scale& s) const {
+  if (follower()) return busKeyScale(s);
+  if (!latched_) return false;
+  cam::resolve(s, (latched_ - 1) % 12, quality_ == 2, camA_, camB_);
+  return true;
 }
 
 void HrStab::publishRoot(int pc) {

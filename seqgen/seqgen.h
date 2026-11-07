@@ -54,9 +54,13 @@ class SeqBase {
   void setSink(EventSink fn, void* user) { sink_ = fn; user_ = user; }
   void setChannel(uint8_t ch) { ch_ = ch; }
   uint8_t channel() const { return ch_; }
+  // plan 028: the Camelot scale flavour of the track (index into the A / B type list, 0 = Natural; see camelot.h)
+  void setCam(uint8_t a, uint8_t b) { camA_ = a; camB_ = b; }
+  uint8_t camA() const { return camA_; }
+  uint8_t camB() const { return camB_; }
 
  protected:
-  SeqBase() : sink_(0), user_(0), ch_(1) {}
+  SeqBase() : sink_(0), user_(0), ch_(1), camA_(0), camB_(0) {}
   void emit(uint8_t kind, int note, int vel, unsigned gateMs = 0) const {
     if (!sink_ || note < 0 || note > 127) return;
     Event e;
@@ -66,6 +70,7 @@ class SeqBase {
   EventSink sink_;
   void* user_;
   uint8_t ch_;
+  uint8_t camA_, camB_;
 };
 
 }  // namespace seqgen

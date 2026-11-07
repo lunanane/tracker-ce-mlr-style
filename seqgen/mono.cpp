@@ -38,7 +38,7 @@ void Mono::fire() {
   if (!mute_) {
     int d = steps_[(pg_ - 1) * 16 + pos_ - 1];
     if (d != kNoStep) {
-      int m = c.scaleDeg(d + tpose_ + c.gtpose);
+      int m = c.scaleDeg(d + tpose_ + c.gtpose, camA_, camB_);
       if (m >= 0 && m <= 127) n = m;
     }
   }

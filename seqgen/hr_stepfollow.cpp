@@ -12,17 +12,18 @@ HrStepFollow::HrStepFollow()
 }
 
 // context(): the published scale (none = chromatic) and the root (default 60)
-void HrStepFollow::context(const uint8_t** scale, int* n, int* root) const {
+void HrStepFollow::context(uint8_t buf[12], const uint8_t** scale, int* n, int* root) const {
   const HrBus& b = bus();
-  *scale = b.nScale ? b.scale : 0;
-  *n = b.nScale;
+  *n = busScale(buf);
+  *scale = *n ? buf : 0;
   *root = b.root >= 0 ? b.root : 60;
 }
 
 int HrStepFollow::noteForDegree(int degree) const {
   const uint8_t* sc;
   int n, root;
-  context(&sc, &n, &root);
+  uint8_t buf[12];
+  context(buf, &sc, &n, &root);
   if (!sc) return root + degree + 12 * octave_;
   int interval = floormod(sc[floormod(degree, n)] - sc[0], 12);
   int base = root - floormod(root - sc[0], 12);
@@ -30,8 +31,9 @@ int HrStepFollow::noteForDegree(int degree) const {
 }
 
 bool HrStepFollow::isTonic(int degree) const {
-  const HrBus& b = bus();
-  return b.nScale == 0 ? floormod(degree, 12) == 0 : floormod(degree, b.nScale) == 0;
+  uint8_t buf[12];
+  const int n = busScale(buf);
+  return n == 0 ? floormod(degree, 12) == 0 : floormod(degree, n) == 0;
 }
 
 bool HrStepFollow::windowFits(int base) const { return noteForDegree(base) >= kMinNote && noteForDegree(base + kNoteRows - 1) <= kMaxNote; }

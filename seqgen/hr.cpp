@@ -123,6 +123,24 @@ int hrAppend(char* out, size_t n, int at, const char* fmt, ...) {
   return k < 0 ? at : at + k;
 }
 
+bool HrScript::busKeyScale(cam::Scale& s) const {
+  const HrBus& b = bus();
+  if (!b.nScale || b.keyPc < 0) return false;
+  cam::resolve(s, b.keyPc, b.keyMinor != 0, camA_ ? camA_ : b.keyA, camB_ ? camB_ : b.keyB);
+  return true;
+}
+
+int HrScript::busScale(uint8_t pcs[12]) const {
+  const HrBus& b = bus();
+  cam::Scale s;
+  if (busKeyScale(s) && (b.keyMinor ? camA_ : camB_)) {  // an own type of that side replaces the published flavour
+    for (int i = 0; i < s.n; ++i) pcs[i] = (uint8_t)((s.tonic + s.iv[i]) % 12);
+    return s.n;
+  }
+  for (int i = 0; i < b.nScale; ++i) pcs[i] = b.scale[i];
+  return b.nScale;
+}
+
 const char* hrNoteName(int pc0) {
   static const char* const k[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
   return k[floormod(pc0, 12)];

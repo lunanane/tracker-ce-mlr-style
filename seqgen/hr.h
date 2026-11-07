@@ -8,6 +8,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "camelot.h"
 #include "seqgen.h"
 
 namespace seqgen {
@@ -23,8 +24,11 @@ struct HrBus {
   uint8_t scale[12];
   uint8_t nScale;  // 0 = none
   int16_t root;    // -1 = nothing published
+  int8_t keyPc;    // plan 028: the published key (pad root pitch class, side A = minor); -1 = none / chromatic
+  uint8_t keyMinor, keyA, keyB;  // ... and the A / B type the publisher plays it with
   HrBus() { reset(); }
   void reset() {
+    keyPc = -1; keyMinor = keyA = keyB = 0;
     static const uint8_t kDefault[7] = {3, 5, 6, 8, 10, 11, 1};
     for (int i = 0; i < 7; ++i) scale[i] = kDefault[i];
     nScale = 7;
@@ -34,6 +38,19 @@ struct HrBus {
     nScale = (uint8_t)(n > 12 ? 12 : n);
     for (int i = 0; i < nScale; ++i) scale[i] = pc[i];
   }
+  // plan 028: publish a key with the sequencer's A / B type (the scale becomes tonic first, 5..7 notes)
+  void setKey(int pc, bool minor, uint8_t tA, uint8_t tB) {
+    cam::Scale s;
+    cam::resolve(s, pc, minor, tA, tB);
+    uint8_t pcs[7];
+    for (int i = 0; i < s.n; ++i) pcs[i] = (uint8_t)((s.tonic + s.iv[i]) % 12);
+    setScale(pcs, s.n);
+    keyPc = (int8_t)(((pc % 12) + 12) % 12);
+    keyMinor = minor ? 1 : 0;
+    keyA = tA;
+    keyB = tB;
+  }
+  void clearScale() { nScale = 0; keyPc = -1; }
 };
 
 // Shift-legend cell. zone numbers equal seqplay::Zone (checked in core/source/seqPlayLogic.h).
@@ -79,6 +96,9 @@ class HrScript : public SeqBase {
   virtual bool hasLatch() const { return false; }
   virtual bool latch() const { return true; }
   virtual void setLatch(bool on) { (void)on; }
+  // plan 028: the key the script plays now (wheel position + scale); false = it has none (or no scale: Euclid, Grid Seq)
+  virtual bool camKey(cam::Scale& s) const { (void)s; return false; }
+  virtual void camChanged() {}                 // the A / B type changed (setCam): publish / reshape
   virtual bool live() const = 0;               // the script is performing (latched / running / sounding): keeps the track taken over
   virtual int getParam(int id) const { (void)id; return 0; }
   virtual void setParam(int id, int v) { (void)id; (void)v; }
@@ -99,6 +119,10 @@ class HrScript : public SeqBase {
   void noteOn(int note, int vel) const { emit(EV_NOTE_ON, note, vel, 0); }  // midi_note_on
   void noteOff(int note) const { emit(EV_NOTE_OFF, note, 0, 0); }          // midi_note_off
   const HrBus& bus() const { static const HrBus none; return bus_ ? *bus_ : none; }
+  // The shared scale as THIS script plays it (plan 028): its own A / B type for the published key's side replaces the published flavour,
+  // Natural takes the scale as published. Returns the note count (0 = chromatic), pcs tonic first.
+  int busScale(uint8_t pcs[12]) const;
+  bool busKeyScale(cam::Scale& s) const; // the published key as this script plays it; false = none published
   uint8_t type_;
   HrBus* bus_;
 };

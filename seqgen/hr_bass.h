@@ -21,6 +21,7 @@ class HrBass : public HrScript {
   void start() override { startPlayback(); }
   void stop() override { stopPlayback(); }
   void silence() override { stopPlayback(); stopSounding(); }
+  bool camKey(cam::Scale& s) const override { return busKeyScale(s); }
   bool live() const override { return heldN_ != 0 || sounding_ >= 0; }  // the keys decide WHICH note: nothing held = nothing to play
   int getParam(int id) const override;
   void setParam(int id, int v) override;

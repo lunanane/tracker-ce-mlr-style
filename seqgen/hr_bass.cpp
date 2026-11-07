@@ -23,20 +23,22 @@ int HrBass::noteForKey(int index) const {
   const HrBus& b = bus();
   int root = b.root >= 0 ? b.root : 60;
   int note;
-  if (b.nScale == 0) {
+  uint8_t sc[12];
+  const int n = busScale(sc);
+  if (n == 0) {
     note = root + index + 12 * octave_;
   } else {
-    int n = b.nScale;
-    int interval = floormod(b.scale[index % n] - b.scale[0], 12);
-    int base = root - floormod(root - b.scale[0], 12);
+    int interval = floormod(sc[index % n] - sc[0], 12);
+    int base = root - floormod(root - sc[0], 12);
     note = base + 12 * (index / n) + interval + 12 * octave_;
   }
   return note < 0 || note > 127 ? -1 : note;
 }
 
 bool HrBass::isRootKey(int index) const {
-  const HrBus& b = bus();
-  return b.nScale == 0 ? index % 12 == 0 : index % b.nScale == 0;
+  uint8_t sc[12];
+  const int n = busScale(sc);
+  return n == 0 ? index % 12 == 0 : index % n == 0;
 }
 
 bool HrBass::isHeld(int index) const {
