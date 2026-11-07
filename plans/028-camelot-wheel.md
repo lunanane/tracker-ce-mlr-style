@@ -24,3 +24,17 @@ wheel on screen.
   parameter page. The reference is the lead's live key when there is a lead (plan 011), otherwise the other
   sequencer tracks that are sounding right now; a track compared with nothing shows no mark.
 - Pure logic in a host-testable header (Camelot distance, mark per track), with tests.
+
+## Scale flavour per ring (owner 2026-11-07: "go beyond minor and major scales … per sequencer selecting which of the
+## minor/major type scales is used for either A or B")
+- Two per-track settings in the sequencer parameter page (plan 025): **A scale** (minor family: natural minor/aeolian
+  default, dorian, phrygian, harmonic minor, melodic minor, minor pentatonic, …) and **B scale** (major family:
+  major/ionian default, lydian, mixolydian, major pentatonic, …). Whenever the track plays an A key it uses its A
+  scale, a B key its B scale — so jumping around the wheel keeps the chosen colour.
+- Applies to every scale-using sequencer (Chord/Arp chords and arps are built from the scale's degrees, HR types,
+  Strings, Mono, followers). Defaults = today's behaviour (bit-exact with the current tests).
+- Labels show the flavour: `8A Am dor`. Matching (above) is computed from the actual notes: the mode's parent key on
+  the wheel (A dorian = the notes of 9B/6A … i.e. one step), so a "good" mark stays honest for modes; harmonic/melodic
+  minor and pentatonics map to their nearest wheel position (document the rule).
+- Saved per track (seqtracks.bin new version, oldest-version rule). The Model:Samples implementation is private and
+  not on this PC — built from scratch.
