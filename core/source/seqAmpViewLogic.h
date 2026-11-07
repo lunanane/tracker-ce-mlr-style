@@ -958,7 +958,7 @@ template <class C> void drawBack(C& c, const Follower& f)
     for (int i = 0; i < 5; i++)
         c.text(kX0 - 6, i == 0 ? kY0 + 7 : (i == 4 ? kY1 - 7 : yOf((float)kDbLines[i])), 1, 2 | 4, kDbText[i]);
     for (int i = 0; i < marks; i++)
-        c.text(mX[i], kY1 - 22, 1, 1 | 2, kMarkText[mIdx[i]]);
+        c.text(mX[i] < kX0 + 20 ? kX0 + 20 : mX[i], kY1 - 22, 1, 1 | 2, kMarkText[mIdx[i]]); // not on top of the -48 label
     c.text(kX1 - 4, kY1 - 22, 1, 4 | 2, "now");
 }
 
@@ -1026,7 +1026,7 @@ inline void makeLabels(const Follower& f, const bool* aud, Labels& lb)
         else
             snprintf(lb.lvl[ln], sizeof lb.lvl[ln], "%c %d", tag, (int)(db < 0 ? db - 0.5f : db + 0.5f));
     }
-    snprintf(lb.jog, sizeof lb.jog, "Jog: time scale, linear %d s / total %d s", (int)(kLinMs[sc] / 1000), (int)(kTotalMs[sc] / 1000));
+    snprintf(lb.jog, sizeof lb.jog, "Jog: zoom %d s / %d s", (int)(kLinMs[sc] / 1000), (int)(kTotalMs[sc] / 1000));
     const Info& in = f.info;
     if (in.playing)
         snprintf(lb.pat, sizeof lb.pat, "P%02d %02d/%02d", in.pattern, in.pos, in.len);
@@ -1042,7 +1042,8 @@ template <class C> void drawTexts(C& c, const bool* aud, const Labels& lb, const
     for (int ln = 0; ln < kLanes; ln++)
     {
         if (!aud[ln]) continue;
-        c.color(ln == kTracks ? seqpal::kTitle : seqpal::trackColor(ln));
+        const uint32_t tc = ln == kTracks ? seqpal::kTitle : seqpal::trackColor(ln);
+        c.color(strstr(lb.lvl[ln], "--") ? seqpal::dim(tc) : tc); // a silent track is off: its label is dimmed
         c.text(kX1 + 8, kY0 + 14 + ln * 28, 3, 2, lb.lvl[ln]);
     }
     c.color(seqpal::kTitle);
@@ -1052,8 +1053,11 @@ template <class C> void drawTexts(C& c, const bool* aud, const Labels& lb, const
     c.color(seqpal::kTitle);
     c.text(kX1 + 8, kY1 - 62, 1, 2, lb.pat);
     c.text(kX1 + 8, kY1 - 42, 1, 2, lb.bpm);
-    c.color(seqpal::kText);
-    c.text(kX1 + 8, kY1 - 22, 1, 2, hint);
+    if (hint[0]) // the screen button under the panel says Close already
+    {
+        c.color(seqpal::kText);
+        c.text(kX1 + 8, kY1 - 22, 1, 2, hint);
+    }
 }
 
 // C as in pitchtrace::draw (color, width, rect, lines, strip, textPhase, text, finish) plus subpixel(on): the strips between subpixel(true)
