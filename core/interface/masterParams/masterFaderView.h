@@ -57,10 +57,10 @@ inline void fillView(strFaderView& vw, const Snap& s)
             snprintf(b.name, sizeof(b.name), "%s", s.name[r]);
             snprintf(b.value, sizeof(b.value), "%s", s.value[r]);
             if (r == 0)
-                snprintf(b.note, sizeof(b.note), "%s", s.dialled[r] ? "dialled in with the fader (DISENGAGE restores the earlier level)"
+                snprintf(b.note, sizeof(b.note), "%s", s.dialled[r] ? "dialled in (DISENGAGE restores the earlier level)"
                                                                    : "level of the return (project value, saved with the project)");
             else
-                snprintf(b.note, sizeof(b.note), "%s", s.dialled[r] ? "dialled in with the fader (DISENGAGE restores the earlier value)"
+                snprintf(b.note, sizeof(b.note), "%s", s.dialled[r] ? "dialled in (DISENGAGE restores the earlier value)"
                                                                    : "project value (saved with the project)");
             snprintf(b.state, sizeof(b.state), "%s", kState[b.status]);
         }
@@ -85,7 +85,7 @@ inline void fillView(strFaderView& vw, const Snap& s)
                     hpFreqText(b.value, sizeof(b.value), s.hpCut);
                 else
                     snprintf(b.value, sizeof(b.value), "off");
-                snprintf(b.note, sizeof(b.note), "pad 1 = 60 Hz ... pad 8 = 5.1 kHz on the whole master   DISENGAGE = off");
+                snprintf(b.note, sizeof(b.note), "pad 1 = 60 Hz ... pad 8 = 5.1 kHz   DISENGAGE = off");
                 snprintf(b.state, sizeof(b.state), "%s", s.hpCut ? "ACTIVE" : "OFF");
             }
             else
@@ -94,7 +94,7 @@ inline void fillView(strFaderView& vw, const Snap& s)
                 b.engaged = s.hpRes != 1;
                 snprintf(b.name, sizeof(b.name), "Resonance");
                 snprintf(b.value, sizeof(b.value), "%d %%", seqbr::percentOf(s.hpRes));
-                snprintf(b.note, sizeof(b.note), "12 dB per octave, 0 .. 100 %%   saved with the project (beat repeat settings file)");
+                snprintf(b.note, sizeof(b.note), "12 dB per octave   saved with the project");
                 snprintf(b.state, sizeof(b.state), "%s", s.hpRes != 1 ? "DIALLED" : "PROJECT");
                 b.status = s.hpRes != 1 ? RS_DIALLED : RS_PROJECT;
             }

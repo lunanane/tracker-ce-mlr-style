@@ -39,6 +39,10 @@ void cutReleaseAll();                // leaving the layer: lets go of every held
                                      // reverse / rate / STOP of the tracks are NOT touched (plan 005 M5)
 void cutSyncAll();                   // SYNC ALL: forgets held pads / takes, queues the command (kept and retried until accepted)
 void cutPanic();                     // transport Stop: release holds and takes, then SYNC ALL (the next Play starts on the grid)
+void cutUpdate(uint32_t nowMs);      // the same with the clock of the main loop (ms): the deliberate two-pad loop is timed with it
 void cutUpdate();                    // once per main loop pass, any view: retries lost releases and a SYNC ALL that did not fit
+uint8_t cutEngagePercent(uint8_t slot); // plan 026: 0 = nothing to engage, 1..100 = two pads of the slot are held, the loop starts at 100
+void cutQuantDial(int dir);          // plan 026: one jog detent: finer (dir < 0) / coarser (dir > 0) jump quantise, off .. 1 bar, stops at the ends
+void cutMlrLoad(uint8_t quant, uint8_t slotA, uint8_t slotB); // project load: the saved quantise / slot tracks (no write is asked for)
 bool cutRecHeld();                   // a take is armed (Rec was pressed an odd number of times in the CUT layer)
 bool cutSyncPending();               // a SYNC ALL is waiting for room in the command queue

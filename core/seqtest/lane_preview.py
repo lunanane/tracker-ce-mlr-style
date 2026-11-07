@@ -26,7 +26,7 @@ def render(path, out):
     d0.rectangle([0, 0, W, 28], fill=(40, 40, 40, 255))
     d0.text((8, 6), "Session view (stock title bar)", fill=(160, 160, 160, 255))
     d0.rectangle([0, 425, W, H], fill=(30, 30, 30, 255))
-    labels = ["Assign 1", "Assign 2", "Help", "BeatRpt", "Q beat", "SYNC ALL", "", "CLIPS"]
+    labels = ["Assign 1", "Assign 2", "Help", "BeatRpt", "Q 1/4", "SYNC ALL", "", "CLIPS"]
     for i, t in enumerate(labels):
         d0.text((i * 100 + 50 - 4 * len(t), 445), t, fill=(150, 150, 150, 255))
     color = (255, 255, 255)

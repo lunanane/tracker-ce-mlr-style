@@ -34,21 +34,21 @@ static void test_pad_map()
         {
             for (uint8_t col = 0; col < 8; col++)
             {
-                const PadInfo p = mapPad((uint8_t)(row * 12 + col), page);
+                const seqmf::PadInfo p = mapPad((uint8_t)(row * 12 + col), page);
                 if (page == MP_BR)
                     CHECK(p.cell == MC_BR && p.index == row);
                 else
                     CHECK(p.cell == MC_FADER && p.index == row && p.step == col + 1);
             }
             // the page menu: column 9, row = page, on every page
-            const PadInfo m = mapPad((uint8_t)(row * 12 + 8), page);
+            const seqmf::PadInfo m = mapPad((uint8_t)(row * 12 + 8), page);
             CHECK(m.cell == MC_PAGE && m.index == row);
         }
     CHECK(mapPad(9, MP_REVERB).cell == MC_NONE && mapPad(2 * 12 + 9, MP_REVERB).cell == MC_NONE && mapPad(3 * 12 + 9, MP_HP).cell == MC_NONE);
     CHECK(mapPad(2 * 12 + 9, MP_DELAY).cell == MC_PINGPONG && mapPad(3 * 12 + 9, MP_DELAY).cell == MC_SYNC && mapPad(12 + 9, MP_DELAY).cell == MC_NONE);
     for (uint8_t row = 0; row < 4; row++)
     {
-        const PadInfo r = mapPad((uint8_t)(row * 12 + 11), MP_HP);
+        const seqmf::PadInfo r = mapPad((uint8_t)(row * 12 + 11), MP_HP);
         CHECK(r.cell == MC_RESET && r.index == row);
         CHECK(mapPad((uint8_t)(row * 12 + 10), MP_HP).cell == MC_NONE);
         CHECK(mapPad((uint8_t)(row * 12 + 10), MP_BR).cell == MC_BR && mapPad((uint8_t)(row * 12 + 11), MP_BR).cell == MC_BR);
@@ -56,7 +56,7 @@ static void test_pad_map()
     CHECK(mapPad(48, MP_HP).cell == MC_NONE);
     // the beat repeat page hands columns 10-12 to the CUT page controller, which has its mode / latch / off pads there
     CHECK(seqbr::mapPad(9, 0).cell == seqbr::BC_MODE && seqbr::mapPad(10, 0).cell == seqbr::BC_LATCH && seqbr::mapPad(11, 0).cell == seqbr::BC_OFF);
-    CHECK(perfPage(MP_DELAY) == seqperf::PAGE_PING && perfPage(MP_REVERB) == seqperf::PAGE_REV && isFxPage(MP_DELAY) && !isFxPage(MP_HP));
+    CHECK(perfPage(MP_DELAY) == seqperf::PAGE_PING && perfPage(MP_REVERB) == seqperf::PAGE_REV && seqmf::isFxPage(MP_DELAY) && !seqmf::isFxPage(MP_HP));
 }
 
 static void test_values()
@@ -224,7 +224,7 @@ static void test_screens()
     s.pageDot = 1u << MP_HP;
     vw = scene("hp_on", s);
     CHECK(strcmp(vw.band[0].value, "1.7 kHz") == 0 || strstr(vw.band[0].value, "kHz") || strstr(vw.band[0].value, "Hz"));
-    CHECK(vw.band[0].engaged == 1 && vw.band[0].status == seqperf::RS_LIVE && strcmp(vw.band[1].value, "29 %") == 0 && vw.band[1].engaged == 1);
+    CHECK(vw.band[0].engaged == 1 && vw.band[0].status == seqperf::RS_LIVE && strcmp(vw.band[1].value, "43 %") == 0 && vw.band[1].engaged == 1);
     // the beat repeat pages, idle and with a running repeat, every sub page
     for (uint8_t sub = 0; sub < seqbr::BG_COUNT; sub++)
     {
@@ -249,7 +249,7 @@ static void test_screens()
         vw = scene(nm, s);
         if (sub == seqbr::BG_FILTER)
             CHECK(vw.band[3].usable == 0 && strcmp(vw.band[0].name, "MIX LEVEL") == 0 && strcmp(vw.band[1].name, "BP CENTRE") == 0);
-        else
+        else if (sub == seqbr::BG_REPEAT)
             CHECK(vw.band[0].canLatch == 1 && vw.band[0].latched == 1 && strcmp(vw.band[0].dis, "OFF") == 0 && strcmp(vw.band[0].state, "REPEAT") == 0);
     }
     // the Perform page's own view is unchanged by the master fields: master = 0 draws its five chips

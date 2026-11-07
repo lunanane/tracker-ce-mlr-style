@@ -103,7 +103,10 @@ struct BrParams
 {
     uint8_t step[BP_COUNT];
     uint8_t mode;
-    uint8_t hpCut; // plan 024: master high-pass cutoff step 0 = off, 1 .. 8
+    // Plan 026: settings of the MLR page that share this sidecar (it is the file of the CUT page): jump quantise (seqcut::Quant), the tracks
+    // of slot A / B. Defaults beat (2), 0, 1. Saved only when changed (sidecar version 2); the defaults keep version 1.
+    uint8_t mlrQuant, mlrSlotA, mlrSlotB;
+    uint8_t hpCut; // plan 024: master high-pass cutoff step 0 = off, 1 .. 8 (sidecar version 3)
     uint8_t hpRes; // resonance step 1 .. 8
     BrParams() { reset(); }
     void reset()
@@ -111,9 +114,13 @@ struct BrParams
         for (int i = 0; i < BP_COUNT; i++)
             step[i] = defaultStep((Param)i);
         mode = beatrepeat::MODE_MIX;
+        mlrQuant = 2;
+        mlrSlotA = 0;
+        mlrSlotB = 1;
         hpCut = 0;
         hpRes = 1;
     }
+    bool mlrDefault() const { return mlrQuant == 2 && mlrSlotA == 0 && mlrSlotB == 1; }
     static uint8_t defaultStep(Param p)
     {
         switch (p)
@@ -133,10 +140,10 @@ struct BrParams
         for (int i = 0; i < BP_COUNT; i++)
             if (step[i] != defaultStep((Param)i))
                 return false;
-        return mode == beatrepeat::MODE_MIX && hpCut == 0 && hpRes == 1;
+        return mode == beatrepeat::MODE_MIX && mlrDefault() && v3Default();
     }
-    // the fields that did not exist in file version 1 are still at their defaults: the file is written as version 1
-    bool isV1() const
+    // the fields of file version 3 (plan 024) are still at their defaults
+    bool v3Default() const
     {
         return step[BP_MIX] == defaultStep(BP_MIX) && step[BP_BPC] == defaultStep(BP_BPC) && step[BP_BPW] == defaultStep(BP_BPW) && hpCut == 0 && hpRes == 1;
     }
@@ -160,14 +167,15 @@ struct BrParams
         return s;
     }
 
-    // ---- sidecar "seqbrpt.bin": frame of seqSidecarLogic.h, magic "SBRP" ----
-    // Version 1: payload = the 7 steps + mode (8 bytes). Version 2 (plan 024) appends 5 bytes: mix step, band-pass centre step, band-pass
-    // width step, master high-pass cutoff step (0 = off), resonance step. Oldest version that fits: a set whose new fields are all at
-    // their defaults is written as version 1 (older firmware keeps reading it); this reader takes both. A newer file than the reader is
-    // never rewritten (FRAME_NEWER).
+    // ---- sidecar "seqbrpt.bin": frame of seqSidecarLogic.h, magic "SBRP". Version 1: the 7 steps + mode (8 bytes). Version 2 (plan 026) adds the MLR
+    // page settings: quantise, slot A track, slot B track (11 bytes). Version 3 (plan 024) adds the beat repeat MIX level step, band-pass centre
+    // and width steps, the master high-pass cutoff step (0 = off) and resonance step (16 bytes).
+    // Oldest version that fits: a file whose newer fields are all at their defaults is written as version 1 (readable by every earlier firmware),
+    // version 2 when only the MLR settings differ, version 3 otherwise. The reader takes the bytes it knows and leaves the rest, a newer file
+    // than the reader is never rewritten (FRAME_NEWER).
     static const char* magic() { return "SBRP"; }
-    enum : uint8_t { kVersion = 2, kVersion1 = 1 };
-    enum : size_t { kPayload = 8, kPayload2 = 13, kFileMax = kPayload + seqsidecar::kOverhead, kFileMax2 = kPayload2 + seqsidecar::kOverhead };
+    enum : uint8_t { kVersion = 3 };
+    enum : size_t { kPayload = 8, kPayload2 = 11, kPayload3 = 16, kFileMax = kPayload2 + seqsidecar::kOverhead, kFileMax3 = kPayload3 + seqsidecar::kOverhead };
     void raw(uint8_t* p) const
     {
         p[0] = step[BP_AUTOGRID];
@@ -178,26 +186,29 @@ struct BrParams
         p[5] = step[BP_PITCH];
         p[6] = step[BP_DECAY];
         p[7] = mode;
-        p[8] = step[BP_MIX];
-        p[9] = step[BP_BPC];
-        p[10] = step[BP_BPW];
-        p[11] = hpCut;
-        p[12] = hpRes;
+        p[8] = mlrQuant;
+        p[9] = mlrSlotA;
+        p[10] = mlrSlotB;
+        p[11] = step[BP_MIX];
+        p[12] = step[BP_BPC];
+        p[13] = step[BP_BPW];
+        p[14] = hpCut;
+        p[15] = hpRes;
     }
     uint16_t hash() const
     {
-        uint8_t b[kPayload2];
+        uint8_t b[kPayload3];
         raw(b);
-        return seqsidecar::crc16(b, kPayload2);
+        return seqsidecar::crc16(b, kPayload3);
     }
     size_t save(uint8_t* buf, size_t cap) const
     {
-        const bool v1 = isV1();
-        if (cap < (size_t)(v1 ? kFileMax : kFileMax2))
+        if (cap < (size_t)kFileMax3)
             return 0;
         uint8_t* p = buf + seqsidecar::kHeader;
         raw(p);
-        return seqsidecar::frameWrite(buf, cap, magic(), v1 ? kVersion1 : kVersion, p, v1 ? kPayload : kPayload2);
+        const uint8_t ver = v3Default() ? (mlrDefault() ? 1 : 2) : 3; // oldest version that fits
+        return seqsidecar::frameWrite(buf, cap, magic(), ver, p, ver == 1 ? kPayload : (ver == 2 ? kPayload2 : kPayload3));
     }
     // false: missing / bad frame (nothing changed). *newer: written by a newer mod version (leave the file alone). A short payload keeps
     // the defaults for what is missing; a value out of range falls back to its own default.
@@ -218,16 +229,22 @@ struct BrParams
                 d.step[order[i]] = p[i];
         if (n > 7 && p[7] < beatrepeat::MODE_COUNT)
             d.mode = p[7];
-        if (v >= 2 && n >= kPayload2) // the fields of version 2; a version 1 file keeps their defaults whatever follows its 8 bytes
+        if (v >= 2 && n >= kPayload2 && p[8] < 7 && p[9] < 16 && p[10] < 16 && p[9] != p[10]) // 7 = seqcut::Q_COUNT
         {
-            static const Param order2[3] = { BP_MIX, BP_BPC, BP_BPW };
+            d.mlrQuant = p[8];
+            d.mlrSlotA = p[9];
+            d.mlrSlotB = p[10];
+        }
+        if (v >= 3 && n >= kPayload3) // the fields of version 3 (plan 024)
+        {
+            static const Param order3[3] = { BP_MIX, BP_BPC, BP_BPW };
             for (size_t i = 0; i < 3; i++)
-                if (p[8 + i] >= 1 && p[8 + i] <= 8)
-                    d.step[order2[i]] = p[8 + i];
-            if (p[11] <= 8)
-                d.hpCut = p[11];
-            if (p[12] >= 1 && p[12] <= 8)
-                d.hpRes = p[12];
+                if (p[11 + i] >= 1 && p[11 + i] <= 8)
+                    d.step[order3[i]] = p[11 + i];
+            if (p[14] <= 8)
+                d.hpCut = p[14];
+            if (p[15] >= 1 && p[15] <= 8)
+                d.hpRes = p[15];
         }
         *this = d;
         return true;

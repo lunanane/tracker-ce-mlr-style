@@ -54,7 +54,7 @@ class CutSessionLayer : public SessionLayer
     void info(char lines[4][48]) override
     {
         snprintf(lines[0], 48, "A: track %d   B: track %d", cutSlotTrack(0) + 1, cutSlotTrack(1) + 1);
-        snprintf(lines[1], 48, "Pads 1-16: jump, two = latched loop");
+        snprintf(lines[1], 48, "Pads 1-16: jump, hold two = loop; hold a pad = ratchet");
         snprintf(lines[2], 48, "STOP REV RATE RSYNC / GRID SECT REC MUTE");
         snprintf(lines[3], 48, "Help = pad legend   BeatRpt = beat repeat");
     }
@@ -127,6 +127,16 @@ class CutSessionLayer : public SessionLayer
         if (i != seqcut::kScreenButtonSyncAll)
             return false;
         snprintf(out, 12, "%s", laneViewAnyOffGrid() ? "[SYNC ALL]" : "SYNC ALL"); // brackets: some track is off the grid
+        return true;
+    }
+    // plan 026: the jog wheel dials the jump quantise (off, 1/32, 1/16, 1/8, 1/4, 1/2, 1 bar); the beat repeat pages keep their own pads
+    bool jog(int16_t value, bool shift) override
+    {
+        (void)shift;
+        if (cutBrActive())
+            return false;
+        if (value != 0)
+            cutQuantDial(value > 0 ? 1 : -1);
         return true;
     }
     bool arrow(ArrowDir dir, bool shift) override

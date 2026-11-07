@@ -373,7 +373,7 @@ static void test_br_sidecar()
     p.step[BP_VARIATION] = 5;
     p.mode = beatrepeat::MODE_INSERT;
     const size_t n = p.save(buf, sizeof(buf));
-    CHECK(n == (size_t)BrParams::kFileMax && memcmp(buf, "SBRP", 4) == 0 && buf[4] == 1);     // oldest version that fits: 1
+    CHECK(n == (size_t)BrParams::kPayload + seqsidecar::kOverhead && memcmp(buf, "SBRP", 4) == 0 && buf[4] == 1);     // oldest version that fits: 1
     BrParams q;
     bool newer = true;
     CHECK(q.load(buf, n, &newer) && !newer && q == p && q.hash() == p.hash());
@@ -398,7 +398,7 @@ static void test_br_sidecar()
     // a newer file is flagged and never read; a corrupt one and another magic are refused; nothing changes on a failure
     uint8_t nf[32];
     memcpy(nf, buf, n);
-    nf[4] = 3; // plan 024: version 2 is known now, the first newer one is 3
+    nf[4] = 4; // newer than the reader (the reader knows versions 1, 2 (plan 026) and 3 (plan 024))
     uint16_t c = seqsidecar::crc16(nf, seqsidecar::kHeader + BrParams::kPayload);
     nf[seqsidecar::kHeader + BrParams::kPayload] = (uint8_t)(c & 255);
     nf[seqsidecar::kHeader + BrParams::kPayload + 1] = (uint8_t)(c >> 8);
@@ -542,7 +542,7 @@ static void test_br_024()
     BrParams d;
     beatrepeat::Settings s = d.settings();
     CHECK(s.mix == 100 && s.bpHz == 20000 && s.bpTw == 12 && s.hpIdx == 0 && s.hpRes == 0);
-    CHECK(d.isDefault() && d.isV1());
+    CHECK(d.isDefault() && d.v3Default());
     BrParams p;
     p.step[BP_MIX] = 4;
     p.step[BP_BPC] = 5;
@@ -551,7 +551,7 @@ static void test_br_024()
     p.hpRes = 8;
     s = p.settings();
     CHECK(s.mix == 43 && s.bpHz == 3200 && s.bpTw == 36 && s.hpIdx == 90 && s.hpRes == 100);
-    CHECK(!p.isDefault() && !p.isV1());
+    CHECK(!p.isDefault() && !p.v3Default());
     CHECK(hpIdxOf(0) == 0 && hpIdxOf(1) == 13 && hpIdxOf(8) == 90);
     for (uint8_t st = 2; st <= 8; st++)
         CHECK(hpIdxOf(st) > hpIdxOf((uint8_t)(st - 1)) && hpIdxOf(st) <= seqfx::kHpMax);
@@ -595,40 +595,56 @@ static void test_br_024()
     CHECK(strcmp(legendCell(8, 2, ls).word, "FILT") == 0 && strcmp(legendCell(7, 1, ls).word, "open") == 0 && strcmp(legendCell(0, 2, ls).word, "0.3") == 0);
     CHECK(strcmp(legendCell(0, 0, ls).word, "0") == 0 && strcmp(legendCell(7, 0, ls).word, "100") == 0 && strcmp(legendCell(3, 3, ls).word, "-") == 0);
     CHECK(strcmp(pageName(BG_FILTER), "FILTER") == 0);
-    // the sidecar: version 1 while the new fields are at their defaults, version 2 once one differs; both load
-    uint8_t fb[BrParams::kFileMax2 + 8];
+    // the sidecar: the oldest version that fits - 1 while the newer fields are at their defaults, 2 when only the MLR settings differ (plan 026),
+    // 3 once a beat repeat / high-pass field differs (plan 024); all of them load
+    uint8_t fb[BrParams::kFileMax3 + 8];
     BrParams old;
     old.step[BP_CHANCE] = 6;
     old.mode = beatrepeat::MODE_GATE;
     size_t n = old.save(fb, sizeof(fb));
-    CHECK(n == (size_t)BrParams::kFileMax && fb[4] == 1);
+    CHECK(n == (size_t)BrParams::kPayload + seqsidecar::kOverhead && fb[4] == 1);
     BrParams ld;
     CHECK(ld.load(fb, n) && ld == old && ld.step[BP_MIX] == 8 && ld.step[BP_BPC] == 8 && ld.step[BP_BPW] == 3 && ld.hpCut == 0 && ld.hpRes == 1);
+    BrParams m2 = old;
+    m2.mlrQuant = 4;
+    n = m2.save(fb, sizeof(fb));
+    CHECK(n == (size_t)BrParams::kFileMax && fb[4] == 2);
+    BrParams l2;
+    CHECK(l2.load(fb, n) && l2 == m2 && l2.mlrQuant == 4 && l2.step[BP_MIX] == 8 && l2.hpCut == 0);
     n = p.save(fb, sizeof(fb));
-    CHECK(n == (size_t)BrParams::kFileMax2 && memcmp(fb, "SBRP", 4) == 0 && fb[4] == 2);
+    CHECK(n == (size_t)BrParams::kFileMax3 && memcmp(fb, "SBRP", 4) == 0 && fb[4] == 3);
     bool newer = true;
     BrParams q;
     CHECK(q.load(fb, n, &newer) && !newer && q == p && q.hash() == p.hash() && q.hpCut == 8 && q.hpRes == 8 && q.step[BP_BPW] == 8);
-    CHECK(p.save(fb, BrParams::kFileMax2 - 1) == 0 && old.save(fb, BrParams::kFileMax) == (size_t)BrParams::kFileMax);
-    // a version 2 file with a short payload (8 bytes): the new fields stay at their defaults
-    uint8_t pay[13];
+    BrParams m3 = p;
+    m3.mlrQuant = 5;
+    m3.mlrSlotA = 3;
+    n = m3.save(fb, sizeof(fb));
+    BrParams l3;
+    CHECK(fb[4] == 3 && l3.load(fb, n) && l3 == m3 && l3.mlrQuant == 5 && l3.mlrSlotA == 3 && l3.hpCut == 8);
+    CHECK(p.save(fb, BrParams::kFileMax3 - 1) == 0);
+    // a version 3 file with a payload of only 11 bytes (the MLR fields): the newer fields stay at their defaults
+    uint8_t pay[16];
     p.raw(pay);
-    uint8_t fr[40];
-    size_t fn = seqsidecar::frameWrite(fr, sizeof(fr), "SBRP", 2, pay, 8);
+    uint8_t fr[48];
+    size_t fn = seqsidecar::frameWrite(fr, sizeof(fr), "SBRP", 3, pay, 11);
     BrParams sh;
     CHECK(sh.load(fr, fn) && sh.step[BP_MIX] == 8 && sh.hpCut == 0 && sh.step[BP_DECAY] == p.step[BP_DECAY]);
     // out of range values fall back one by one
-    pay[8] = 0;
-    pay[9] = 3;
-    pay[10] = 9;
-    pay[11] = 9;
-    pay[12] = 0;
-    fn = seqsidecar::frameWrite(fr, sizeof(fr), "SBRP", 2, pay, 13);
+    pay[11] = 0;
+    pay[12] = 3;
+    pay[13] = 9;
+    pay[14] = 9;
+    pay[15] = 0;
+    fn = seqsidecar::frameWrite(fr, sizeof(fr), "SBRP", 3, pay, 16);
     BrParams bad;
     CHECK(bad.load(fr, fn) && bad.step[BP_MIX] == 8 && bad.step[BP_BPC] == 3 && bad.step[BP_BPW] == 3 && bad.hpCut == 0 && bad.hpRes == 1);
-    // a version 1 file is never read for the new fields, even when it carries more bytes
-    fn = seqsidecar::frameWrite(fr, sizeof(fr), "SBRP", 1, pay, 13);
-    pay[9] = 4;
+    // a version 1 or 2 file is never read for the version 3 fields, even when it carries more bytes
+    pay[12] = 4;
+    fn = seqsidecar::frameWrite(fr, sizeof(fr), "SBRP", 2, pay, 16);
+    BrParams v2;
+    CHECK(v2.load(fr, fn) && v2.step[BP_BPC] == 8);
+    fn = seqsidecar::frameWrite(fr, sizeof(fr), "SBRP", 1, pay, 16);
     BrParams v1;
     CHECK(v1.load(fr, fn) && v1.step[BP_BPC] == 8);
     // the pre-roll switch of the layer: on with the beat repeat pads shown, off when leaving
