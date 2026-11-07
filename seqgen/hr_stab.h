@@ -23,6 +23,8 @@ class HrStab : public HrScript {
   void start() override { pos_ = 0; }
   void stop() override { stopVoices(); }
   bool live() const override { return latched_ != 0; }
+  bool camKey(cam::Scale& s) const override;
+  void camChanged() override { publishScale(); }
   bool hasLatch() const override { return true; }
   bool latch() const override { return !hold_; }
   void setLatch(bool on) override { hold_ = on ? 0 : 1; if (!on) unlatchRoot(); }

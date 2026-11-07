@@ -67,6 +67,12 @@ class Engine
     bool latchOn(uint8_t track) const;
     void applyParam(uint8_t track, uint8_t idx, int value); // direct (audio context / host tests)
 
+    // ---- plan 028: Camelot key of every track (display only, main loop). One critical section; the mark of each track against the others
+    // (seqgen::cam::marks). The lead (plan 011, not built) will be passed as the reference when it exists: leadTrack_ = 0xFF means none.
+    void camSnapshot(seqgen::cam::Snap out[seqlogic::kTracks], uint8_t marks[seqlogic::kTracks]) const;
+    uint8_t camA(uint8_t track) const { return track < kTracks ? t_[track].camA : 0; }
+    uint8_t camB(uint8_t track) const { return track < kTracks ? t_[track].camB : 0; }
+
     // ---- Plinky type (plan 010 B): one track at a time plays the voice ----
     uint8_t plinkyOwner(bool withPending = true) const; // the Plinky track (or the one about to become it), 0xFF = none
     const seqplinky::Setup& plinkySetup() const { return pl_; }
@@ -97,8 +103,10 @@ class Engine
     // HYPER_RASP type (so older mod versions can still read the file) and version 2 otherwise. The HR block is the settings of the
     // track's HYPER_RASP script.
     // Version 3 (plan 025) adds the per-track Latch bytes after the HR trailer; it is written only when a Latch differs from the type's default.
-    enum { kSidecarVersionV1 = 1, kSidecarVersion = 2, kSidecarVersionV3 = 3,
-           kSidecarMax = 8 + seqlogic::kTracks * (5 + seqgen::ChordArp::kSerialSize + seqgen::Mono::kSerialSize + seqgen::HrScript::kMaxSerial) + 2 };
+    // Version 4 (plan 028) adds one A / B type byte per track (A | B << 4) after the Latch bytes; written only when a track that uses a scale has
+    // a type other than Natural (the oldest version that fits is written, all older versions still load).
+    enum { kSidecarVersionV1 = 1, kSidecarVersion = 2, kSidecarVersionV3 = 3, kSidecarVersionV4 = 4,
+           kSidecarMax = 8 + seqlogic::kTracks * (5 + seqgen::ChordArp::kSerialSize + seqgen::Mono::kSerialSize + seqgen::HrScript::kMaxSerial) + 2 + 2 * seqlogic::kTracks };
     size_t saveState(uint8_t* buf, size_t cap) const; // 0 = buffer too small
     bool loadState(const uint8_t* buf, size_t len);   // false = invalid frame (nothing changed); a bad track block only turns that track Off
     void resetState();                                // all tracks Off, fresh state
@@ -171,6 +179,7 @@ class Engine
         seqlogic::PadLatch pl; // plan 025: engine latch (Chord/Arp, Strings, HR Bass)
         uint8_t latch;      // engine latch on
         bool quiet;         // latched Chord/Arp paused by Stop (silenced, resumes with Play)
+        uint8_t camA, camB; // plan 028: A / B scale type (index into the side's list, 0 = Natural), pushed to the generators by applyCam
     };
 
     bool push(const Cmd& c);
@@ -196,6 +205,8 @@ class Engine
     int getById(const Track& t, uint8_t id) const;
     void setById(uint8_t track, uint8_t id, int v);
     void applyLatch(uint8_t track, bool on);
+    void applyCam(uint8_t track);
+    void setCam(uint8_t track, bool minor, int v);
     void latchRelease(uint8_t track);
     bool plinkyNoteHeld(uint8_t note, uint8_t exceptPad) const;
     void createHr(uint8_t track, uint8_t type);
@@ -218,6 +229,7 @@ class Engine
     uint8_t idleCount_;
     uint32_t usAcc_;
     uint32_t clockSilentUs_;
+    uint8_t leadTrack_ = 0xFF; // plan 011: the lead sequencer, the reference of the match marks (none yet)
     uint32_t epoch_; // bumped before every call into a generator: events of one call form one simultaneous group
 
     // record: planner + queue audio -> main

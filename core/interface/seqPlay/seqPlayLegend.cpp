@@ -121,9 +121,19 @@ void cSeqPlayLegend::update()
     if (view->mode == SeqPlayViewData::PARAMS)
     {
         // plan 025: the sequencer settings page, one display stage (its own control, drawn below the legend control)
-        seqparams::Palette pal = { th.backgroundColor, th.grey_22, 0x555555, th.white, th.cyan, th.yellow, 0x000000, th.cyan };
+        seqparams::Palette pal = { th.backgroundColor, th.grey_22, 0x555555, th.white, th.cyan, th.yellow, 0x000000, th.cyan,
+                                   seqwheel::markColor(th, view->keyMark, th.white) };
         PlinkyCtx c;
         seqparams::draw(c, view->prm, pal);
+        return;
+    }
+
+    if (view->mode == SeqPlayViewData::WHEEL)
+    {
+        // plan 028: the Camelot wheel, its own display stage (worst case measured by test_wheel_draw)
+        seqwheel::Palette pal = { th.backgroundColor, th.grey_22, th.white, 0x000000, th.cyan, th.orange, th.white, th.green, th.yellow, th.red };
+        PlinkyCtx c;
+        seqwheel::draw(c, view->wheel, pal);
         return;
     }
 
@@ -237,6 +247,11 @@ void cSeqPlayLegend::update()
     API_COLOR(th.white);
     API_CMD_TEXT(kLegendX, (int16_t)(kLegendY - 27), font3, OPT_CENTERY, cap);
     API_CMD_TEXT(kLegendX, (int16_t)(kLegendY - 9), font1, OPT_CENTERY, seqplay::legendHelp(st));
+    if (view->key[0]) // plan 028: the track's key and its match colour
+    {
+        API_COLOR(seqwheel::markColor(th, view->keyMark, th.white));
+        API_CMD_TEXT(kLegendX, (int16_t)(kLegendY - 44), font3, OPT_CENTERY, view->key);
+    }
     API_COLOR(0x909090); // a hint, not a focus: yellow is reserved for "where you are" (docs/seq-ui-colours.md)
     API_CMD_TEXT((int16_t)(kLegendX + 12 * kLegendCellW), (int16_t)(kLegendY - 44), font1, OPT_CENTERY | OPT_RIGHTX, "tap track again to close");
     API_COLOR(th.white);

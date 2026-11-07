@@ -471,7 +471,7 @@ static void test_legend_state()
     CHECK(strcmp(rootName(1, 0, nb), "C#m") == 0); // kCam[1][0] = 61, minor row
     CHECK(strcmp(rootName(2, 5, nb), "A#") == 0);   // 70, major row
     CHECK(rootName(4, 0, nb)[0] == 0);
-    CHECK(strcmp(legendCell(st, 0, 1).txt, "C#m") == 0 && legendCell(st, 0, 1).zone == Z_NOTE);
+    CHECK(strcmp(legendCell(st, 0, 1).txt, "12A C#m") == 0 && legendCell(st, 0, 1).zone == Z_NOTE); // plan 028: Camelot position + key
     // Play page: the page pad (no tab is on); an edit page: its tab in column 11 is the one pad that is on
     int onPlay = 0;
     for (uint8_t r = 0; r < 4; r++)
@@ -654,7 +654,7 @@ static void test_hr_legend()
             for (uint8_t c = 0; c < 12; c++)
             {
                 LegendCell lc = legendCell(st, c, r);
-                CHECK(strlen(lc.txt) <= 6);
+                CHECK(strlen(lc.txt) <= 7); // plan 028: the Camelot root labels ("11A F#m") are seven characters
                 CHECK(lc.zone <= Z_HOLD);
                 if (lc.txt[0]) words++;
                 CHECK(strcmp(lc.txt, snap.txt[r * 12 + c]) == 0 && lc.zone == snap.zone[r * 12 + c]);
@@ -731,7 +731,7 @@ static void test_legend_words_and_captions()
                 for (uint8_t c = 0; c < 12; c++)
                 {
                     LegendCell lc = legendCell(st, c, r);
-                    CHECK(strlen(lc.txt) <= 6);
+                    CHECK(strlen(lc.txt) <= 7); // plan 028: the Camelot root labels
                     for (const char* bad : kBad) CHECK(strcmp(lc.txt, bad) != 0);
                     if (lc.txt[0]) labels++;
                 }

@@ -24,6 +24,7 @@ class HrStepFollow : public HrScript {
   void start() override { startPlayback(); }
   void stop() override { stopPlayback(); }
   void silence() override { stopPlayback(); stopSounding(); }
+  bool camKey(cam::Scale& s) const override { return busKeyScale(s); }
   bool live() const override { return (playing_ && nLit_ != 0) || nSounding_ != 0; }  // running AND a degree set
   int getParam(int id) const override;
   void setParam(int id, int v) override;
@@ -38,7 +39,7 @@ class HrStepFollow : public HrScript {
  private:
   enum { kSteps = 8, kNoteRows = 4, kMinNote = 12, kMaxNote = 120 };
   struct Lit { int16_t degree; uint8_t mask; };  // mask bit c-1 = step c; entries kept sorted by degree, mask never 0
-  void context(const uint8_t** scale, int* n, int* root) const;
+  void context(uint8_t buf[12], const uint8_t** scale, int* n, int* root) const;  // buf holds the scale (the script's own A / B type applied)
   int noteForDegree(int degree) const;
   bool isTonic(int degree) const;
   bool windowFits(int base) const;

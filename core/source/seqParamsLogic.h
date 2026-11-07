@@ -23,9 +23,9 @@ using seqlogic::TYPE_MONO;
 using seqlogic::TYPE_PLINKY;
 
 // ids beyond the generators' own (engine settings)
-enum : uint8_t { ID_LATCH = 0xF0, ID_PL_ROOT = 0xF1, ID_PL_SCALE = 0xF2, ID_PL_OCTAVE = 0xF3, ID_PL_INTERVAL = 0xF4 };
+enum : uint8_t { ID_LATCH = 0xF0, ID_PL_ROOT = 0xF1, ID_PL_SCALE = 0xF2, ID_PL_OCTAVE = 0xF3, ID_PL_INTERVAL = 0xF4, ID_CAM_A = 0xF5, ID_CAM_B = 0xF6 };
 enum Fmt : uint8_t { F_NUM = 0, F_SIGN, F_LIST, F_NOTE, F_PC, F_CHORD, F_SCALE, F_RATE, F_MSPEED };
-enum { kMaxCells = 7, kMaxSections = 4, kMaxParams = 24 };
+enum { kMaxCells = 7, kMaxSections = 4, kMaxParams = 25 };
 
 // name, generator id, range, default, text format, list (index into lists(), shows list[v - mn])
 struct Desc
@@ -50,7 +50,7 @@ struct Tab
 enum List : uint8_t
 {
     L_NONE = 0, L_ONOFF, L_CA_TYPE, L_CA_SPEED, L_CA_DIR, L_CA_MODE, L_GATE, L_QUAL, L_STAB_CHORD, L_ROLE, L_HR_TYPE, L_HR_MODE, L_HR_SPEED, L_HR_DIR,
-    L_AS_DIR, L_OCT3, L_LOCK, L_BEAT, L_COUNT
+    L_AS_DIR, L_OCT3, L_LOCK, L_BEAT, L_CAM_A, L_CAM_B, L_COUNT
 };
 inline const char* const* lists(uint8_t l)
 {
@@ -72,12 +72,17 @@ inline const char* const* lists(uint8_t l)
     static const char* const kOct3[] = { "-1", "0", "+1" };
     static const char* const kLock[] = { "Free", "Lock" };
     static const char* const kBeat[] = { "Now", "Beat" };
+    static const char* const kCamA[] = { "Natural", "Dorian", "Phrygian", "Penta", "Blues", "Harm min" }; // seqgen/camelot.h typeScale(true, ..)
+    static const char* const kCamB[] = { "Natural", "Lydian", "Mixolyd", "Penta" };                         // typeScale(false, ..)
     static const char* const* const k[L_COUNT] = { k0, kOnOff, kCaType, kCaSpeed, kCaDir, kCaMode, kGate, kQual, kStabChord, kRole, kHrType, kHrMode,
-                                                   kHrSpeed, kHrDir, kAsDir, kOct3, kLock, kBeat };
+                                                   kHrSpeed, kHrDir, kAsDir, kOct3, kLock, kBeat, kCamA, kCamB };
     return k[l < L_COUNT ? l : 0];
 }
 
 #define D(name, id, mn, mx, def, fmt, list) { name, (uint8_t)(id), mn, mx, def, fmt, list }
+// plan 028: the two scale type cells (Camelot A side = minor keys, B side = major keys)
+#define CAM_A D("A type", ID_CAM_A, 0, 5, 0, F_LIST, L_CAM_A)
+#define CAM_B D("B type", ID_CAM_B, 0, 3, 0, F_LIST, L_CAM_B)
 // ---- Chord / Arp (c31 page 3) ----
 inline const Tab& tabChordArp()
 {
@@ -86,15 +91,17 @@ inline const Tab& tabChordArp()
         D("Type", C::P_SEL_TYPE, 1, 4, 1, F_LIST, L_CA_TYPE), D("Speed", C::P_SEL_SPEED, 1, 10, 1, F_LIST, L_CA_SPEED), D("Dir", C::P_SEL_DIR, 1, 10, 1, F_LIST, L_CA_DIR),
         D("Size", C::P_SEL_SIZE, 2, 5, 5, F_NUM, 0), D("Chord", C::P_SEL_MOD, 1, 15, 1, F_CHORD, 0), D("Octaves", C::P_ORANGE, 1, 4, 1, F_NUM, 0),
         D("Latch", seqparams::ID_LATCH, 0, 1, 0, F_LIST, L_ONOFF),
-        D("Oct", C::P_KOCT, -1, 1, 0, F_SIGN, 0), D("Inv", C::P_INV, -6, 6, 0, F_SIGN, 0), D("Transp", C::P_TPOSE, -24, 24, 0, F_SIGN, 0),
         D("Mode", C::P_PMODE, 1, 3, 1, F_LIST, L_CA_MODE), D("Lock key", C::P_LOCK_ROOT, 54, 65, 60, F_PC, 0), D("Minor", C::P_LOCK_MINOR, 0, 1, 0, F_LIST, L_ONOFF),
-        D("Groove", C::P_SEL_GROOVE, 1, 16, 1, F_NUM, 0), D("Velocity", C::P_SEL_VG, 1, 72, 1, F_NUM, 0), D("Lane", C::P_LANE, 0, 36, 0, F_NUM, 0),
+        CAM_A, CAM_B,
+        D("Oct", C::P_KOCT, -1, 1, 0, F_SIGN, 0), D("Inv", C::P_INV, -6, 6, 0, F_SIGN, 0), D("Transp", C::P_TPOSE, -24, 24, 0, F_SIGN, 0),
+        D("Velocity", C::P_SEL_VG, 1, 72, 1, F_NUM, 0), D("Lane", C::P_LANE, 0, 36, 0, F_NUM, 0),
         D("Swing", C::P_SWING, 0, 3, 0, F_NUM, 0), D("Gate", C::P_GATE, 0, 2, 0, F_LIST, L_GATE),
+        D("Groove", C::P_SEL_GROOVE, 1, 16, 1, F_NUM, 0),
         D("Param", C::P_PON, 0, 1, 0, F_LIST, L_ONOFF), D("Arch", C::P_PARCH, 1, 4, 1, F_NUM, 0), D("Down", C::P_PW0, 0, 3, 2, F_NUM, 0),
         D("8th", C::P_PW1, 0, 3, 1, F_NUM, 0), D("16th", C::P_PW2, 0, 3, 0, F_NUM, 0),
     };
-    static const Sec s[] = { { "Play", 7 }, { "Pitch", 6 }, { "Feel", 5 }, { "Groove", 5 } };
-    static const Tab t = { 4, 23, s, d };
+    static const Sec s[] = { { "Play", 7 }, { "Key", 5 }, { "Shape", 7 }, { "Groove", 6 } };
+    static const Tab t = { 4, 25, s, d };
     return t;
 }
 // ---- Mono (c31 page 4) ----
@@ -105,9 +112,10 @@ inline const Tab& tabMono()
         D("Speed", M::P_SPEED, 1, 12, 8, F_MSPEED, 0), D("Tie", M::P_TIE, 0, 1, 0, F_LIST, L_ONOFF), D("Pages", M::P_NP, 1, 8, 1, F_NUM, 0),
         D("Loop in", M::P_LSTART, 1, 16, 1, F_NUM, 0), D("Loop out", M::P_LEND, 1, 16, 16, F_NUM, 0),
         D("Window", M::P_WIN, -40, 40, 0, F_SIGN, 0), D("Transp", M::P_TPOSE, -24, 24, 0, F_SIGN, 0), D("Velocity", M::P_VG, 1, 72, 1, F_NUM, 0),
+        CAM_A, CAM_B,
     };
-    static const Sec s[] = { { "Time", 5 }, { "Pitch", 3 } };
-    static const Tab t = { 2, 8, s, d };
+    static const Sec s[] = { { "Time", 5 }, { "Pitch", 5 } };
+    static const Tab t = { 2, 10, s, d };
     return t;
 }
 // ---- Strings (the PolySynth played from the pads) ----
@@ -129,18 +137,18 @@ inline const Tab& tabStabs(bool arp)
         D("Octave", S::P_OCTAVE, -2, 2, 0, F_SIGN, 0), D("Transp", S::P_TRANSP, -12, 12, 0, F_SIGN, 0), D("Velocity", S::P_VEL, 1, 127, 100, F_NUM, 0),
         D("Rate", S::P_RATE, 1, 24, 6, F_RATE, 0),
         D("Pattern", S::P_PATTERN, 1, 10, 1, F_NUM, 0), D("Chord", S::P_CHORD, 1, 8, 1, F_LIST, L_STAB_CHORD), D("Quality", S::P_QUALITY, 1, 2, 1, F_LIST, L_QUAL),
-        D("Role", S::P_ROLE, 1, 2, 1, F_LIST, L_ROLE), D("Latch", ID_LATCH, 0, 1, 1, F_LIST, L_ONOFF),
+        D("Role", S::P_ROLE, 1, 2, 1, F_LIST, L_ROLE), D("Latch", ID_LATCH, 0, 1, 1, F_LIST, L_ONOFF), CAM_A, CAM_B,
     };
     static const Desc dStab[] = {
         D("Octave", S::P_OCTAVE, -2, 2, 0, F_SIGN, 0), D("Transp", S::P_TRANSP, -12, 12, 0, F_SIGN, 0), D("Velocity", S::P_VEL, 1, 127, 100, F_NUM, 0),
         D("Rate", S::P_RATE, 1, 24, 6, F_RATE, 0),
         D("Pattern", S::P_PATTERN, 1, 10, 3, F_NUM, 0), D("Chord", S::P_CHORD, 1, 8, 1, F_LIST, L_STAB_CHORD), D("Quality", S::P_QUALITY, 1, 2, 1, F_LIST, L_QUAL),
-        D("Latch", ID_LATCH, 0, 1, 1, F_LIST, L_ONOFF),
+        D("Latch", ID_LATCH, 0, 1, 1, F_LIST, L_ONOFF), CAM_A, CAM_B,
     };
-    static const Sec sArp[] = { { "Sound", 4 }, { "Pattern", 5 } };
-    static const Sec sStab[] = { { "Sound", 4 }, { "Pattern", 4 } };
-    static const Tab ta = { 2, 9, sArp, dArp };
-    static const Tab ts = { 2, 8, sStab, dStab };
+    static const Sec sArp[] = { { "Sound", 4 }, { "Pattern", 7 } };
+    static const Sec sStab[] = { { "Sound", 4 }, { "Pattern", 6 } };
+    static const Tab ta = { 2, 11, sArp, dArp };
+    static const Tab ts = { 2, 10, sStab, dStab };
     return arp ? ta : ts;
 }
 inline const Tab& tabArpSeq()
@@ -165,10 +173,10 @@ inline const Tab& tabHrChordArp()
         D("Mode", H::P_MODE, 1, 2, 1, F_LIST, L_HR_MODE), D("Speed", H::P_SPEED, 1, 4, 1, F_LIST, L_HR_SPEED), D("Dir", H::P_DIR, 1, 4, 1, F_LIST, L_HR_DIR),
         D("Groove", H::P_GROOVE, 1, 12, 1, F_NUM, 0), D("Gate", H::P_GATE, 1, 16, 1, F_NUM, 0),
         D("Key lock", H::P_KEYLOCK, 1, 2, 1, F_LIST, L_LOCK), D("Key", H::P_KEY, 0, 11, 0, F_PC, 0), D("Scale", H::P_SCALE, 1, 2, 1, F_LIST, L_QUAL),
-        D("Start", H::P_QSTART, 1, 2, 1, F_LIST, L_BEAT),
+        D("Start", H::P_QSTART, 1, 2, 1, F_LIST, L_BEAT), CAM_A, CAM_B,
     };
-    static const Sec s[] = { { "Chord", 7 }, { "Arp", 5 }, { "Key", 4 } };
-    static const Tab t = { 3, 16, s, d };
+    static const Sec s[] = { { "Chord", 7 }, { "Arp", 5 }, { "Key", 6 } };
+    static const Tab t = { 3, 18, s, d };
     return t;
 }
 inline const Tab& tabBass()
@@ -176,10 +184,10 @@ inline const Tab& tabBass()
     using B = seqgen::HrBass;
     static const Desc d[] = {
         D("Octave", B::P_OCTAVE, -2, 2, 0, F_SIGN, 0), D("Dir", B::P_DIR, 1, 4, 1, F_NUM, 0), D("Groove", B::P_GROOVE, 1, 12, 1, F_NUM, 0),
-        D("Latch", ID_LATCH, 0, 1, 0, F_LIST, L_ONOFF),
+        D("Latch", ID_LATCH, 0, 1, 0, F_LIST, L_ONOFF), CAM_A, CAM_B,
     };
-    static const Sec s[] = { { "Bass", 4 } };
-    static const Tab t = { 1, 4, s, d };
+    static const Sec s[] = { { "Bass", 6 } };
+    static const Tab t = { 1, 6, s, d };
     return t;
 }
 inline const Tab& tabEuclid()
@@ -211,12 +219,14 @@ inline const Tab& tabStepFollow()
     using F = seqgen::HrStepFollow;
     static const Desc d[] = {
         D("Rate", F::P_DIV, 1, 24, 6, F_RATE, 0), D("Velocity", F::P_VEL, 1, 127, 100, F_NUM, 0), D("Octave", F::P_OCTAVE, -2, 2, 0, F_SIGN, 0),
-        D("Start", F::P_START, 1, 8, 1, F_NUM, 0), D("End", F::P_END, 1, 8, 8, F_NUM, 0),
+        D("Start", F::P_START, 1, 8, 1, F_NUM, 0), D("End", F::P_END, 1, 8, 8, F_NUM, 0), CAM_A, CAM_B,
     };
-    static const Sec s[] = { { "Follow", 5 } };
-    static const Tab t = { 1, 5, s, d };
+    static const Sec s[] = { { "Follow", 7 } };
+    static const Tab t = { 1, 7, s, d };
     return t;
 }
+#undef CAM_A
+#undef CAM_B
 #undef D
 
 // the table of a sequencer type; nullptr for Off
@@ -316,12 +326,14 @@ struct Model
     uint8_t track;  // 1..16
     uint8_t sec, idx;
     int8_t v[kMaxParams];
+    char key[12];   // plan 028: the track's key as its Camelot label ("8A Am"), empty = none
     Model() { memset(this, 0, sizeof(*this)); }
 };
 
 struct Palette
 {
     uint32_t bg, panel, bar, text, section, accent, onAccent, fill;
+    uint32_t mark; // colour of the key text (the match colour, plan 028)
 };
 
 enum { kPanelY0 = 30, kPanelY1 = 424, kHeadY = 41, kRowY0 = 56, kRowH = 52, kRowStep = 56, kBoxX0 = 8, kBoxX1 = 792, kCellX0 = 112, kCellStep = 96,
@@ -368,6 +380,11 @@ template <class C> void draw(C& c, const Model& m, const Palette& p)
     snprintf(buf, sizeof buf, "T%d  %s", m.track, seqplay::typeName(m.type));
     c.text(kBoxX0 + 4, kHeadY, 3, 2, buf);
     c.text(kBoxX1, kHeadY, 1, 2 | 4, "Arrows move, jog edits, Del resets");
+    if (m.key[0])
+    {
+        c.color(p.mark);
+        c.text(kBoxX0 + 250, kHeadY, 3, 2, m.key);
+    }
     flat = 0;
     for (int s = 0; s < tb->nSec; s++)
         for (int i = 0; i < tb->sec[s].n; i++, flat++)

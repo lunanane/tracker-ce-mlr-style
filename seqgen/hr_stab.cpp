@@ -78,12 +78,12 @@ void HrStab::ageVoices() {
 void HrStab::scaleContext(uint8_t* scale, int* n, int* root) const {
   const HrBus& b = bus();
   int r = b.root >= 0 ? b.root : 60;
-  if (b.nScale == 0) {
+  const int ns = busScale(scale);
+  if (ns == 0) {
     for (int i = 0; i < 12; ++i) scale[i] = (uint8_t)((r + i) % 12);
     *n = 12;
   } else {
-    for (int i = 0; i < b.nScale; ++i) scale[i] = b.scale[i];
-    *n = b.nScale;
+    *n = ns;
   }
   *root = r;
 }
@@ -155,17 +155,18 @@ void HrStab::revoice() {
 void HrStab::publishScale() {
   if (arp() && role_ != ROLE_LEADER) return;
   if (!latched_) return;
-  static const uint8_t kMaj[7] = {0, 2, 4, 5, 7, 9, 11}, kMin[7] = {0, 2, 3, 5, 7, 8, 10};
-  const uint8_t* iv = quality_ == 2 ? kMin : kMaj;
   int tonic = (latched_ - 1) % 12;
-  uint16_t sig = (uint16_t)(1 + tonic * 2 + (quality_ == 2 ? 1 : 0));
+  uint16_t sig = (uint16_t)(1 + tonic * 2 + (quality_ == 2 ? 1 : 0) + 25 * camA_ + 150 * camB_);
   if (sig == published_) return;
   published_ = sig;
-  if (bus_) {
-    uint8_t pcs[7];
-    for (int i = 0; i < 7; ++i) pcs[i] = (uint8_t)((tonic + iv[i]) % 12);
-    bus_->setScale(pcs, 7);
-  }
+  if (bus_) bus_->setKey(tonic, quality_ == 2, camA_, camB_);
+}
+
+bool HrStab::camKey(cam::Scale& s) const {
+  if (follower()) return busKeyScale(s);
+  if (!latched_) return false;
+  cam::resolve(s, (latched_ - 1) % 12, quality_ == 2, camA_, camB_);
+  return true;
 }
 
 void HrStab::publishRoot(int pc) {
@@ -413,11 +414,12 @@ void HrStab::legend(int col, int row, HrCell& c) const {
 }
 
 void HrStab::title(char* out, size_t n) const {
-  // "ARP LINES  C# min  cinquillo  add9  1/16  Oct -2  Vel 100  Tran +12  Follow" (Oct, Tran: only when not 0)
+  // "ARP LINES  12A C#m  cinquillo  add9  1/16  Oct -2  Vel 100  Tran +12  Follow" (Oct, Tran: only when not 0)
   int k = hrAppend(out, n, 0, "%s  ", arp() ? "ARP LINES" : "CHORD STABS");
-  if (!latched_) k = hrAppend(out, n, k, "no root");
-  else if (follower()) k = hrAppend(out, n, k, "key %d %s", latched_, quality_ == 1 ? "maj" : "min");
-  else k = hrAppend(out, n, k, "%s %s", hrNoteName(latched_ - 1), quality_ == 1 ? "maj" : "min");
+  cam::Scale ks;  // plan 028: the key as its Camelot position ("8A Am", "8A D DOR")
+  char kl[16];
+  if (!camKey(ks)) k = hrAppend(out, n, k, "no root");
+  else { cam::label(kl, sizeof kl, ks); k = hrAppend(out, n, k, follower() ? "key %s" : "%s", kl); }
   k = hrAppend(out, n, k, "  %s  %s  %s  Vel %d", arp() ? kArp[pattern_ - 1].name : kStab[pattern_ - 1].name, kChordName[chord_ - 1], hrRateName(rate_), (int)vel_);
   if (octave_) k = hrAppend(out, n, k, "  Oct %+d", (int)octave_);
   if (transp_) k = hrAppend(out, n, k, "  Tran %+d", (int)transp_);

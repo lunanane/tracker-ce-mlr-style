@@ -1,14 +1,13 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 // Chord/Arp engine, port of c34 page 3 without the arranger. See README.md for the mapping.
 #include "chordarp.h"
+#include <stdio.h>
 
 namespace seqgen {
 
 // ---- c31 tables (page 3 header, lines 237-262) -------------------------------------------------
 static const uint8_t kCam[4][6] = {{64, 69, 62, 67, 60, 65}, {61, 66, 71, 64, 69, 62},
                                    {71, 66, 61, 68, 63, 70}, {68, 63, 70, 65, 60, 67}};
-static const uint8_t kScMaj[7] = {0, 2, 4, 5, 7, 9, 11};
-static const uint8_t kScMin[7] = {0, 2, 3, 5, 7, 8, 10};
 static const int8_t kCdeg[8][5] = {{0}, {0, 1, 4}, {0, 2, 4}, {0, 3, 4}, {0, 4}, {0, 2, 4, 5}, {0, 2, 4, 6}, {0, 2, 4, 6, 8}};
 static const uint8_t kCdegN[8] = {1, 3, 3, 3, 2, 4, 4, 5};
 static const int8_t kCabs[7][4] = {{0, 4, 7, 10}, {0, 4, 7, 11}, {0, 3, 6}, {0, 4, 8}, {0, 4, 6, 10}, {0, 4, 8, 10}, {0, 1, 4, 7}};
@@ -29,14 +28,52 @@ static const uint8_t kPnLut[6] = {5, 6, 9, 11, 14, 15};  // eased note pulse, in
 
 template <typename T> static inline T clampv(T v, T lo, T hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
+// ---- Camelot helper (camelot.h): one copy of the code ----------------------------------------------
+namespace cam {
+void build(Scale& s, int tonic, uint8_t sc) {
+  const uint16_t m = scaleMask(sc);
+  s.sc = sc;
+  s.minor = scaleIsB(sc) ? 0 : 1;
+  s.tonic = (uint8_t)(((tonic % 12) + 12) % 12);
+  s.num = numOfMajor(s.tonic + 12 - scaleOff(sc));
+  s.n = 0;
+  for (uint8_t i = 0; i < 12; i++)
+    if ((m >> i) & 1u) s.iv[s.n++] = i;
+}
+void resolve(Scale& s, int pc, bool minor, uint8_t tA, uint8_t tB) {
+  const uint8_t sc = typeScale(minor, minor ? tA : tB);
+  const int cb = (((minor ? pc + 3 : pc) % 12) + 12) % 12;
+  build(s, cb + scaleOff(sc), sc);
+}
+void marks(const Snap* t, int n, int lead, uint8_t* out) {
+  for (int i = 0; i < n; i++) {
+    out[i] = M_NONE;
+    if (!t[i].valid || !t[i].sounding) continue;
+    for (int j = 0; j < n; j++) {
+      if (j == i || !t[j].valid || !t[j].sounding || (lead >= 0 && j != lead)) continue;
+      const uint8_t m = markOf(t[i].s, t[j].s);
+      if (m > out[i]) out[i] = m;
+    }
+  }
+}
+void label(char* out, size_t cap, const Scale& s) {
+  static const char* const kMaj[12] = {"C", "Db", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"};
+  static const char* const kMin[12] = {"C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"};
+  static const char* const kAbbr[SC_COUNT] = {"", "m", " DOR", " PHR", " LYD", " MIX", "m PNT", " PNT", " BLU", " HMI"};
+  snprintf(out, cap, "%d%c %s%s", s.num, s.minor ? 'A' : 'B', (scaleIsB(s.sc) ? kMaj : kMin)[s.tonic % 12], kAbbr[s.sc % SC_COUNT]);
+}
+}  // namespace cam
+
 // ---- SeqContext ------------------------------------------------------------------------------
 void SeqContext::scale(int& root, bool& minor) const {
   if (chord) { chord->scaleSet(root, minor); return; }
   root = 60; minor = false;
 }
-int SeqContext::scaleDeg(int d) const {
-  if (chord) return chord->scaleDeg(d);
-  return 60 + 12 * floordiv(d, 7) + kScMaj[floormod(d, 7)];
+int SeqContext::scaleDeg(int d, uint8_t a, uint8_t b) const {
+  if (chord) return chord->scaleDegC(d, a, b);
+  cam::Scale s;  // no Chord/Arp: C major in the follower's B flavour
+  cam::resolve(s, 0, false, a, b);
+  return cam::degreeNote(s, 60 + s.tonic, d);
 }
 
 int vgvCalc(int g, int i, int base, int gb) {
@@ -128,21 +165,35 @@ void ChordArp::scaleSet(int& root, bool& minor) const {
   minor = mn;
 }
 
-int ChordArp::scaleDeg(int d) const {
+int ChordArp::scaleDegC(int d, uint8_t a, uint8_t b) const {
   int r; bool mn; scaleSet(r, mn);
-  return r + 12 * floordiv(d, 7) + (mn ? kScMin : kScMaj)[floormod(d, 7)];
+  cam::Scale s;
+  cam::resolve(s, r, mn, a ? a : camA_, b ? b : camB_);
+  return cam::degreeNote(s, cam::anchor(s, r), d);
 }
 
+bool ChordArp::camKey(cam::Scale& s, uint8_t a, uint8_t b) const {
+  if (pmode_ < 2 && !last_.valid) return false;
+  int r; bool mn; scaleSet(r, mn);
+  cam::resolve(s, r, mn, a ? a : camA_, b ? b : camB_);
+  return true;
+}
+
+// the locked key with this sequencer's A / B type, and the note its tonic sits on (lock_r moved onto the tonic)
+void ChordArp::lockScale(cam::Scale& s, int& base) const {
+  cam::resolve(s, lockR_, lockMn_, camA_, camB_);
+  base = cam::anchor(s, lockR_);
+}
 int ChordArp::dlk(int note) const {
-  const uint8_t* iv = lockMn_ ? kScMin : kScMaj;
-  int rel = note - lockR_, oct = floordiv(rel, 12), off = floormod(rel, 12);
+  cam::Scale s; int base; lockScale(s, base);
+  int rel = note - base, oct = floordiv(rel, 12), off = floormod(rel, 12);
   int b = 1, bd = 99;
-  for (int i = 1; i <= 7; ++i) { int dd = iabs(iv[i - 1] - off); if (dd < bd) { bd = dd; b = i; } }
-  return oct * 7 + (b - 1);
+  for (int i = 1; i <= s.n; ++i) { int dd = iabs(s.iv[i - 1] - off); if (dd < bd) { bd = dd; b = i; } }
+  return oct * s.n + (b - 1);
 }
 int ChordArp::lkd(int d) const {
-  const uint8_t* iv = lockMn_ ? kScMin : kScMaj;
-  return lockR_ + 12 * floordiv(d, 7) + iv[floormod(d, 7)];
+  cam::Scale s; int base; lockScale(s, base);
+  return cam::degreeNote(s, base, d);
 }
 
 // ---- chord pool (c34 c_pool: transpose T is applied while the pool is built, in the chord's own key) --------
@@ -153,9 +204,11 @@ int ChordArp::pool(int r, int m, bool mn, int16_t out[8]) const {
   int ko = 12 * koct_;
   bool lk = pmode_ >= 2;
   int T = arpTpose_ + (ctx_ ? ctx_->gtpose : 0);
-  const uint8_t* iv = mn ? kScMin : kScMaj;
+  cam::Scale sc;
+  cam::resolve(sc, r, mn, camA_, camB_);
+  const int base = cam::anchor(sc, r);
   if (m > 8) {
-    int rr = r + 12 * floordiv(T, 7) + iv[floormod(T, 7)];
+    int rr = cam::degreeNote(sc, base, T);
     if (lk) rr = lkd(dlk(r) + T);
     for (int i = 0; i < kCabsN[m - 9]; ++i) raw[n++] = rr + kCabs[m - 9][i] + ko;
   } else if (lk) {
@@ -164,7 +217,7 @@ int ChordArp::pool(int r, int m, bool mn, int16_t out[8]) const {
   } else {
     for (int i = 0; i < kCdegN[m - 1]; ++i) {
       int d = kCdeg[m - 1][i] + T;
-      raw[n++] = r + 12 * floordiv(d, 7) + iv[floormod(d, 7)] + ko;
+      raw[n++] = cam::degreeNote(sc, base, d) + ko;
     }
   }
   int k = 0;

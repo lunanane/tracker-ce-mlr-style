@@ -19,6 +19,7 @@ class HrArpSeq : public HrScript {
   void tick() override;
   void stop() override { stopSounding(); }
   bool live() const override { return latched_ != 0 || playing_; }
+  bool camKey(cam::Scale& s) const override { if (!latched_) return false; cam::resolve(s, (latched_ - 1) % 12, quality_ == 2, 0, 0); return true; }
   bool hasLatch() const override { return true; }
   bool latch() const override { return !hold_; }
   void setLatch(bool on) override { hold_ = on ? 0 : 1; if (!on && manual_) unlatchRoot(); }

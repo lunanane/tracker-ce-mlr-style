@@ -114,9 +114,10 @@ static void test_params_tables()
         CHECK(!c.horizontal(*tb, -1) && !c.vertical(*tb, -1));
         for (int i = 0; i < 10; i++) c.horizontal(*tb, 1);
         CHECK(c.idx == 6);                        // Play row has seven cells
-        CHECK(c.vertical(*tb, 1) && c.sec == 1 && c.idx == 5); // Pitch row has six: the column is kept as far as it exists
-        CHECK(c.vertical(*tb, 1) && c.vertical(*tb, 1) && c.sec == 3 && c.idx == 4 && !c.vertical(*tb, 1));
-        CHECK(c.flat(*tb) == 7 + 6 + 5 + 4);
+        // plan 028 made room for the A / B type cells: the rows are Play 7, Key 5, Shape 7, Groove 6 (were 7, 6, 5, 5)
+        CHECK(c.vertical(*tb, 1) && c.sec == 1 && c.idx == 4); // Key row has five: the column is kept as far as it exists
+        CHECK(c.vertical(*tb, 1) && c.vertical(*tb, 1) && c.sec == 3 && c.idx == 4 && !c.vertical(*tb, 1)); // Groove row has six
+        CHECK(c.flat(*tb) == 7 + 5 + 7 + 4);
     }
     // the engine takes a command per table row, applied at the next block
     {

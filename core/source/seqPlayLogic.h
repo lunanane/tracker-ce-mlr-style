@@ -258,6 +258,8 @@ struct StripCell
     const char* msg = nullptr;  // transient message (<= 11 characters)
     bool shiftHint = false;     // v0.3.2: the selected sequencer cell tells how to see the pad map (tap the selected track button) (set by the overlay)
     bool synthHint = false;     // v0.3.2: ... and, in turns, how to open the PolySynth parameters (the track plays the PolySynth instrument)
+    uint8_t mark = 0;           // plan 028: match mark of the track's key (seqgen::cam::Mark), 0 = none
+    char key[8] = { 0 };        // ... and the key ("8A Am")
     bool alt = false;           // which of the two hints is shown now (the overlay flips it every two seconds)
 };
 
@@ -302,6 +304,7 @@ inline void stripLine2(char* out, size_t n, const StripCell& c)
     else if (c.launched) snprintf(out, n, "clip");
     else if (c.cut) snprintf(out, n, "cut");
     else if (type == seqlogic::TYPE_OFF) snprintf(out, n, "pattern");
+    else if (c.mark && !c.selected) snprintf(out, n, "%s %c", c.key, c.mark == 1 ? '=' : c.mark == 2 ? '~' : 'x'); // plan 028: = match, ~ neighbour, x clash
     else if (c.takenOver) snprintf(out, n, "live");
     else if (c.shiftHint && c.synthHint && c.alt && type != seqlogic::TYPE_OFF) snprintf(out, n, "Hold+Instr");
     else if (c.shiftHint && type != seqlogic::TYPE_OFF) snprintf(out, n, "tap: help");
@@ -334,7 +337,7 @@ struct LegendCell
 {
     Zone zone;
     bool on;     // the pad that is active now (page tab, current speed / page / velocity, tie)
-    char txt[8]; // up to 6 characters
+    char txt[8]; // up to 7 characters (6, plus the Camelot labels of the root pads, plan 028)
 };
 
 // The legend of a HYPER_RASP script, as the script reports it (seqgen::HrScript::legend / title / help); filled by the overlay.
@@ -345,7 +348,7 @@ struct HrSnap
     const char* help; // static text of the script
     uint8_t zone[48];
     uint8_t on[48];
-    char txt[48][7];
+    char txt[48][8];
 };
 
 static_assert((int)seqgen::HZ_NONE == (int)Z_NONE && (int)seqgen::HZ_NOTE == (int)Z_NOTE && (int)seqgen::HZ_STEP == (int)Z_STEP &&
@@ -374,15 +377,28 @@ struct LegendState
 
 // Chord/Arp root pads (c31 camelot grid, copy of kCam in seqgen/chordarp.cpp): pad row = grid x - 1, pad column = grid y - 1.
 // Odd grid rows (second and fourth pad row) are the minor roots.
-inline const char* rootName(uint8_t row, uint8_t col, char* buf4)
+inline uint8_t camPadRoot(uint8_t row, uint8_t col)
 {
     static const uint8_t kCam[4][6] = { { 64, 69, 62, 67, 60, 65 }, { 61, 66, 71, 64, 69, 62 },
                                         { 71, 66, 61, 68, 63, 70 }, { 68, 63, 70, 65, 60, 67 } };
+    return kCam[row][col];
+}
+inline const char* rootName(uint8_t row, uint8_t col, char* buf4)
+{
     static const char* const kPc[12] = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
     if (row >= 4 || col >= 6) { buf4[0] = 0; return buf4; }
-    const char* n = kPc[kCam[row][col] % 12];
+    const char* n = kPc[camPadRoot(row, col) % 12];
     snprintf(buf4, 4, "%s%s", n, (row & 1) ? "m" : "");
     return buf4;
+}
+// plan 028: the same pad as its Camelot position and key ("8B C", "8A Am", "5A Cm"), at most 7 characters + NUL. The pads themselves are unchanged.
+inline const char* camRootLabel(uint8_t row, uint8_t col, char* buf8)
+{
+    if (row >= 4 || col >= 6) { buf8[0] = 0; return buf8; }
+    seqgen::cam::Scale s;
+    seqgen::cam::resolve(s, camPadRoot(row, col) % 12, (row & 1) != 0, 0, 0);
+    seqgen::cam::label(buf8, 8, s);
+    return buf8;
 }
 
 // Mono speed 1..12 (seqgen kSpd = pulses per step 96 48 32 24 16 12 8 6 4 3 2 1)
@@ -411,12 +427,12 @@ inline LegendCell legendCell(const LegendState& st, uint8_t col, uint8_t row)
         const int i = row * 12 + col;
         c.zone = (Zone)st.hr->zone[i];
         c.on = st.hr->on[i] != 0;
-        for (int k = 0; k < 6; k++) c.txt[k] = st.hr->txt[i][k];
+        for (int k = 0; k < 7; k++) c.txt[k] = st.hr->txt[i][k];
         return c;
     }
     auto set = [&c](Zone z, const char* t) {
         c.zone = z;
-        for (int i = 0; i < 6 && t[i]; i++) c.txt[i] = t[i];
+        for (int i = 0; i < 7 && t[i]; i++) c.txt[i] = t[i];
     };
     if (st.type == seqlogic::TYPE_PLINKY)
     {
@@ -461,8 +477,8 @@ inline LegendCell legendCell(const LegendState& st, uint8_t col, uint8_t row)
         static const char* const kTabs[4] = { "Play", "Groove", "Feel", "Setup" };
         if (col <= 5)
         {
-            char b[4];
-            set(Z_NOTE, rootName(row, col, b));
+            char b[8];
+            set(Z_NOTE, camRootLabel(row, col, b));
             return c;
         }
         const uint8_t page = st.page > 3 ? 0 : st.page;
@@ -614,7 +630,7 @@ inline void fillHrSnap(HrSnap& s, const seqgen::HrScript& script)
             const int i = r * 12 + c;
             s.zone[i] = cell.zone;
             s.on[i] = cell.on ? 1 : 0;
-            for (int k = 0; k < 6; k++)
+            for (int k = 0; k < 7; k++)
                 s.txt[i][k] = cell.txt[k];
         }
 }

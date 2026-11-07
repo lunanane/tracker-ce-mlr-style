@@ -1382,6 +1382,7 @@ int sessionTests(int& checks);
 #include "test_mlr26.inc"
 #include "test_plinkyseq.inc"
 #include "test_params.inc"
+#include "test_camelot.inc"
 
 int main()
 {
@@ -1500,6 +1501,7 @@ int main()
     test_plinky_overlay_draw_budget();
     test_note_band();
     test_params_all();
+    test_camelot_all();
     printf("%d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

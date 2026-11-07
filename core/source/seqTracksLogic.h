@@ -210,6 +210,17 @@ inline uint8_t latchKind(uint8_t type)
 }
 inline bool latchDefault(uint8_t type) { return latchKind(type) == LATCH_SCRIPT; }
 
+// ---- plan 028: A / B scale type (Camelot flavour per side, camelot.h). The sequencers that build notes from a scale have the two settings:
+// Chord/Arp, Mono, HR Arp Lines, Chord Stabs, Chord/Arp, Bass, Step Follow (the HrType order above). Strings keeps its own Scale list (it
+// already names every flavour); Arp Seq, Euclid and Grid Seq do not use a scale.
+inline bool hasCam(uint8_t type)
+{
+    if (type == TYPE_CHORDARP || type == TYPE_MONO) return true;
+    if (!isHrType(type)) return false;
+    const uint8_t hr = (uint8_t)(type - TYPE_HR_FIRST);
+    return hr <= 1 || hr == 3 || hr == 4 || hr == 7;
+}
+
 // The engine latch: physical pads in, "logical" pad events out. A press that starts a new gesture (no pad is down) either switches off
 // everything latched (it hits a latched pad) or replaces the latched pads by the new one; presses while a finger is already down join the
 // group (a chord / several strings). Releases are never forwarded. Pure bit logic: the engine applies the result.

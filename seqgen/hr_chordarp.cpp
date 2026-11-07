@@ -15,7 +15,6 @@ const uint16_t kGatePat[16] = {65535, 21845, 52428, 18761, 61166, 28013, 6745, 4
 const uint8_t kSpeeds[4] = {12, 8, 6, 4};
 const uint8_t kArpSq[8] = {1, 3, 2, 4, 3, 5, 4, 6};
 const uint8_t kSizeOpt[4] = {5, 4, 3, 2};
-const int8_t kMajScale[7] = {0, 2, 4, 5, 7, 9, 11}, kMinScale[7] = {0, 2, 3, 5, 7, 8, 10};
 }  // namespace
 
 HrChordArp::HrChordArp()
@@ -32,21 +31,22 @@ HrChordArp::HrChordArp()
 
 // ---------------------------------------------------------------- key lock
 int HrChordArp::noteToDegree(int note) const {
-  const int8_t* iv = lockMinor_ ? kMinScale : kMajScale;
-  int rel = note - lockRoot();
+  cam::Scale s;
+  int rel = note - lockScale(s);
   int oct = floordiv(rel, 12), pc = floormod(rel, 12);
   int best = 99, bestDeg = 0;
-  for (int di = 0; di < 7; ++di) {
-    int dd = iabs(iv[di] - pc);
+  for (int di = 0; di < s.n; ++di) {
+    int dd = iabs(s.iv[di] - pc);
     if (dd < best) { best = dd; bestDeg = di; }
   }
-  if (iabs(12 - pc) < best) bestDeg = 7;
-  return oct * 7 + bestDeg;
+  if (iabs(12 - pc) < best) bestDeg = s.n;
+  return oct * s.n + bestDeg;
 }
 
 int HrChordArp::degreeToNote(int d) const {
-  const int8_t* iv = lockMinor_ ? kMinScale : kMajScale;
-  return lockRoot() + 12 * floordiv(d, 7) + iv[floormod(d, 7)];
+  cam::Scale s;
+  const int base = lockScale(s);
+  return cam::degreeNote(s, base, d);
 }
 
 int HrChordArp::buildChord(int root, int type, int* out) const {
@@ -400,16 +400,20 @@ void HrChordArp::silence() {
 }
 
 void HrChordArp::publishKeyLock() {
-  uint16_t sig = keylock_ == 2 ? (uint16_t)(1 + lockKey_ * 2 + (lockMinor_ ? 1 : 0)) : 0;
+  uint16_t sig = keylock_ == 2 ? (uint16_t)(1 + lockKey_ * 2 + (lockMinor_ ? 1 : 0) + 25 * camA_ + 150 * camB_) : 0;
   if (keylock_ != 2) sig = 0;
   if (sig == published_) return;
   published_ = sig;
   if (!bus_) return;
-  if (keylock_ != 2) { bus_->nScale = 0; return; }
-  const int8_t* iv = lockMinor_ ? kMinScale : kMajScale;
-  uint8_t pcs[7];
-  for (int i = 0; i < 7; ++i) pcs[i] = (uint8_t)((lockKey_ + iv[i]) % 12);
-  bus_->setScale(pcs, 7);
+  if (keylock_ != 2) { bus_->clearScale(); return; }
+  bus_->setKey(lockKey_, lockMinor_ != 0, camA_, camB_);
+}
+
+bool HrChordArp::camKey(cam::Scale& s) const {
+  if (keylock_ == 2) { cam::resolve(s, lockKey_, lockMinor_ != 0, camA_, camB_); return true; }
+  if (!hasRoot_) return false;
+  cam::resolve(s, kRoots[rootY_ - 1][rootX_ - 1] % 12, (rootY_ & 1) == 0, 0, 0);  // free key: the root pad's position (even rows = minor roots)
+  return true;
 }
 
 // ---------------------------------------------------------------- the clock
@@ -729,7 +733,11 @@ void HrChordArp::legend(int col, int row, HrCell& c) const {
     else if (x == 6 && y == 1) c.set(HZ_HOLD, "Clear", clearHeld_ != 0);
   } else {
     if (x <= 6) {
-      c.set(HZ_NOTE, hrNoteName(kRoots[y - 1][x - 1] % 12), hasRoot_ && rootX_ == x && rootY_ == y);
+      cam::Scale cs;  // plan 028: the Camelot position of the root pad ("8A Am"); the pad itself is unchanged
+      cam::resolve(cs, kRoots[y - 1][x - 1] % 12, (y & 1) == 0, 0, 0);
+      char lb[8];
+      cam::label(lb, sizeof lb, cs);
+      c.set(HZ_NOTE, lb, hasRoot_ && rootX_ == x && rootY_ == y);
     } else if (x == 7) {
       static const char* const k[4] = {"Maj", "Min", "Dom7", "Sus4"};
       c.set(HZ_PANEL, k[y - 1], y == selK1_ || y == selK2_);
@@ -748,7 +756,13 @@ void HrChordArp::title(char* out, size_t n) const {
   if (octave_) k = hrAppend(out, n, k, "  Oct %+d", (int)octave_);
   if (inv_) k = hrAppend(out, n, k, "  Inv %+d", (int)inv_);
   k = hrAppend(out, n, k, "  Vel %d  %s", (int)baseVel_, latched_ ? "Latch" : "Moment");
-  if (keylock_ == 2) hrAppend(out, n, k, "  Lock");
+  if (keylock_ == 2) {
+    cam::Scale ks;  // plan 028: the locked key as its Camelot position
+    char kl[16];
+    camKey(ks);
+    cam::label(kl, sizeof kl, ks);
+    hrAppend(out, n, k, "  Lock %s", kl);
+  }
 }
 
 const char* HrChordArp::help() const {

@@ -33,6 +33,8 @@ class HrChordArp : public HrScript {
   bool hasLatch() const override { return true; }
   bool latch() const override { return latched_ != 0; }
   void setLatch(bool on) override { doParam(P_LATCH, on ? 2 : 1, false); }
+  bool camKey(cam::Scale& s) const override;
+  void camChanged() override { publishKeyLock(); retriggerLatched(); }
   bool live() const override { return hasRoot_ || arpActive_ || nActive_ > 0 || playing_ || nPlayback_ > 0; }
   int getParam(int id) const override;
   void setParam(int id, int v) override;
@@ -46,7 +48,8 @@ class HrChordArp : public HrScript {
 
  private:
   struct Step { uint8_t used, type, dur; uint8_t note; };  // steps[i]: root = MIDI note (0..127), chord type 1..10, duration 1..4
-  int lockRoot() const { return 60 + lockKey_; }
+  // the locked key with this script's A / B type, and the note its tonic sits on (60 + key moved onto the tonic)
+  int lockScale(cam::Scale& s) const { cam::resolve(s, lockKey_, lockMinor_, camA_, camB_); return cam::anchor(s, 60 + lockKey_); }
   int noteToDegree(int note) const;
   int degreeToNote(int d) const;
   int buildChord(int root, int type, int* out) const;           // build_chord: + transpose, key lock

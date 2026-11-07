@@ -1,6 +1,7 @@
 // Sequencer tracks mod — PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 // Chord/Arp sequencer: owner's grid-composer c34 page 3 without the arranger/tracker part.
 #pragma once
+#include "camelot.h"
 #include "seqgen.h"
 
 namespace seqgen {
@@ -16,7 +17,8 @@ struct SeqContext {
   uint8_t gb;
   SeqContext() : chord(0), gtpose(0), gb(0) {}
   void scale(int& root, bool& minor) const;  // folded tonic (54..65) and minor flag
-  int scaleDeg(int d) const;                 // c31 scale_deg
+  // c31 scale_deg; a / b = the follower's own A / B type (plan 028; 0 = take the lead's, which is Natural without a lead)
+  int scaleDeg(int d, uint8_t a = 0, uint8_t b = 0) const;
   int vgv(int g, int i, int base) const { return vgvCalc(g, i, base, gb); }  // c34 vgv(g,i,base)
   void barTick() { gb = (uint8_t)((gb + 1) % 9); }
 };
@@ -83,7 +85,9 @@ class ChordArp : public SeqBase {
 
   // Read-only helpers (also used by Mono through SeqContext and by tests).
   void scaleSet(int& root, bool& minor) const;
-  int scaleDeg(int d) const;
+  int scaleDeg(int d) const { return scaleDegC(d, 0, 0); }
+  int scaleDegC(int d, uint8_t a, uint8_t b) const;  // a / b: a follower's own types, 0 = this sequencer's
+  bool camKey(cam::Scale& s, uint8_t a = 0, uint8_t b = 0) const;  // plan 028: the key it plays now (wheel position + scale; a / b: a follower's own types); false = no key yet
   int vgvSel(int i, int base) const { return vgvCalc(selVg_, i, base, ctx_ ? ctx_->gb : ownGb_); }  // live velocity
   int pool(int rootNote, int mod, bool minor, int16_t out[8]) const;  // c_pool
   bool gbit(int g, int i) const;
@@ -108,6 +112,7 @@ class ChordArp : public SeqBase {
   void pgen();
   void applyBar();
   void setPair(uint8_t& cur, int row, int v);
+  void lockScale(cam::Scale& s, int& base) const;
   int lkd(int d) const;
   int dlk(int note) const;
   int rv(const RootRef& r) const;

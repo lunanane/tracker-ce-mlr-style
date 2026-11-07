@@ -38,6 +38,10 @@ static void scene(const char* dir, const char* name, uint8_t type, uint8_t sec, 
     m.track = 3;
     m.sec = sec;
     m.idx = idx;
+    snprintf(m.key, sizeof m.key, "8A D DOR");
+    params.keyMark = 2;
+    legend.keyMark = 3;
+    snprintf(legend.key, sizeof legend.key, "11A F#m");
     for (uint8_t i = 0; i < tb->nTotal; i++)
     {
         const seqparams::Desc& d = seqparams::desc(*tb, i);
@@ -56,6 +60,30 @@ static void scene(const char* dir, const char* name, uint8_t type, uint8_t sec, 
     printf("%s\n", path);
 }
 
+static void wheel(const char* dir)
+{
+    char path[512];
+    snprintf(path, sizeof path, "%s/legend_wheel.ops", dir);
+    g_ops = fopen(path, "w");
+    if (!g_ops)
+        return;
+    static SeqPlayViewData v;
+    v = SeqPlayViewData();
+    v.mode = SeqPlayViewData::WHEEL;
+    seqwheel::Model& m = v.wheel;
+    m.on = 1;
+    m.cur = 14 + 1; // 8A
+    m.mark = 2;
+    m.trail[0] = 14; m.trail[1] = 16;
+    m.others = (1u << 14) | (1u << 4) | (1u << 23);
+    snprintf(m.label, sizeof m.label, "8A D DOR");
+    strControlProperties pp = { 0, 0, 800, 480, 0, &v, nullptr };
+    cSeqPlayLegend ctl(&pp);
+    ctl.update();
+    fclose(g_ops);
+    printf("%s\n", path);
+}
+
 int main(int argc, char** argv)
 {
     const char* dir = argc > 1 ? argv[1] : ".";
@@ -64,5 +92,6 @@ int main(int argc, char** argv)
     scene(dir, "strings", seqlogic::TYPE_PLINKY, 0, 4, true);
     scene(dir, "hr_chordarp", seqlogic::TYPE_HR_FIRST + seqgen::HR_CHORD_ARP, 1, 2, true);
     scene(dir, "hr_stabs", seqlogic::TYPE_HR_FIRST + seqgen::HR_CHORD_STABS, 1, 3, true);
+    wheel(dir);
     return 0;
 }
