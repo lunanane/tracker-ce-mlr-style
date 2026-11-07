@@ -1,6 +1,7 @@
 #include "Platform.h"
 #include "Profiler.h"
 #include "seqCpu.h" // plan 022 P1
+#include "seqMasterRec.h" // plan 030 A
 #include "TrackerImpl.h"
 #include "mtWavetableEnvelopes.h"
 #include "core/interface.h"
@@ -134,6 +135,7 @@ void TrackerImpl::init(Platform* platform)
     sequencer.setCrcCalculator(platform->getCrcCalculator());
     padsBacklight.init(500, platform->getLeds());
     exporter.init(platform->getFileSystem());
+    seqmasterrec::init(platform->getFileSystem()); // plan 030 A: the master recording ring (EXTERNAL_RAM raw storage)
     Profiler::getInstance()->init();
     seqcpu::init(); // plan 022 P1: cycle counter for the CPU monitor
     newFileManager.setCrcCalculator(platform->getCrcCalculator());
@@ -164,11 +166,14 @@ void TrackerImpl::update()
 {
     if (lowPower.getLowPowerState() == shutdownStateSleep)
     {
+        if (seqmasterrec::active())
+            seqmasterrec::stop(); // plan 030 A: the file is closed before the card goes away
         return;
     }
 
     const uint32_t perfT0 = seqcpu::cyc(); // plan 022 P1: main loop pass time
     engine.updateSdStream();
+    seqmasterrec::update(); // plan 030 A: at most one 16 KB chunk of the master recording, only while recording
     display.update();
     engine.updateSdStream();
     padsBacklight.update();

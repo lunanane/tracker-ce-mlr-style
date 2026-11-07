@@ -7,8 +7,8 @@ HRSRC = ../../seqgen/hr.cpp ../../seqgen/hr_stab.cpp ../../seqgen/hr_arpseq.cpp 
 GLUE = ../source/seqTracksCore.cpp ../source/seqCut.cpp ../interface/seqSession/cutLayer.cpp
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
 
-.PHONY: test clean preview master-preview amp-preview pitch-preview grid-preview legend-preview
-test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE) build/seq_plinky_tests$(EXE) build/seq_trace_tests$(EXE) build/seq_amp_tests$(EXE) build/seq_warp_tests$(EXE) build/seq_stage_tests$(EXE) build/seq_gridstage_tests$(EXE) build/seq_br_tests$(EXE) build/seq_master_tests$(EXE) build/seq_pitchdevice_tests$(EXE) build/seq_sampmem_tests$(EXE) build/seq_cpumon_tests$(EXE) build/seq_kernel_tests$(EXE)
+.PHONY: test clean preview rec-preview master-preview amp-preview pitch-preview grid-preview legend-preview
+test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE) build/seq_plinky_tests$(EXE) build/seq_trace_tests$(EXE) build/seq_amp_tests$(EXE) build/seq_warp_tests$(EXE) build/seq_stage_tests$(EXE) build/seq_gridstage_tests$(EXE) build/seq_br_tests$(EXE) build/seq_master_tests$(EXE) build/seq_pitchdevice_tests$(EXE) build/seq_sampmem_tests$(EXE) build/seq_cpumon_tests$(EXE) build/seq_kernel_tests$(EXE) build/seq_masterrec_tests$(EXE)
 	build/seq_cpu_tests$(EXE)
 	build/seq_glue_tests$(EXE)
 	build/seq_perform_tests$(EXE)
@@ -27,6 +27,11 @@ test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tes
 	build/seq_sampmem_tests$(EXE)
 	build/seq_cpumon_tests$(EXE)
 	build/seq_kernel_tests$(EXE)
+	build/seq_masterrec_tests$(EXE)
+
+build/seq_masterrec_tests$(EXE): test_masterrec.cpp ../source/seqMasterRecLogic.h
+	mkdir -p build
+	$(CXX) $(CXXFLAGS) test_masterrec.cpp -o $@
 
 build/seq_kernel_tests$(EXE): test_kernel.cpp ../libs/Audio/play_memory_kernel.h
 	mkdir -p build
@@ -163,3 +168,9 @@ master-preview: build/seq_master_tests$(EXE)
 	mkdir -p build/preview
 	SEQ_MASTER_PREVIEW=build/preview build/seq_master_tests$(EXE) > /dev/null
 	python master_preview.py build/preview
+
+# PNG previews of the Global Mixer 3/3 page with the Rec button idle / recording (plan 030 A; needs Pillow)
+rec-preview: build/seq_masterrec_tests$(EXE)
+	mkdir -p build/preview
+	SEQ_REC_PREVIEW=build/preview build/seq_masterrec_tests$(EXE) > /dev/null
+	python rec_preview.py build/preview

@@ -383,6 +383,9 @@ class FileSystem
     virtual bool pollAsyncRead(bool* outSuccess = nullptr) = 0;
     virtual bool waitAsyncRead() = 0;
     virtual bool isAsyncReadBusy() = 0;
+    // plan 030 (master recording): commit a file to the card without closing it; free space of the card (false = unknown)
+    virtual bool syncFile(FileHandle) { return true; }
+    virtual bool getFreeBytes(uint64_t&) { return false; }
 
     virtual int createInstrumentsList(const char* path,
                                       char** list,

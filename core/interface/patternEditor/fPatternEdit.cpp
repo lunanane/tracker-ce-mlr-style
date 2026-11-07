@@ -1,3 +1,4 @@
+#include "seqMasterRec.h"
 #include "mtStructs.h"
 #include "patternEditor/patternEditor.h"
 #include <assert.h>
@@ -1921,6 +1922,11 @@ void cPatternEditor::setProjectSaveFlags()
 
 void cPatternEditor::startExportSelection()
 {
+    if (seqmasterrec::blocksOthers()) // plan 030 A: the master recording and the export exclude each other
+    {
+        mtPopups.show(0, "Stop the master recording", "first (Global Mixer 3/3)");
+        return;
+    }
     if (PTE->saveClockConfig == 255)
     {
         PTE->saveClockConfig = mtConfig.midi.clkIn;

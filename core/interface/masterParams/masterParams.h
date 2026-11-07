@@ -149,6 +149,8 @@ class cMasterParams : public ModuleBase
     void fadersButton();  // plan 024: the "Faders" screen button of Global Mixer 3/3 opens the Master fader pages
     void closeFaders(bool restoreUi); // restoreUi: back to Global Mixer 3/3 (buttons, labels); false when the page was left
     void showFaderLabels();
+    void recButton();     // plan 030 A: the "Rec" screen button of Global Mixer 3/3 starts / stops the master recording to the SD card
+    void refreshRecInfo(); // time + size in the title bar while recording; relabels the button when the recording ended
     void switchToDelayScreen();
     void switchToReverbScreen();
     void switchToLimiterScreen();

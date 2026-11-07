@@ -9,6 +9,7 @@
 #include <cmath>
 #include <masterParams/masterParams.h>
 #include "seqFx.h"
+#include "seqMasterRec.h"
 #include "mtAudioEngine.h"
 #include "Profiler.h"
 
@@ -1504,7 +1505,7 @@ void cMasterParams::showMixerDelayReverbScreen()
     display.setControlHide(limiterSidechainList);
     display.setControlHide(saturationList);
 
-    titleBar->show();
+    titleBar->show(seqmasterrec::active()); // plan 030 A: the right label carries the REC time and size
     titleBar->setTitle("Global Mixer 3/3");
 
     char* mixerLabelFormat = (char*)"%s";
@@ -1595,6 +1596,7 @@ void cMasterParams::showMixerDelayReverbScreen()
 #ifdef FEATURE_PLINKY
     sprintf(mixerLabel[7], "%s", ampView.visible() ? "Close" : "Amp view"); // plan 013 M: screen button 8
     sprintf(mixerLabel[6], "Faders"); // plan 024: screen button 7
+    sprintf(mixerLabel[5], "%s", seqmasterrec::active() ? "Stop rec" : "Rec"); // plan 030 A: screen button 6
 #endif
 
     if (displayType == displayMode::mixerDelayReverb)
@@ -1674,6 +1676,9 @@ void cMasterParams::showMixerDelayReverbScreen()
                              mtProject.values.lineInMute ? display.getTheme().inactiveLabelsColors
                                                          : display.getTheme().activeLabelsColors);
 
+#ifdef FEATURE_PLINKY
+    display.setControlColors(label[5], seqmasterrec::active() ? display.getTheme().performActiveTrackLabelsColors : display.getTheme().activeLabelsColors); // plan 030 A: red fill, white text = recording
+#endif
     for (uint8_t i = 0; i < 8; i++)
     {
         display.setControlValue(label[i], 1);

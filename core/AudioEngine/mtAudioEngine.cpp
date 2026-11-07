@@ -14,6 +14,7 @@
 #include "sampleRecorder/sampleRecorder.h"
 #include "tempoSyncRateValues.h"
 #include "seqFxLogic.h"
+#include "seqMasterRec.h" // plan 030 A
 #include "util.h"
 #include <Recorder.h>
 
@@ -833,6 +834,14 @@ void audioEngine::connectOutputToExportQueue(AudioOutput* output, ExportQueues* 
     connections.push_back(
       new AudioConnection(output->getFinalMixer(AudioOutput::OutputChannels::kRight),
                           exportQueues->getChannelRms(ExportQueues::ExportChannels::kRight)));
+
+#ifndef PLATFORM_IMX
+    // plan 030 A: live master recording taps the limiter outputs (the master, no metronome / preview)
+    connections.push_back(new AudioConnection(
+      output->getLimiter(AudioOutput::OutputChannels::kLeft), 0, seqmasterrec::tapStream(), 0));
+    connections.push_back(new AudioConnection(
+      output->getLimiter(AudioOutput::OutputChannels::kRight), 0, seqmasterrec::tapStream(), 1));
+#endif
 }
 
 AUDIO_CORE_RAM void audioEngine::endAllFx(bool synthOnly)

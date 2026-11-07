@@ -5,6 +5,7 @@
 #include "VoiceStreamManager.h"
 #include "fileManager.h"
 #include "fileTransfer.h"
+#include "seqMasterRec.h"
 #include <algorithm>
 
 static volatile uint8_t exportStep;
@@ -37,6 +38,8 @@ void cFileManager::updateExportProjectSamples()
 
 bool cFileManager::exportSound(uint8_t mode)
 {
+    if (seqmasterrec::blocksOthers()) // plan 030 A
+        return false;
     if (status != fmIdle && status != fmSavingProjectToWorkspace)
         return false;
     if (currentOperation != fmNoOperation && currentOperation != fmSaveWorkspaceProject)
@@ -105,6 +108,8 @@ bool cFileManager::exportSound(uint8_t mode)
 
 bool cFileManager::exportSoundRenderSelection(char* filePath)
 {
+    if (seqmasterrec::blocksOthers()) // plan 030 A
+        return false;
     if (status != fmIdle && status != fmSavingProjectToWorkspace)
         return false;
     if (currentOperation != fmNoOperation && currentOperation != fmSaveWorkspaceProject)

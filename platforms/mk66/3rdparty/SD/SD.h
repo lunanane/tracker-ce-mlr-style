@@ -49,6 +49,7 @@ class SdCard
     uint32_t clusterCount();
     uint16_t sectorsPerCluster();
     uint32_t freeClusterCount();
+    bool freeBytes(uint64_t& out); // plan 030: false when the FAT could not be read
 
   private:
     FRESULT delete_node(TCHAR* path, UINT sz_buff, FILINFO* fno, bool removeDir = true);
@@ -77,6 +78,8 @@ class SdFile
         }
         return true;
     }
+
+    bool sync() { return f_sync(file) == FR_OK; } // plan 030
 
     bool seek(uint32_t pos)
     {

@@ -1,3 +1,4 @@
+#include "seqMasterRec.h"
 #include "Recorder.h"
 #include "TrackerImpl.h"
 #include "core/graphicProcessing.h"
@@ -1344,6 +1345,12 @@ static void functActionButton7()
     if (SR->currentScreen != cSampleRecorder::screenTypeKeyboard)
     {
         functSelectButton7();
+    }
+
+    if (SR->currentScreen == cSampleRecorder::screenTypeConfig && seqmasterrec::blocksOthers()) // plan 030 A: exclusive with the master recording
+    {
+        mtPopups.show(0, "Stop the master recording", "first (Global Mixer 3/3)");
+        return;
     }
 
     switch (SR->currentScreen)
