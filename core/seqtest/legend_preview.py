@@ -40,6 +40,10 @@ def render(path, out):
         elif k == "R":
             x0, y0, x1, y1 = map(int, rest.split())
             d.rectangle([x0 * SS, y0 * SS, (x1 + 1) * SS - 1, (y1 + 1) * SS - 1], fill=color)
+        elif k == "P":
+            x, y, r16 = map(int, rest.split())
+            r = r16 / 16.0
+            d.ellipse([(x - r) * SS, (y - r) * SS, (x + r) * SS - 1, (y + r) * SS - 1], fill=color)
         elif k == "S":
             v = list(map(int, rest.split()))
             d.line([(v[i] * SS, v[i + 1] * SS) for i in range(0, len(v), 2)], fill=color, width=wd * SS)

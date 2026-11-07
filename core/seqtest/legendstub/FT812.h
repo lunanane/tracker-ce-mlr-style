@@ -6,10 +6,11 @@
 #include <stdio.h>
 extern FILE* g_ops;
 extern int g_prim;
-enum { LINE_STRIP = 1, RECTS = 2, OPT_CENTERX = 512, OPT_CENTERY = 1024, OPT_RIGHTX = 2048 };
+enum { LINE_STRIP = 1, RECTS = 2, FTPOINTS = 3, OPT_CENTERX = 512, OPT_CENTERY = 1024, OPT_RIGHTX = 2048 };
 enum { SRC_ALPHA = 1, ZERO = 2, ONE_MINUS_SRC_ALPHA = 3 };
 static int16_t g_vx[64];
 static int g_vn = 0;
+static int g_psz = 0;
 static inline void stubColor(uint32_t c) { fprintf(g_ops, "C %06X\n", (unsigned)(c & 0xFFFFFF)); }
 static inline void stubBegin(int p) { g_prim = p; g_vn = 0; }
 static inline void stubEnd()
@@ -29,8 +30,10 @@ static inline void stubVertex(int16_t x, int16_t y)
         if (g_vn == 0) { g_vx[0] = x; g_vx[1] = y; g_vn = 1; }
         else { fprintf(g_ops, "R %d %d %d %d\n", g_vx[0], g_vx[1], x, y); g_vn = 0; }
     }
+    else if (g_prim == FTPOINTS) fprintf(g_ops, "P %d %d %d\n", x, y, g_psz);
     else if (g_vn < 32) { g_vx[2 * g_vn] = x; g_vx[2 * g_vn + 1] = y; g_vn++; }
 }
+#define API_POINT_SIZE(s) (g_psz = (int)(s))
 #define API_COLOR(c) stubColor(c)
 #define API_LINE_WIDTH(w) fprintf(g_ops, "W %d\n", (int)(w))
 #define API_BEGIN(p) stubBegin(p)

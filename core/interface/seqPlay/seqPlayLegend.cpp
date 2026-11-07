@@ -52,18 +52,26 @@ struct PlinkyCtx
         inRects = false;
     }
     void color(uint32_t rgb) { API_COLOR(rgb); }
-    void rect(int x0, int y0, int x1, int y1)
+    void rect(int x0, int y0, int x1, int y1) // out of line: the display list macros are big where inlined
     {
         ensureRects();
         API_VERTEX2F(x0, y0);
         API_VERTEX2F(x1 - 1, y1 - 1);
+    }
+    void disc(int cx, int cy, int r) // plan 029: wheel discs
+    {
+        endRects();
+        API_BEGIN(FTPOINTS);
+        API_POINT_SIZE(r * 16);
+        API_VERTEX2F(cx, cy);
+        API_END();
     }
     void textPhase()
     {
         endRects();
         API_BLEND_FUNC(SRC_ALPHA, ONE_MINUS_SRC_ALPHA);
     }
-    void text(int x, int y, int font, int opt, const char* s)
+    __attribute__((noinline)) void text(int x, int y, int font, int opt, const char* s)
     {
         endRects();
         API_CMD_TEXT(x, y, fonts[font - 1].handle, (uint16_t)(((opt & 1) ? OPT_CENTERX : 0) | ((opt & 2) ? OPT_CENTERY : 0) | ((opt & 4) ? OPT_RIGHTX : 0)), s);
@@ -89,6 +97,7 @@ void cSeqPlayLegend::update()
     const int16_t font3 = fonts[2].handle; // 14 px bold
     const int16_t font1 = fonts[0].handle; // 14 px regular
 
+    const uint32_t keyColor = seqwheel::markColor(th, view->keyMark, th.white); // the track's key in its match colour
     API_BLEND_FUNC(SRC_ALPHA, ZERO); // opaque: the pattern rows below must not shine through
     API_LINE_WIDTH(16);
 
@@ -121,8 +130,8 @@ void cSeqPlayLegend::update()
     if (view->mode == SeqPlayViewData::PARAMS)
     {
         // plan 025: the sequencer settings page, one display stage (its own control, drawn below the legend control)
-        seqparams::Palette pal = { th.backgroundColor, th.grey_22, 0x555555, th.white, th.cyan, th.yellow, 0x000000, th.cyan,
-                                   seqwheel::markColor(th, view->keyMark, th.white) };
+        seqparams::Palette pal = { th.backgroundColor, th.grey_22, 0x555555, th.white, 0xD8D8D8, th.yellow, 0x000000, th.cyan,
+                                   keyColor, 0x909090 }; // group labels grey: cyan only ever means a value
         PlinkyCtx c;
         seqparams::draw(c, view->prm, pal);
         return;
@@ -131,7 +140,7 @@ void cSeqPlayLegend::update()
     if (view->mode == SeqPlayViewData::WHEEL)
     {
         // plan 028: the Camelot wheel, its own display stage (worst case measured by test_wheel_draw)
-        seqwheel::Palette pal = { th.backgroundColor, th.grey_22, th.white, 0x000000, th.cyan, th.orange, th.white, th.green, th.yellow, th.red };
+        seqwheel::Palette pal = { th.backgroundColor, 0x3A3A3A, th.white, 0x000000, 0x9A9A9A, 0x808080, th.white, th.green, th.orange, th.red };
         PlinkyCtx c;
         seqwheel::draw(c, view->wheel, pal);
         return;
@@ -249,12 +258,11 @@ void cSeqPlayLegend::update()
     API_CMD_TEXT(kLegendX, (int16_t)(kLegendY - 9), font1, OPT_CENTERY, seqplay::legendHelp(st));
     if (view->key[0]) // plan 028: the track's key and its match colour
     {
-        API_COLOR(seqwheel::markColor(th, view->keyMark, th.white));
+        API_COLOR(keyColor);
         API_CMD_TEXT(kLegendX, (int16_t)(kLegendY - 44), font3, OPT_CENTERY, view->key);
     }
     API_COLOR(0x909090); // a hint, not a focus: yellow is reserved for "where you are" (docs/seq-ui-colours.md)
     API_CMD_TEXT((int16_t)(kLegendX + 12 * kLegendCellW), (int16_t)(kLegendY - 44), font1, OPT_CENTERY | OPT_RIGHTX, "tap track again to close");
-    API_COLOR(th.white);
     API_COLOR(0x000000);
     for (uint8_t row = 0; row < 4; row++)
     {
