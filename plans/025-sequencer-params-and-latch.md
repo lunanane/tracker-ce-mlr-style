@@ -66,7 +66,7 @@ Flash ~30 KB left — report the size delta. Display stages ≤ 3840 B. No long-
   before (defaults). A version 3 header over a version 2 body, a cut or a bad CRC is refused. The Latch is part of the change hash.
 
 ### Numbers
-- Image end 0xF7038 = 1,011,768 B (base 0xF48B8 = 1,001,656 B): **+10,112 B flash**, margin to 0xFC000 20,424 B; RAM +1,888 B
+- Image end 0xF7008 = 1,011,720 B (base 0xF48B8 = 1,001,656 B): **+10,064 B flash**, margin to 0xFC000 20,472 B; RAM +1,888 B
   (two more view copies of the overlay); EXTERNAL_RAM unchanged. The flash is mostly setters that were not linked before
   (Chord/Arp, Mono, the scripts), the tables (about 1.3 KB), the page drawing and the latch code.
 - Display: the page is its own control (a second `cSeqPlayLegend`, mode PARAMS, drawn below the legend control): one stage of
