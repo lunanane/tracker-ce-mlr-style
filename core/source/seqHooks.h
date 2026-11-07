@@ -49,3 +49,5 @@ bool seqEndPerformFxForExport();
 
 // ---- R4: once per main loop pass (seqTracksUpdate), any view: retries a SYNC ALL / releases that did not fit into the queue. ----
 void seqCutUpdate();
+// plan 026: a project was loaded: the MLR page settings saved with it (jump quantise = seqcut::Quant, the tracks of slot A / B)
+void seqCutLoadSettings(uint8_t quant, uint8_t slotA, uint8_t slotB);

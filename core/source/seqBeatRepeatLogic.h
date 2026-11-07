@@ -85,13 +85,20 @@ struct BrParams
 {
     uint8_t step[BP_COUNT];
     uint8_t mode;
+    // Plan 026: settings of the MLR page that share this sidecar (it is the file of the CUT page): jump quantise (seqcut::Quant), the tracks
+    // of slot A / B. Defaults beat (2), 0, 1. Saved only when changed (sidecar version 2); the defaults keep version 1.
+    uint8_t mlrQuant, mlrSlotA, mlrSlotB;
     BrParams() { reset(); }
     void reset()
     {
         for (int i = 0; i < BP_COUNT; i++)
             step[i] = defaultStep((Param)i);
         mode = beatrepeat::MODE_MIX;
+        mlrQuant = 2;
+        mlrSlotA = 0;
+        mlrSlotB = 1;
     }
+    bool mlrDefault() const { return mlrQuant == 2 && mlrSlotA == 0 && mlrSlotB == 1; }
     static uint8_t defaultStep(Param p)
     {
         switch (p)
@@ -108,7 +115,7 @@ struct BrParams
         for (int i = 0; i < BP_COUNT; i++)
             if (step[i] != defaultStep((Param)i))
                 return false;
-        return mode == beatrepeat::MODE_MIX;
+        return mode == beatrepeat::MODE_MIX && mlrDefault();
     }
     bool operator==(const BrParams& o) const { return memcmp(this, &o, sizeof(*this)) == 0; }
     beatrepeat::Settings settings() const
@@ -125,12 +132,14 @@ struct BrParams
         return s;
     }
 
-    // ---- sidecar "seqbrpt.bin": frame of seqSidecarLogic.h, magic "SBRP", version 1, payload = the 7 steps + mode (8 bytes) ----
-    // Oldest version that fits: version 1 is the only layout; a later version appends bytes (this reader takes the 8 it knows and
-    // leaves the rest), a newer file than the reader is never rewritten (FRAME_NEWER).
+    // ---- sidecar "seqbrpt.bin": frame of seqSidecarLogic.h, magic "SBRP", payload = the 7 steps + mode (8 bytes, version 1), plus (version 2)
+    // the MLR page settings: quantise, slot A track, slot B track (11 bytes) ----
+    // Oldest version that fits: a file whose MLR settings are the defaults is written as version 1 (readable by every earlier firmware);
+    // version 2 only when the quantise or a slot track was changed. The reader takes the bytes it knows and leaves the rest, a newer file
+    // than the reader is never rewritten (FRAME_NEWER).
     static const char* magic() { return "SBRP"; }
-    enum : uint8_t { kVersion = 1 };
-    enum : size_t { kPayload = 8, kFileMax = kPayload + seqsidecar::kOverhead };
+    enum : uint8_t { kVersion = 2 };
+    enum : size_t { kPayload = 8, kPayload2 = 11, kFileMax = kPayload2 + seqsidecar::kOverhead };
     void raw(uint8_t* p) const
     {
         p[0] = step[BP_AUTOGRID];
@@ -141,12 +150,15 @@ struct BrParams
         p[5] = step[BP_PITCH];
         p[6] = step[BP_DECAY];
         p[7] = mode;
+        p[8] = mlrQuant;
+        p[9] = mlrSlotA;
+        p[10] = mlrSlotB;
     }
     uint16_t hash() const
     {
-        uint8_t b[kPayload];
+        uint8_t b[kPayload2];
         raw(b);
-        return seqsidecar::crc16(b, kPayload);
+        return seqsidecar::crc16(b, kPayload2);
     }
     size_t save(uint8_t* buf, size_t cap) const
     {
@@ -154,7 +166,8 @@ struct BrParams
             return 0;
         uint8_t* p = buf + seqsidecar::kHeader;
         raw(p);
-        return seqsidecar::frameWrite(buf, cap, magic(), kVersion, p, kPayload);
+        const bool v1 = mlrDefault(); // oldest version that fits
+        return seqsidecar::frameWrite(buf, cap, magic(), v1 ? 1 : 2, p, v1 ? kPayload : kPayload2);
     }
     // false: missing / bad frame (nothing changed). *newer: written by a newer mod version (leave the file alone). A short payload keeps
     // the defaults for what is missing; a value out of range falls back to its own default.
@@ -175,6 +188,12 @@ struct BrParams
                 d.step[order[i]] = p[i];
         if (n > 7 && p[7] < beatrepeat::MODE_COUNT)
             d.mode = p[7];
+        if (v >= 2 && n >= kPayload2 && p[8] < 7 && p[9] < 16 && p[10] < 16 && p[9] != p[10]) // 7 = seqcut::Q_COUNT
+        {
+            d.mlrQuant = p[8];
+            d.mlrSlotA = p[9];
+            d.mlrSlotB = p[10];
+        }
         *this = d;
         return true;
     }

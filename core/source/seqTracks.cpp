@@ -154,6 +154,7 @@ void seqCutInit()
     seqcut::Hooks h = { 0, cutNoteMap, cutTrackPos, cutTrackSteps, cutStopNote, cutSampleTrack };
     c->setHooks(h);
     c->setSectionMode(true); // MLR: two slots of 16 pads on the musical grid (plan 016 A)
+    c->setDeliberate(true);  // plan 026: a two-pad loop starts only after both pads were held (the layer sends the engage command)
     seqEngine.setCut(c); // published last (release)
 }
 

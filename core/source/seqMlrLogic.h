@@ -205,24 +205,25 @@ inline void waveFold(WaveCol& c, const int16_t* s, int n, int stride)
 inline int waveColStep(int j, int sectionLen) { return (j * sectionLen) / kWaveCols; }
 
 // ---- lane screen (geometry, models) ---------------------------------------------------------------------------------------------
-constexpr int kMlrLaneX = 88;     // x of the lane: 16 pads of 38 px
-constexpr int kMlrPadW = 38;
-constexpr int kMlrLaneW = 16 * kMlrPadW; // 608
+constexpr int kMlrLaneX = 88;     // x of the lane: 16 pads of 32 px (plan 026: narrower, the room goes to the 4 x 2 block of the pad settings)
+constexpr int kMlrPadW = 32;
+constexpr int kMlrLaneW = 16 * kMlrPadW; // 512
 constexpr int kMlrLaneTop = 70;
 constexpr int kMlrLaneH = 164;
 constexpr int kMlrLaneStride = 172;
-constexpr int kMlrBlockX = 700;   // names of the extra pads: 2 columns of 49 px (cells 47 wide)
+constexpr int kMlrBlockX = 604;   // names of the extra pads: 4 columns x 2 rows like the pads cols 9-12 (cells 47 wide, pitch 49)
+constexpr int kMlrCellW = 47, kMlrCellPitch = 49, kMlrCellH = 76, kMlrCellPitchY = 80;
 constexpr int kMlrWaveMid = 120;  // y of the waveform centre inside a lane (offset from the lane top)
 
 struct SlotInfo
 {
-    uint8_t track, flags, flags2, spp, sec, nsec, pads, loopLo, loopHi, picking, muted, rec, waveOk, pad_[3];
+    uint8_t track, flags, flags2, spp, sec, nsec, pads, loopLo, loopHi, picking, muted, rec, waveOk, engage, pad_[2]; // engage: plan 026, 0..100
     uint16_t cacheMask, noteMask, has, pad2_;
     WaveCol wave[kWaveCols];
 };
 struct MlrModel
 {
-    uint8_t recHeld, legend, pickSlot, pad_;
+    uint8_t recHeld, legend, pickSlot, quant; // quant: jump quantise (seqcut::Quant, plan 026)
     uint8_t legendPad[kSlots]; // legend only: the pad each playhead is on (0xFF none), so the legend follows the playhead
     uint8_t pad2_[2];
     SlotInfo slot[kSlots];
