@@ -85,9 +85,9 @@ legend-preview: preview_legend.cpp legendstub/FT812.h ../interface/seqPlay/seqPl
 	build/preview_legend$(EXE) build/preview
 	python legend_preview.py build/preview
 
-build/seq_play_tests$(EXE): test_play.cpp ../source/seqPlayLogic.h ../source/seqTracksLogic.h $(HRSRC)
+build/seq_play_tests$(EXE): test_play.cpp ../source/seqPlayLogic.h ../source/seqTracksLogic.h $(HRSRC) ../../seqgen/chordarp.cpp ../../seqgen/camelot.h
 	mkdir -p build
-	$(CXX) $(CXXFLAGS) test_play.cpp $(HRSRC) -o $@
+	$(CXX) $(CXXFLAGS) test_play.cpp $(HRSRC) ../../seqgen/chordarp.cpp -o $@
 
 build/seq_fx_tests$(EXE): test_fx.cpp ../source/seqFxDsp.h ../source/seqFxLogic.h ../source/seqSidecarLogic.h ../libs/Audio/Polyverb/ring_reverb.h
 	mkdir -p build
