@@ -44,3 +44,10 @@ priority 7 below audio (needs raising + measuring), Windows built-in UAC1 multic
 re-enumeration, flash (stereo 6-8 KB, multichannel 10-12 KB). Firmware update is via SD, not affected.
 Staged: 0 descriptor spike (enumeration on macOS / Windows / iOS, MIDI still works) → 1 stereo master → 2 10 ch.
 Flash: A + B together > the current margin → flash savings first (%f printf ~8 KB, random-name tables ~14.7 KB).
+
+## Owner decisions 2026-11-07
+- SAMPLE_MEMORY_SIZE -256 KB for the record ring: yes.
+- Focus: on-device master recording (part A) now; USB stays MIDI (must keep working). USB audio (part B) later — the
+  owner has it implemented in another fork, look at that first.
+- Provisional (lead): /Recorded/ folder, limiter tap (no metronome/preview), header 44100 Hz; flash room from the
+  %f printf conversion (no visible change) if needed.
