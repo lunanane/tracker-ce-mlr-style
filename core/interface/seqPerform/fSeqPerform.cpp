@@ -944,14 +944,12 @@ void cSeqPerform::refreshScreen()
         {
             b.canLatch = 0;
             paramRowText(page, r, b.name, sizeof(b.name), b.value, sizeof(b.value));
-            const char* how = b.status == RS_DIALLED ? "dialled in with the fader (DISENGAGE restores the earlier value)"
-                                                     : "project value (saved with the project)";
+            const char* how = b.status == RS_DIALLED ? "DISENGAGE restores the earlier value" : "";
             if (page == PAGE_PING && r == 3)
             {
                 char w[16];
                 widthText(w, sizeof(w), seqFxBandwidth());
-                snprintf(b.note, sizeof(b.note), "jog = center   Shift+jog = width %s   %s", w,
-                         b.status == RS_DIALLED ? "dialled in" : "project value");
+                snprintf(b.note, sizeof(b.note), "jog = center   Shift+jog = width %s", w);
             }
             else if (page == PAGE_REV && r == 3)
             {
@@ -960,8 +958,7 @@ void cSeqPerform::refreshScreen()
                     snprintf(h, sizeof(h), "off");
                 else
                     khzText(h, sizeof(h), (int)(seqfx::hpHz(seqFxHighpass()) + 0.5f));
-                snprintf(b.note, sizeof(b.note), "jog = low cut %s   Shift+jog = diffusion   %s", h,
-                         b.status == RS_DIALLED ? "dialled in" : "project value");
+                snprintf(b.note, sizeof(b.note), "jog = low cut %s   Shift+jog = diffusion", h);
             }
             else
             {

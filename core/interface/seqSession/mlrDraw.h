@@ -180,7 +180,13 @@ template <class C> void lane(C& c, const SlotInfo& s, int k)
     snprintf(buf, sizeof(buf), "sec %d/%d%s", s.sec + 1, s.nsec < 1 ? 1 : s.nsec, (s.flags2 & V2_HOLD) ? " H" : "");
     c.text(10, top + 52, 5, TX_LEFT, buf);
     const char* st = (s.flags & VF_STOPPED) ? "STOP" : ((s.flags & VF_REC) ? "REC" : ((s.flags & VF_RECORDED) ? "REPLAY" : (s.loopLo <= s.loopHi ? "LOOP" : ((s.flags & VF_RATCHET) ? "RATCHET" : ((s.flags & VF_ACTIVE) ? "OFF GRID" : "")))));
-    if (st[0]) c.text(10, top + 72, 5, TX_LEFT, st);
+    if (st[0])
+    {
+        // the state word in the colour of its meaning (docs/seq-ui-colours.md): REC red, loop yellow like its bracket, the rest quiet grey
+        c.color((s.flags & VF_STOPPED) ? seqpal::kText : ((s.flags & VF_REC) ? kRed : (s.loopLo <= s.loopHi && !(s.flags & VF_RECORDED) ? seqpal::kInstr : seqpal::kText)));
+        c.text(10, top + 72, 5, TX_LEFT, st);
+        c.color(seqpal::kText);
+    }
     if (s.muted) c.text(10, top + 90, 5, TX_LEFT, "MUTED");
     const uint8_t rate = viewRate(View{ 0, 1, 0, s.flags, 0, 0, 0, 0 });
     if ((s.flags & VF_REVERSE) || rate != 1)
@@ -266,13 +272,16 @@ template <class C> void drawMlr(C& c, const MlrModel& m)
     else
     {
         c.color(seqpal::kText);
-        snprintf(buf, sizeof(buf), "A: T%d %s    B: T%d %s", m.slot[0].track + 1, gridName((m.slot[0].flags2 & V2_GRID8) ? GRID_8 : GRID_4),
-                 m.slot[1].track + 1, gridName((m.slot[1].flags2 & V2_GRID8) ? GRID_8 : GRID_4));
-        c.text(m.legend ? 270 : 150, mid, 5, TX_CENTERY, buf);
-        if (!m.legend)
+        if (m.legend) // the lanes say track and grid themselves; only the legend needs the line
+        {
+            snprintf(buf, sizeof(buf), "A: T%d %s    B: T%d %s", m.slot[0].track + 1, gridName((m.slot[0].flags2 & V2_GRID8) ? GRID_8 : GRID_4),
+                     m.slot[1].track + 1, gridName((m.slot[1].flags2 & V2_GRID8) ? GRID_8 : GRID_4));
+            c.text(270, mid, 5, TX_CENTERY, buf);
+        }
+        else
         {
             snprintf(buf, sizeof(buf), "Q %s  (jog)", quantName(m.quant));
-            c.text(470, mid, 5, TX_CENTERY, buf);
+            c.text(150, mid, 5, TX_CENTERY, buf);
         }
     }
     if (m.legend)

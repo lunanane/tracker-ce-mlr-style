@@ -42,7 +42,7 @@ inline void fillView(strFaderView& vw, const Snap& s)
     vw.master = 1;
     vw.page = s.page;
     vw.pageMask = s.pageDot;
-    snprintf(vw.tracks, sizeof(vw.tracks), "page pads: column 9");
+    snprintf(vw.tracks, sizeof(vw.tracks), "page: pad col 9");
     static const char* const kState[5] = { "DISENGAGED", "ENGAGED", "LATCHED", "PROJECT", "DIALLED" };
     for (uint8_t r = 0; r < 4; r++)
     {
@@ -56,12 +56,8 @@ inline void fillView(strFaderView& vw, const Snap& s)
             b.status = s.dialled[r] ? RS_DIALLED : RS_PROJECT;
             snprintf(b.name, sizeof(b.name), "%s", s.name[r]);
             snprintf(b.value, sizeof(b.value), "%s", s.value[r]);
-            if (r == 0)
-                snprintf(b.note, sizeof(b.note), "%s", s.dialled[r] ? "dialled in (DISENGAGE restores the earlier level)"
-                                                                   : "level of the return (project value, saved with the project)");
-            else
-                snprintf(b.note, sizeof(b.note), "%s", s.dialled[r] ? "dialled in (DISENGAGE restores the earlier value)"
-                                                                   : "project value (saved with the project)");
+            if (s.dialled[r]) // a stored value needs no note: the state word says PROJECT
+                snprintf(b.note, sizeof(b.note), "DISENGAGE restores the earlier value");
             snprintf(b.state, sizeof(b.state), "%s", kState[b.status]);
         }
         else if (s.page == MP_HP)
@@ -85,7 +81,7 @@ inline void fillView(strFaderView& vw, const Snap& s)
                     hpFreqText(b.value, sizeof(b.value), s.hpCut);
                 else
                     snprintf(b.value, sizeof(b.value), "off");
-                snprintf(b.note, sizeof(b.note), "pad 1 = 60 Hz ... pad 8 = 5.1 kHz   DISENGAGE = off");
+                snprintf(b.note, sizeof(b.note), "pad 1 = 60 Hz ... pad 8 = 5.1 kHz");
                 snprintf(b.state, sizeof(b.state), "%s", s.hpCut ? "ACTIVE" : "OFF");
             }
             else
@@ -94,7 +90,7 @@ inline void fillView(strFaderView& vw, const Snap& s)
                 b.engaged = s.hpRes != 1;
                 snprintf(b.name, sizeof(b.name), "Resonance");
                 snprintf(b.value, sizeof(b.value), "%d %%", seqbr::percentOf(s.hpRes));
-                snprintf(b.note, sizeof(b.note), "12 dB per octave   saved with the project");
+                snprintf(b.note, sizeof(b.note), "12 dB per octave");
                 snprintf(b.state, sizeof(b.state), "%s", s.hpRes != 1 ? "DIALLED" : "PROJECT");
                 b.status = s.hpRes != 1 ? RS_DIALLED : RS_PROJECT;
             }
@@ -140,12 +136,12 @@ inline void fillView(strFaderView& vw, const Snap& s)
     }
     // the summary line
     if (s.page == MP_REVERB)
-        snprintf(vw.summary, sizeof(vw.summary), "REVERB  the Perform REV faders, with the return level   DISENGAGE (pad 12): Shift = all four");
+        snprintf(vw.summary, sizeof(vw.summary), "REVERB   DISENGAGE (pad 12): Shift = all four");
     else if (s.page == MP_DELAY)
-        snprintf(vw.summary, sizeof(vw.summary), "DELAY  ping-pong %s (pad 10, row 3)   sync %s (row 4)   DISENGAGE (pad 12): Shift = all four",
+        snprintf(vw.summary, sizeof(vw.summary), "DELAY   ping-pong %s (pad 10, row 3)   sync %s (row 4)   Shift+DISENGAGE = all four",
                  s.pingpong ? "ON" : "off", s.sync ? "ON" : "off");
     else if (s.page == MP_HP)
-        snprintf(vw.summary, sizeof(vw.summary), "HIGH-PASS  master low cut   cutoff pad 1-8, DISENGAGE (pad 12, row 1) = off");
+        snprintf(vw.summary, sizeof(vw.summary), "HIGH-PASS   DISENGAGE (pad 12, row 1) = off");
     else
     {
         char st[24];

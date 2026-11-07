@@ -237,7 +237,7 @@ void cSeqPlayLegend::update()
     API_COLOR(th.white);
     API_CMD_TEXT(kLegendX, (int16_t)(kLegendY - 27), font3, OPT_CENTERY, cap);
     API_CMD_TEXT(kLegendX, (int16_t)(kLegendY - 9), font1, OPT_CENTERY, seqplay::legendHelp(st));
-    API_COLOR(th.yellow);
+    API_COLOR(0x909090); // a hint, not a focus: yellow is reserved for "where you are" (docs/seq-ui-colours.md)
     API_CMD_TEXT((int16_t)(kLegendX + 12 * kLegendCellW), (int16_t)(kLegendY - 44), font1, OPT_CENTERY | OPT_RIGHTX, "tap track again to close");
     API_COLOR(th.white);
     API_COLOR(0x000000);

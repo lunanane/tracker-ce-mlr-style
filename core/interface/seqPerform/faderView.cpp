@@ -6,6 +6,7 @@
 #include "FT812.h"
 #include "Themes.h"
 #include "display.h"
+#include "seqPalette.h"
 
 using namespace seqperf;
 
@@ -63,9 +64,11 @@ void drawText(uint32_t color, uint8_t alpha, int16_t x, int16_t y, uint8_t font,
         API_CMD_TEXT(x, y, fonts[font].handle, opt | OPT_CENTERY, s);
 }
 
+// colours with intent (docs/seq-ui-colours.md): yellow = focus, blue = stored value, green = live / dialled in, orange = latched,
+// red = disengage / danger, grey = off
 struct Pal
 {
-    uint32_t bright, panel, cell, live, latched, project, off, warn;
+    uint32_t bright, panel, cell, live, latched, value, off, warn, focus, ink;
 };
 
 Pal palette()
@@ -75,11 +78,13 @@ Pal palette()
     p.bright = th.white;
     p.panel = th.grey_22;
     p.cell = th.activeLabelsColors[1];
-    p.live = th.green;
-    p.latched = th.orange;
-    p.project = th.cyan;
+    p.live = seqpal::kSceneRgb[7];
+    p.latched = seqpal::kSceneRgb[5];
+    p.value = seqpal::mix(seqpal::kFx2, seqpal::kBg, 100);
     p.off = th.white;
-    p.warn = th.red;
+    p.warn = 0xE0383E;
+    p.focus = seqpal::kInstr;
+    p.ink = 0x101010;
     return p;
 }
 
@@ -90,7 +95,7 @@ uint32_t statusColor(const Pal& p, uint8_t status)
         case RS_LIVE:
         case RS_DIALLED: return p.live;
         case RS_LATCHED: return p.latched;
-        case RS_PROJECT:
+        case RS_PROJECT: return p.value;
         default: return p.off;
     }
 }
@@ -132,9 +137,9 @@ void cSeqFaderView::update()
         int16_t x, w;
         chipPos(i, x, w, view->master != 0);
         bool active = view->page == i;
-        fill(active ? p.bright : p.panel, 255, x, kChipY, w, kChipH);
+        fill(active ? p.focus : p.panel, 255, x, kChipY, w, kChipH);
         if (view->pageMask & (1u << i))
-            fill(p.live, 255, x + w - 11, kChipY + 3, 8, 8);
+            fill(active ? p.ink : p.live, 255, x + w - 11, kChipY + 3, 8, 8);
     }
 
     for (uint8_t r = 0; r < 4; r++)
@@ -142,32 +147,22 @@ void cSeqFaderView::update()
         const strFaderBand& b = view->band[r];
         int16_t y0 = kBand0 + r * kBandStep;
         uint32_t sc = statusColor(p, b.status);
-        uint8_t dim = b.usable ? 255 : 90;
-        // band panel, status stripe on the left
-        fill(p.panel, 255, 6, y0, 788, kBandH);
+        // band panel, status stripe on the left; a row that is not used is just a faint panel
+        fill(p.panel, b.usable ? 255 : 90, 6, y0, 788, kBandH);
+        if (!b.usable)
+            continue;
         fill(sc, b.status == RS_OFF ? 70 : 255, 6, y0, 5, kBandH);
 
         // the long bar: 8 steps, lit from the left
         for (uint8_t c = 0; c < 8; c++)
         {
-            bool lit = c < b.step && b.usable;
             int16_t x = kBarX + c * kCellStep;
-            if (lit)
-            {
-                bool soft = b.status == RS_PROJECT;
-                fill(sc, soft ? 150 : 255, x, y0 + kCellY, kCellW, kCellH);
-            }
-            else
-            {
-                fill(p.cell, dim, x, y0 + kCellY, kCellW, kCellH);
-            }
+            fill(c < b.step ? sc : p.cell, 255, x, y0 + kCellY, kCellW, kCellH);
         }
 
         // LATCH and DISENGAGE cells (pad columns 11 and 12)
         if (b.canLatch)
             fill(b.latched ? p.latched : p.cell, 255, kSideX, y0 + 8, 78, 26);
-        else
-            fill(p.cell, 60, kSideX, y0 + 8, 78, 26);
         fill(b.engaged ? p.warn : p.cell, b.engaged ? 255 : 90, kSideX + 86, y0 + 8, 78, 26);
     }
 
@@ -192,7 +187,7 @@ void cSeqFaderView::update2()
         int16_t x, w;
         chipPos(i, x, w, view->master != 0);
         bool active = view->page == i;
-        drawText(active ? p.panel : p.bright, active ? 255 : 170, x + w / 2, kChipY + kChipH / 2, F14B, OPT_CENTERX, chipName(i, view->master != 0), w - 4);
+        drawText(active ? p.ink : p.bright, active ? 255 : 170, x + w / 2, kChipY + kChipH / 2, F14B, OPT_CENTERX, chipName(i, view->master != 0), w - 4);
     }
     // tracks the FX and sends affect (the 8 buttons under the screen select them)
     drawText(view->noTracks ? p.warn : p.bright, view->noTracks ? 255 : 200, 794, kChipY + kChipH / 2, F14, OPT_RIGHTX, view->tracks, 380);
@@ -207,18 +202,28 @@ void cSeqFaderView::update2()
         const strFaderBand& b = view->band[r];
         int16_t y0 = kBand0 + r * kBandStep;
         uint32_t sc = statusColor(p, b.status);
-        uint8_t dim = b.usable ? 255 : 120;
         char num[2] = { (char)('1' + r), 0 };
-        drawText(p.bright, dim, 22, y0 + 24, F17B, OPT_CENTERX, num, 20);
-        drawText(p.bright, dim, 36, y0 + 18, F14B, 0, b.name, 178);
-        drawText(b.status == RS_OFF ? p.bright : sc, b.status == RS_OFF ? 150 : 255, 36, y0 + 38, F17, 0, b.value, 178);
+        if (!b.usable)
+        {
+            drawText(p.bright, 110, 22, y0 + 24, F17B, OPT_CENTERX, num, 20);
+            continue;
+        }
+        const bool stored = b.status == RS_PROJECT;
+        drawText(p.bright, 200, 22, y0 + 24, F17B, OPT_CENTERX, num, 20);
+        drawText(p.bright, 190, 36, y0 + 18, F14, 0, b.name, 178);
+        drawText(stored ? p.bright : (b.status == RS_OFF ? p.bright : sc), b.status == RS_OFF ? 150 : 255, 36, y0 + 40, F17B, 0, b.value, 178);
         drawText(p.bright, 150, 36, y0 + 62, F12, 0, b.note, 580);
 
-        drawText(b.latched ? p.panel : p.bright, b.canLatch ? 255 : 70, kSideX + 39, y0 + 21, F12, OPT_CENTERX, b.lat[0] ? b.lat : "LATCH", 76);
+        if (b.canLatch)
+            drawText(b.latched ? p.ink : p.bright, 255, kSideX + 39, y0 + 21, F12, OPT_CENTERX, b.lat[0] ? b.lat : "LATCH", 76);
         drawText(p.bright, b.engaged ? 255 : 110, kSideX + 86 + 39, y0 + 21, F12, OPT_CENTERX, b.dis[0] ? b.dis : "DISENGAGE", 76);
-        drawText(b.status == RS_OFF ? p.bright : sc, b.status == RS_OFF ? 140 : 255, kSideX + 82, y0 + 54, F14B, OPT_CENTERX, b.state, 160);
+        // the state word: loud only when it differs from the stored value
+        if (stored || b.status == RS_OFF)
+            drawText(p.bright, 110, kSideX + 82, y0 + 54, F12, OPT_CENTERX, b.state, 160);
+        else
+            drawText(sc, 255, kSideX + 82, y0 + 54, F14B, OPT_CENTERX, b.state, 160);
     }
 
-    drawText(p.bright, 230, 14, kFooterY + 15, F17, 0, view->summary, 770);
+    drawText(p.bright, 190, 14, kFooterY + 15, F14, 0, view->summary, 770);
     API_RESTORE_CONTEXT();
 }
