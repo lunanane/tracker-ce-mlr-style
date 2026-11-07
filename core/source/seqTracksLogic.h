@@ -102,6 +102,7 @@ inline bool isNotePad(uint8_t type, uint8_t pad)
     if (type == TYPE_CHORDARP) return col <= 5;
     if (type == TYPE_MONO) return col < 8;
     if (type == TYPE_PLINKY) return !(col == 11 && padRow(pad) == 3); // every pad but the Setup pad
+    if (type == TYPE_HR_FIRST + 4) return col < 8 && padRow(pad) < 3;  // HR Bass (seqgen::HR_BASS): the 24 scale keys (the preset row and the extras are controls); only the Latch uses this
     return false;
 }
 
@@ -193,5 +194,56 @@ inline uint32_t projectId(const char* path, const char* name)
     for (const char* p = name; p && *p; p++) h = (h ^ (uint8_t)*p) * 16777619u;
     return h;
 }
+
+
+// ---- plan 025: Latch. A pad press toggles a held-key sequencer on / off instead of only sounding while the pad is held.
+// ENGINE latch (the engine filters the pads): Chord/Arp, Strings (Plinky) and the HR Bass; default Off.
+// SCRIPT latch (the script latches a root on a tap, Latch off = it sounds while the pad is held): HR Arp Lines, Chord Stabs, Arp Seq, Chord/Arp;
+// default On (the script's own behaviour). Step sequencers (Mono, Euclid, Grid Seq, Step Follow) have no latch.
+enum LatchKind : uint8_t { LATCH_NONE = 0, LATCH_ENGINE = 1, LATCH_SCRIPT = 2 };
+inline uint8_t latchKind(uint8_t type)
+{
+    if (type == TYPE_CHORDARP || type == TYPE_PLINKY) return LATCH_ENGINE;
+    if (!isHrType(type)) return LATCH_NONE;
+    const uint8_t hr = (uint8_t)(type - TYPE_HR_FIRST); // seqgen::HrType order: Arp Lines, Chord Stabs, Arp Seq, Chord Arp, Bass, Euclid, Grid Seq, Step Follow
+    return hr <= 3 ? LATCH_SCRIPT : hr == 4 ? LATCH_ENGINE : LATCH_NONE;
+}
+inline bool latchDefault(uint8_t type) { return latchKind(type) == LATCH_SCRIPT; }
+
+// The engine latch: physical pads in, "logical" pad events out. A press that starts a new gesture (no pad is down) either switches off
+// everything latched (it hits a latched pad) or replaces the latched pads by the new one; presses while a finger is already down join the
+// group (a chord / several strings). Releases are never forwarded. Pure bit logic: the engine applies the result.
+struct PadLatch
+{
+    uint64_t phys = 0;  // pads physically down
+    uint64_t held = 0;  // pads the sequencer sees as pressed
+    // returns the pads to release; *press = true when the pad is to be pressed
+    uint64_t down(uint8_t pad, bool* press)
+    {
+        const uint64_t bit = (uint64_t)1 << pad;
+        uint64_t rel = 0;
+        *press = true;
+        if (phys == 0)
+        {
+            rel = held;
+            if (held & bit)
+                *press = false; // the same pad (or one of the chord) again: off
+            held = 0;
+        }
+        else if (held & bit)
+            *press = false; // a second finger on a latched pad: nothing new
+        if (*press)
+            held |= bit;
+        phys |= bit;
+        return rel;
+    }
+    void up(uint8_t pad) { phys &= ~((uint64_t)1 << pad); }
+    uint64_t clear()
+    {
+        const uint64_t r = held;
+        held = 0;
+        return r;
+    }
+};
 
 }  // namespace seqlogic

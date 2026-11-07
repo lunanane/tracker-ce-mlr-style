@@ -11,6 +11,7 @@
 #include "seqTracksRec.h"
 #include "seqCut.h"
 #include "seqPlinkySeqLogic.h"
+#include "seqParamsLogic.h"
 
 namespace seqtracks {
 
@@ -57,6 +58,15 @@ class Engine
     void leds(uint8_t track, uint8_t out[seqlogic::kPads]) const;
     bool playing() const { return playing_; }
 
+    // ---- plan 025: the sequencer's settings as parameters (seqParamsLogic.h tables) and Latch ----
+    // postParam: main loop -> audio (applied at the next audio block); idx = flat index into the type's table, value inside its range.
+    bool postParam(uint8_t track, uint8_t idx, int value);
+    // The current values of the track's table (main loop; a short critical section keeps a script from being rebuilt under the read).
+    void paramValues(uint8_t track, int8_t out[seqparams::kMaxParams]) const;
+    bool hasLatch(uint8_t track) const { return track < kTracks && seqlogic::latchKind(t_[track].type) != seqlogic::LATCH_NONE; }
+    bool latchOn(uint8_t track) const;
+    void applyParam(uint8_t track, uint8_t idx, int value); // direct (audio context / host tests)
+
     // ---- Plinky type (plan 010 B): one track at a time plays the voice ----
     uint8_t plinkyOwner(bool withPending = true) const; // the Plinky track (or the one about to become it), 0xFF = none
     const seqplinky::Setup& plinkySetup() const { return pl_; }
@@ -86,7 +96,9 @@ class Engine
     // Version 1 and 2 share one layout; version 2 may carry the HR trailer. Both load. Saving writes version 1 while no track uses a
     // HYPER_RASP type (so older mod versions can still read the file) and version 2 otherwise. The HR block is the settings of the
     // track's HYPER_RASP script.
-    enum { kSidecarVersionV1 = 1, kSidecarVersion = 2, kSidecarMax = 8 + seqlogic::kTracks * (4 + seqgen::ChordArp::kSerialSize + seqgen::Mono::kSerialSize + seqgen::HrScript::kMaxSerial) + 2 };
+    // Version 3 (plan 025) adds the per-track Latch bytes after the HR trailer; it is written only when a Latch differs from the type's default.
+    enum { kSidecarVersionV1 = 1, kSidecarVersion = 2, kSidecarVersionV3 = 3,
+           kSidecarMax = 8 + seqlogic::kTracks * (5 + seqgen::ChordArp::kSerialSize + seqgen::Mono::kSerialSize + seqgen::HrScript::kMaxSerial) + 2 };
     size_t saveState(uint8_t* buf, size_t cap) const; // 0 = buffer too small
     bool loadState(const uint8_t* buf, size_t len);   // false = invalid frame (nothing changed); a bad track block only turns that track Off
     void resetState();                                // all tracks Off, fresh state
@@ -106,6 +118,7 @@ class Engine
 
     // Direct (non-queued) variants, also used by the host tests.
     void applyPad(uint8_t track, uint8_t pad, bool down, uint8_t velo = 0);
+    void applyPadRaw(uint8_t track, uint8_t pad, bool down, uint8_t velo);
     void applyType(uint8_t track, uint8_t type);
     void drain();
     enum { REC_STOP = 0, REC_PUNCH = 1, REC_LOOP = 2, REC_STOP_PATTERN = 3 }; // REC_STOP_PATTERN: ends the take, the reason is "pattern changed"
@@ -155,6 +168,9 @@ class Engine
         uint8_t sounding[16];
         int16_t grpNote;    // sample track: lowest note of the current simultaneous group (-1 none)
         uint32_t grpEpoch;  // group the note belongs to
+        seqlogic::PadLatch pl; // plan 025: engine latch (Chord/Arp, Strings, HR Bass)
+        uint8_t latch;      // engine latch on
+        bool quiet;         // latched Chord/Arp paused by Stop (silenced, resumes with Play)
     };
 
     bool push(const Cmd& c);
@@ -177,6 +193,10 @@ class Engine
     bool recLive(uint8_t track) const { return ((takenMask_ >> track) & 1u) || heldPads(t_[track]) > 0; } // the sequencer is played on the track (also while it is muted)
     void scanMono(Track& t);
     void padPlinky(uint8_t track, uint8_t pad, bool down, uint8_t velo);
+    int getById(const Track& t, uint8_t id) const;
+    void setById(uint8_t track, uint8_t id, int v);
+    void applyLatch(uint8_t track, bool on);
+    void latchRelease(uint8_t track);
     bool plinkyNoteHeld(uint8_t note, uint8_t exceptPad) const;
     void createHr(uint8_t track, uint8_t type);
     static void sink(void* user, const seqgen::Event& e);

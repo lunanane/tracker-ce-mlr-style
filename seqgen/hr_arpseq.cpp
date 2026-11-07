@@ -92,7 +92,7 @@ void HrArpSeq::soundLatched() {
 
 void HrArpSeq::pressRoot(int pc) {
   stopSounding();
-  if (latched_ == pc && manual_) {
+  if (latched_ == pc && manual_ && !hold_) {
     latched_ = 0;
     manual_ = 0;
     poolN_ = 0;
@@ -188,6 +188,7 @@ void HrArpSeq::grid(int x, int y, int z) {
   bool chordKey = (x == 7 && y <= 3);
   bool stepKey = (y == 4 && x <= 8);
   if (z != 1) {
+    if (hold_ && manual_ && y <= 2 && x <= 6 && latched_ == (y - 1) * 6 + x) unlatchRoot();
     if (chordKey && chordDown_ > 0) --chordDown_;
     if (stepKey) {
       if (heldSteps_ > 0) --heldSteps_;
@@ -269,7 +270,17 @@ int HrArpSeq::getParam(int id) const {
 }
 
 void HrArpSeq::setParam(int id, int v) {
-  if (id == P_PLAYING) setPlay(v != 0);
+  static const uint8_t kMax[5] = {2, 4, 4, 12, 3};
+  int c = id == P_MODE ? MODE : id == P_SPEED ? SPEED : id == P_DIR ? DIRECTION : id == P_GROOVE ? GROOVE : id == P_OCT ? OCTAVE : -1;
+  if (c >= 0) {  // plan 025: the cycle buttons' values from the parameter page
+    cyc_[c] = (uint8_t)(v < 1 ? 1 : v > kMax[c] ? kMax[c] : v);
+    stopSounding();
+    soundLatched();
+  } else if (id == P_QUALITY) {
+    if ((v == 1 || v == 2) && v != quality_) toggleQuality();
+  } else if (id == P_PLAYING) {
+    setPlay(v != 0);
+  }
 }
 
 // ---------------------------------------------------------------- serialization (settings: the programmed steps and the loop range)

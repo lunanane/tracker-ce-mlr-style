@@ -49,6 +49,12 @@ void SeqPlayOverlay::createControl()
     pitchTraceView.createControl(); // plan 013 V: before the legend control = drawn on top of it
 #endif
     control_ = display.createControl<cSeqPlayLegend>(&prop);
+    // plan 025: the settings page, a second control of the same class: one display stage of its own (the legend keeps its stage)
+    strControlProperties propP = prop;
+    viewP_.mode = SeqPlayViewData::HIDDEN;
+    propP.data = &viewP_;
+    viewPShownValid_ = false;
+    controlP_ = display.createControl<cSeqPlayLegend>(&propP);
 }
 
 void SeqPlayOverlay::moduleStart()
@@ -64,6 +70,10 @@ void SeqPlayOverlay::moduleStop()
     patternHidden_ = false;
     budgetHidden_ = false;
     control_ = -1; // the interface destroys the module's controls right after stop()
+    controlP_ = -1;
+    prmShown_ = false;
+    delTaken_ = false;
+    viewPShownValid_ = false;
 #ifdef FEATURE_PLINKY
     pitchTraceView.forget(); // plan 013 V
 #endif
@@ -469,6 +479,19 @@ bool SeqPlayOverlay::button(uint8_t b, uint8_t state)
     if (active_ && b == interfaceButtonParams)
         return paramsKey(state);
 
+    // plan 025: Delete resets the value under the cursor of the settings page (its hold / release belong to it as well)
+    if (active_ && editKeyIndex(b) == seqplay::EditKeys::K_DELETE && (delTaken_ || (state == buttonPress && routable() && paramsOpen())))
+    {
+        if (state == buttonPress)
+        {
+            delTaken_ = true;
+            paramsDefault();
+        }
+        else if (state == buttonRelease)
+            delTaken_ = false;
+        return true;
+    }
+
     // v0.3.2: Note / Instr / FX1 / FX2 / Copy / Insert / Delete are the stock keys (also their hold and release, whatever the popups do)
     if (active_ && editKeyIndex(b) < seqplay::EditKeys::K_COUNT)
         return editKey(b, state);
@@ -492,17 +515,27 @@ bool SeqPlayOverlay::button(uint8_t b, uint8_t state)
             return true;
         case interfaceButtonUp:
         case interfaceButtonDown:
-            if (!plinkyOpen_)
+            if (!plinkyOpen_ && !paramsOpen())
                 return false; // the stock cursor
             if (state == buttonPress)
-                plinkyNav(b);
+            {
+                if (plinkyOpen_)
+                    plinkyNav(b);
+                else
+                    paramsNav(b);
+            }
             return true;
         case interfaceButtonLeft:
         case interfaceButtonRight:
-            if (plinkyOpen_)
+            if (plinkyOpen_ || paramsOpen())
             {
                 if (state == buttonPress)
-                    plinkyNav(b);
+                {
+                    if (plinkyOpen_)
+                        plinkyNav(b);
+                    else
+                        paramsNav(b);
+                }
                 return true;
             }
             if (PE().buttons->isButtonPressed(interfaceButtonPattern))
@@ -577,10 +610,128 @@ bool SeqPlayOverlay::pot(uint8_t pot, int16_t value)
         plinkyJog(value); // the parameter overlay owns the wheel (also with a screen button held)
         return true;
     }
+    if (pot == interfacePot0 && routable() && hold_.mask == 0 && paramsOpen())
+    {
+        paramsJog(value); // plan 025: the settings page owns the wheel while the pad legend is shown (Shift = fine)
+        return true;
+    }
     if (pot != interfacePot0 || !routable() || hold_.mask == 0 || PE().buttons->isButtonPressed(interfaceButtonShift))
         return false; // without a held screen button (or with Shift) the wheel is the stock wheel
     jog(value);
     return true;
+}
+
+//##############################################################################################
+//###############################  SEQUENCER SETTINGS (025)     ################################
+//##############################################################################################
+// The pad legend (a tap on the selected track) now comes with the track's sequencer settings above it, as a parameter page like the
+// PolySynth's: Left / Right move between the cells of a row, Up / Down between the rows, the jog wheel changes the value, Delete resets it.
+bool SeqPlayOverlay::paramsOpen() const
+{
+    return active_ && !plinkyOpen_ && !list_.open && legend_.visible() && seqparams::tab(seqEngine.type(selected())) != nullptr;
+}
+
+void SeqPlayOverlay::paramsNav(uint8_t button)
+{
+    const seqparams::Tab* tb = seqparams::tab(seqEngine.type(selected()));
+    if (!tb)
+        return;
+    prmCur_.fix(*tb);
+    if (button == interfaceButtonLeft) prmCur_.horizontal(*tb, -1);
+    else if (button == interfaceButtonRight) prmCur_.horizontal(*tb, 1);
+    else if (button == interfaceButtonUp) prmCur_.vertical(*tb, -1);
+    else prmCur_.vertical(*tb, 1);
+}
+
+void SeqPlayOverlay::paramsPost(uint8_t flat, int value)
+{
+    const uint8_t t = selected();
+    if (!seqEngine.postParam(t, flat, value))
+        return;
+    prmPendTrack_ = t;
+    prmPendIdx_ = flat;
+    prmPendVal_ = (int8_t)value;
+    prmPendUntil_ = seqNowMs() + 60; // the audio side takes it at the next block
+    if (flat < seqparams::kMaxParams)
+        prmVals_[flat] = (int8_t)value;
+}
+
+void SeqPlayOverlay::paramsJog(int16_t value)
+{
+    const uint8_t t = selected();
+    const seqparams::Tab* tb = seqparams::tab(seqEngine.type(t));
+    if (!tb)
+        return;
+    prmCur_.fix(*tb);
+    const uint8_t flat = prmCur_.flat(*tb);
+    const seqparams::Desc& d = seqparams::desc(*tb, flat);
+    int cur = prmVals_[flat];
+    if (prmPendIdx_ == flat && prmPendTrack_ == t && (int32_t)(seqNowMs() - prmPendUntil_) < 0)
+        cur = prmPendVal_;
+    const int nv = seqparams::jogValue(d, cur, value, PE().buttons->isButtonPressed(interfaceButtonShift));
+    if (nv != cur)
+        paramsPost(flat, nv);
+}
+
+void SeqPlayOverlay::paramsDefault()
+{
+    const uint8_t t = selected();
+    const uint8_t type = seqEngine.type(t);
+    const seqparams::Tab* tb = seqparams::tab(type);
+    if (!tb)
+        return;
+    prmCur_.fix(*tb);
+    const uint8_t flat = prmCur_.flat(*tb);
+    paramsPost(flat, seqparams::defaultOf(type, seqparams::desc(*tb, flat)));
+}
+
+// every pass while the legend is shown: the values come from the engine; the page is hidden otherwise
+void SeqPlayOverlay::refreshParams(uint8_t sel)
+{
+    const uint8_t type = seqEngine.type(sel);
+    const seqparams::Tab* tb = seqparams::tab(type);
+    const bool show = view_.mode == SeqPlayViewData::LEGEND && tb != nullptr;
+    seqparams::Model& m = viewP_.prm;
+    if (show)
+    {
+        if (prmTrack_ != sel || prmType_ != type)
+        {
+            prmTrack_ = sel; // another track or type: the cursor starts at the top left
+            prmType_ = type;
+            prmCur_ = seqparams::Cursor();
+        }
+        prmCur_.fix(*tb);
+        seqEngine.paramValues(sel, prmVals_);
+        if (prmPendIdx_ < seqparams::kMaxParams && prmPendTrack_ == sel && (int32_t)(seqNowMs() - prmPendUntil_) < 0)
+            prmVals_[prmPendIdx_] = prmPendVal_;
+        viewP_.mode = SeqPlayViewData::PARAMS;
+        m.on = 1;
+        m.type = type;
+        m.track = (uint8_t)(sel + 1);
+        m.sec = prmCur_.sec;
+        m.idx = prmCur_.idx;
+        memcpy(m.v, prmVals_, sizeof(m.v));
+    }
+    else
+    {
+        viewP_.mode = SeqPlayViewData::HIDDEN;
+        m = seqparams::Model();
+        prmTrack_ = 0xFF;
+    }
+    prmShown_ = show;
+    if (controlP_ < 0)
+        return;
+    if (viewPShownValid_ && memcmp(&viewP_, &viewPShown_, sizeof(viewP_)) == 0)
+        return;
+    const bool wasHidden = !viewPShownValid_ || viewPShown_.mode == SeqPlayViewData::HIDDEN;
+    viewPShown_ = viewP_;
+    viewPShownValid_ = true;
+    if (viewP_.mode == SeqPlayViewData::HIDDEN)
+        display.setControlHide(controlP_);
+    else if (wasHidden)
+        display.setControlShow(controlP_);
+    display.refreshControl(controlP_);
+    display.synchronizeRefresh();
 }
 
 //##############################################################################################
@@ -603,7 +754,7 @@ void SeqPlayOverlay::plinkyClose()
 void SeqPlayOverlay::syncPattern()
 {
     cPatternEditor& pe = PE();
-    bool want = active_ && plinkyOpen_;
+    bool want = active_ && (plinkyOpen_ || prmShown_); // the settings page (plan 025) covers the pattern as well
     if (active_ && !want && !patternHidden_ && view_.mode != SeqPlayViewData::HIDDEN && display.shownRamBytes() > kFrameBudget)
     {
         want = true;
@@ -918,6 +1069,8 @@ void SeqPlayOverlay::refreshView()
     }
     else
         view_.notes = seqnotes::Band(); // the legend, the list and the overlay cover the band
+
+    refreshParams(sel);
 
     if (viewShownValid_ && memcmp(&view_, &viewShown_, sizeof(view_)) == 0)
         return;

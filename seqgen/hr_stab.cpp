@@ -174,7 +174,7 @@ void HrStab::publishRoot(int pc) {
 }
 
 void HrStab::pressRoot(int pc) {
-  if (latched_ == pc) {
+  if (latched_ == pc && !hold_) {
     stopVoices();
     latched_ = 0;
     blink_ = 0;
@@ -201,7 +201,10 @@ void HrStab::pressChord(int i) {
 }
 
 void HrStab::grid(int x, int y, int z) {
-  if (z != 1) return;
+  if (z != 1) {
+    if (hold_ && z == 0 && y <= 2 && x <= 6 && latched_ == (y - 1) * 6 + x) unlatchRoot();
+    return;
+  }
   if (y <= 2 && x <= 6) pressRoot((y - 1) * 6 + x);
   else if (x == 1 && y == 3) pressQuality(1);
   else if (x == 1 && y == 4) pressQuality(2);

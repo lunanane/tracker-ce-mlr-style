@@ -68,6 +68,7 @@ class ChordArp : public SeqBase {
   void lockButton(bool down);           // LCK: down = locked mode + root press sets the lock; up = release
   void start();                         // transport start/continue (c31 250/251)
   void stop();                          // transport stop (c31 252): all live notes off
+  void retrigger();                     // plan 025: a latched chord that Stop silenced sounds again (chord type, speed 1; the arp types resume by themselves)
   void pulse();                         // one 24-PPQN clock pulse
   void tick();                          // one framework tick (30 ms): blink, pulses, gate timer
   void advanceMs(uint32_t dtMs);        // convenience: accumulates dt and calls tick() per 30 ms
