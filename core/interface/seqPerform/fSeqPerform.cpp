@@ -17,6 +17,7 @@
 #include "performanceMode/performanceMode.h"
 #include "seqTracks.h"
 #include "seqFx.h"
+#include "seqPerform/faderParams.h"
 
 using namespace seqperf;
 
@@ -30,10 +31,6 @@ static void functActionButton(uint8_t button, uint8_t state);
 static void functPads(uint8_t pad, uint8_t state, int16_t velo);
 static void functEncoder(int16_t value);
 static void functPlayAction();
-
-static const char* const kRateNames[19] = { "8",    "6",   "4",   "3",    "2",    "3/2",  "1",
-                                            "3/4",  "1/2", "3/8", "1/3",  "1/4",  "3/16", "1/6",
-                                            "1/8",  "1/12", "1/16", "1/24", "1/32" };
 
 static void projectChanged()
 {
@@ -279,134 +276,7 @@ uint8_t cSeqPerform::rowStep(uint8_t row) const
         return st.fxStep[page][row];
     if (row == 0)
         return st.sendStep[page - PAGE_PING];
-    if (page == PAGE_PING)
-    {
-        if (row == 1)
-            return nearestStep((v.delayParams & 0x40) ? P_RATE : P_TIME,
-                               (v.delayParams & 0x40) ? (double)(v.delayParams & 0x3F) : (double)v.delayTime);
-        if (row == 2)
-            return nearestStep(P_FEEDBACK, v.delayFeedback);
-        return nearestStep(P_FILTER, v.delayFilterFrequency);
-    }
-    if (row == 1)
-        return nearestStep(P_SIZE, v.reverb.size);
-    if (row == 2)
-        return nearestStep(P_DAMP, v.reverb.damp);
-    return nearestStep(P_PREDELAY, v.reverb.predelay);
-}
-
-// Real project values, set like the Master page does (same engine setters, project marked changed).
-static void setParamStep(uint8_t pg, uint8_t row, uint8_t step)
-{
-    auto& v = mtProject.values;
-    if (pg == PAGE_PING)
-    {
-        if (row == 1)
-        {
-            if (v.delayParams & 0x40)
-            {
-                v.delayParams = (uint8_t)((v.delayParams & 0xC0) | (uint8_t)paramValue(P_RATE, step));
-                engine.setDelayParams(v.delayParams);
-            }
-            else
-            {
-                v.delayTime = (uint16_t)paramValue(P_TIME, step);
-                engine.setDelayTime(v.delayTime);
-            }
-        }
-        else if (row == 2)
-        {
-            v.delayFeedback = (uint8_t)paramValue(P_FEEDBACK, step);
-            engine.setDelayFeedback(v.delayFeedback);
-        }
-        else
-        {
-            v.delayFilterFrequency = (uint16_t)paramValue(P_FILTER, step);
-            engine.setDelayFilterFrequency(v.delayFilterFrequency);
-        }
-    }
-    else
-    {
-        float f = (float)paramValue(row == 1 ? P_SIZE : (row == 2 ? P_DAMP : P_PREDELAY), step);
-        if (row == 1)
-        {
-            v.reverb.size = f;
-            engine.setReverbSize(f);
-        }
-        else if (row == 2)
-        {
-            v.reverb.damp = f;
-            engine.setReverbDamp(f);
-        }
-        else
-        {
-            v.reverb.predelay = f;
-            engine.setReverbPredelay(f);
-        }
-    }
-    projectChanged();
-}
-
-// Current project value of a PING / REV fader 2-4 (what DISENGAGE restores later).
-static float currentParam(uint8_t pg, uint8_t row)
-{
-    auto& v = mtProject.values;
-    if (pg == PAGE_PING)
-        return row == 1 ? (float)v.delayTime : (row == 2 ? (float)v.delayFeedback : (float)v.delayFilterFrequency);
-    return row == 1 ? v.reverb.size : (row == 2 ? v.reverb.damp : v.reverb.predelay);
-}
-
-// DISENGAGE of a dialled project-value row: the value it had before the fader touched it comes back. Only what differs is set
-// (no needless delay-time jump). PING fader 2 restores time and rate index and keeps the current ping-pong / sync bits.
-static void restoreParam(uint8_t pg, uint8_t row, float pre, uint8_t preRate)
-{
-    auto& v = mtProject.values;
-    if (pg == PAGE_PING)
-    {
-        if (row == 1)
-        {
-            if (v.delayTime != (uint16_t)pre)
-            {
-                v.delayTime = (uint16_t)pre;
-                engine.setDelayTime(v.delayTime);
-            }
-            uint8_t np = (uint8_t)((v.delayParams & 0xC0) | (preRate & 0x3F));
-            if (np != v.delayParams)
-            {
-                v.delayParams = np;
-                engine.setDelayParams(v.delayParams);
-            }
-        }
-        else if (row == 2)
-        {
-            if (v.delayFeedback != (uint8_t)pre)
-            {
-                v.delayFeedback = (uint8_t)pre;
-                engine.setDelayFeedback(v.delayFeedback);
-            }
-        }
-        else if (v.delayFilterFrequency != (uint16_t)pre)
-        {
-            v.delayFilterFrequency = (uint16_t)pre;
-            engine.setDelayFilterFrequency(v.delayFilterFrequency);
-        }
-    }
-    else if (row == 1)
-    {
-        v.reverb.size = pre;
-        engine.setReverbSize(pre);
-    }
-    else if (row == 2)
-    {
-        v.reverb.damp = pre;
-        engine.setReverbDamp(pre);
-    }
-    else
-    {
-        v.reverb.predelay = pre;
-        engine.setReverbPredelay(pre);
-    }
-    projectChanged();
+    return paramRowStep(page, row);
 }
 
 void cSeqPerform::faderPress(uint8_t row, uint8_t step)
@@ -432,7 +302,7 @@ void cSeqPerform::faderPress(uint8_t row, uint8_t step)
     else
     {
         st.dialParam(page, row, currentParam(page, row), (uint8_t)(mtProject.values.delayParams & 0x3F)); // remembers the value before the first touch
-        setParamStep(page, row, step);
+        applyParamStep(page, row, step);
     }
     screenDirty = true;
 }
@@ -951,23 +821,6 @@ void cSeqPerform::refreshPads()
     }
 }
 
-static void khz(char* out, size_t n, int hz)
-{
-    if (hz >= 1000)
-        snprintf(out, n, "%d.%d kHz", hz / 1000, (hz % 1000) / 100);
-    else
-        snprintf(out, n, "%d Hz", hz);
-}
-
-// the delay bandpass center: the top of the range is "open" (the filter is out of the signal path, as in stock)
-static void centreText(char* out, size_t n, int hz)
-{
-    if (seqfx::centerOpen((uint16_t)hz))
-        snprintf(out, n, "open");
-    else
-        khz(out, n, hz);
-}
-
 // bandwidth in octaves, one decimal ("1.0 oct")
 static void widthText(char* out, size_t n, uint8_t twelfths)
 {
@@ -1090,36 +943,7 @@ void cSeqPerform::refreshScreen()
         else
         {
             b.canLatch = 0;
-            if (page == PAGE_PING)
-            {
-                bool sync = (v.delayParams & 0x40) != 0;
-                if (r == 1 && sync)
-                {
-                    snprintf(b.name, sizeof(b.name), "Rate");
-                    snprintf(b.value, sizeof(b.value), "%s", kRateNames[(v.delayParams & 0x3F) < 19 ? (v.delayParams & 0x3F) : 18]);
-                }
-                else if (r == 1)
-                {
-                    snprintf(b.name, sizeof(b.name), "Time");
-                    snprintf(b.value, sizeof(b.value), "%d ms", (int)v.delayTime);
-                }
-                else if (r == 2)
-                {
-                    snprintf(b.name, sizeof(b.name), "Feedback");
-                    snprintf(b.value, sizeof(b.value), "%d", (int)v.delayFeedback);
-                }
-                else
-                {
-                    snprintf(b.name, sizeof(b.name), "BP center");
-                    centreText(b.value, sizeof(b.value), (int)v.delayFilterFrequency);
-                }
-            }
-            else
-            {
-                float f = r == 1 ? v.reverb.size : (r == 2 ? v.reverb.damp : v.reverb.predelay);
-                snprintf(b.name, sizeof(b.name), "%s", r == 1 ? "Size" : (r == 2 ? "Damp" : "Predelay"));
-                snprintf(b.value, sizeof(b.value), "%d", (int)(f * 100 + 0.5f));
-            }
+            paramRowText(page, r, b.name, sizeof(b.name), b.value, sizeof(b.value));
             const char* how = b.status == RS_DIALLED ? "dialled in with the fader (DISENGAGE restores the earlier value)"
                                                      : "project value (saved with the project)";
             if (page == PAGE_PING && r == 3)
@@ -1135,7 +959,7 @@ void cSeqPerform::refreshScreen()
                 if (seqFxHighpass() == 0)
                     snprintf(h, sizeof(h), "off");
                 else
-                    khz(h, sizeof(h), (int)(seqfx::hpHz(seqFxHighpass()) + 0.5f));
+                    khzText(h, sizeof(h), (int)(seqfx::hpHz(seqFxHighpass()) + 0.5f));
                 snprintf(b.note, sizeof(b.note), "jog = low cut %s   Shift+jog = diffusion   %s", h,
                          b.status == RS_DIALLED ? "dialled in" : "project value");
             }
@@ -1168,7 +992,7 @@ void cSeqPerform::refreshScreen()
         if (seqFxHighpass() == 0)
             snprintf(h, sizeof(h), "off");
         else
-            khz(h, sizeof(h), (int)(seqfx::hpHz(seqFxHighpass()) + 0.5f));
+            khzText(h, sizeof(h), (int)(seqfx::hpHz(seqFxHighpass()) + 0.5f));
         snprintf(vw.summary, sizeof(vw.summary), "REV  %s low cut %s   %s diffusion %d   type %s", shiftView ? "jog:" : "[jog]", h,
                  shiftView ? "[Shift+jog]" : "Shift+jog:", (int)(v.reverb.diffusion * 100 / 0.85f + 0.5f),
                  seqfx::reverbTypeName(seqFxReverbType()));

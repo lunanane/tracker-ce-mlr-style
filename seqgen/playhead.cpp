@@ -13,6 +13,7 @@ void Playhead::reset() {
   loopActive_ = false; loA_ = loB_ = 0; ovr_ = false; holdLeft_ = 0; forceJump_ = false;
   recording_ = false; recActive_ = false; gstep_ = 0;
   recWait_ = false; recClosing_ = false; pendClr_ = false; immediate_ = false; gridSet_ = false; recStart_ = 0; gridG_ = 0;
+  gate_ = false; engaged_ = false; ratchetOn_ = false; ratchetHalf_ = false; ratchetPos_ = -1; ratchetPad_ = 0; lastPad_ = 0;
   for (int i = 0; i < kMaxRec; ++i) recBuf_[i] = 0;
   for (int i = 0; i < kMaxRec / 8; ++i) { recHold_[i] = 0; recHas2_[i] = 0; recBack2_[i] = 0; }
 }
@@ -24,12 +25,12 @@ void Playhead::setLength(int steps) {
 }
 void Playhead::setColumns(int n) {
   columns_ = (uint8_t)(n == 12 ? 12 : (n == 16 ? 16 : 8)); spc_ = 0; holdSec_ = -1;
-  held_ = 0; loopActive_ = false; pendLoop_ = false; pendStart_ = false; pendJump_ = -1; ovr_ = false;
+  held_ = 0; loopActive_ = false; pendLoop_ = false; pendStart_ = false; pendJump_ = -1; ovr_ = false; engaged_ = false; ratchetPos_ = -1;
 }
 void Playhead::setGrid(int steps) {
   if (steps < 1) { setColumns(columns_); return; }
   columns_ = 16; spc_ = (uint8_t)clampv(steps, 1, 16);
-  held_ = 0; loopActive_ = false; pendLoop_ = false; pendStart_ = false; pendJump_ = -1; ovr_ = false;
+  held_ = 0; loopActive_ = false; pendLoop_ = false; pendStart_ = false; pendJump_ = -1; ovr_ = false; engaged_ = false; ratchetPos_ = -1;
 }
 void Playhead::setHoldSection(int sec) { holdSec_ = (int8_t)clampv(sec, -1, 127); }
 int Playhead::shownBase() const {
@@ -43,6 +44,10 @@ int Playhead::activePads() const {
   return left <= 0 ? 0 : (left >= 16 * spc_ ? 16 : (left + spc_ - 1) / spc_);
 }
 void Playhead::setQuantise(int steps) { quant_ = (uint8_t)clampv(steps, 1, 64); }
+void Playhead::setRatchet(bool on, bool half) {
+  ratchetOn_ = on; ratchetHalf_ = on && half;
+  if (!on) ratchetPos_ = -1;
+}
 void Playhead::setRate(Rate r) { rate_ = (uint8_t)(r > RATE_DOUBLE ? RATE_NORMAL : r); holdLeft_ = 0; }
 void Playhead::setReverse(bool rev) { rev_ = rev; }
 void Playhead::setImmediate(bool on) { immediate_ = on; }
@@ -75,12 +80,17 @@ int Playhead::succ(int p, int lo, int hi) const {
 bool Playhead::press(int col) {
   if (col < 0 || col >= columns_) return false;
   if ((held_ >> col) & 1) return true;
+  // A hold from another section (the pad was never let go, or its release got lost) must not decide where this pad acts: the pads act on
+  // the section the screen shows, so the old hold is forgotten (the held range of a loop being built always belongs to ONE section).
+  if (spc_ && held_ != 0 && heldBase_ != shownBase()) { held_ = 0; engaged_ = false; ratchetPos_ = -1; }
   const int base = (spc_ && held_ == 0) ? shownBase() : (spc_ ? heldBase_ : 0);
   if (spc_ && base + col * spc_ >= (int)length_) return false;  // an inactive pad: behind the end of the pattern
   if (held_ == 0) heldBase_ = (uint16_t)base;
   held_ |= (uint16_t)(1u << col);
-  if (heldCount() == 1) {
-    // a single pad: jump there, and the jump ends a loop that is still latched
+  lastPad_ = (uint8_t)col;
+  if (heldCount() == 1 || (gate_ && !engaged_)) {
+    // a single pad: jump there, and the jump ends a loop that is still latched. With the gate a further pad in the hand is a jump too
+    // (the loop only starts with engage())
     pendJump_ = (int16_t)(spc_ ? base + col * spc_ : columnPosition(col)); pendLoop_ = false; pendStart_ = false; pendClr_ = true;
   } else {
     int a, b; heldRange(a, b);
@@ -90,15 +100,31 @@ bool Playhead::press(int col) {
   return true;
 }
 
+bool Playhead::engage() {
+  if (heldCount() < 2) return false;
+  int a, b; heldRange(a, b);
+  pendLoop_ = true; pendA_ = (uint8_t)a; pendB_ = (uint8_t)b; pendClr_ = false; pendBase_ = heldBase_; pendStart_ = true;
+  pendJump_ = -1; engaged_ = true; ratchetPos_ = -1;
+  return true;
+}
+
 void Playhead::release(int col) {
   if (col < 0 || col >= columns_ || !((held_ >> col) & 1)) return;
   held_ &= (uint16_t)~(1u << col);
-  if (heldCount() >= 2) {
+  if (heldCount() >= 2 && (!gate_ || engaged_)) {
     int a, b; heldRange(a, b);
     pendLoop_ = true; pendA_ = (uint8_t)a; pendB_ = (uint8_t)b; pendBase_ = heldBase_;
   }
-  // fewer than two pads left: the loop stays (latched, MLR style) and so does a loop that waits for its grid; a single pad in the
-  // row jumps and ends it, RESYNC / SYNC ALL end it too
+  if (heldCount() < 2) engaged_ = false;
+  if (ratchetPos_ >= 0 && col == ratchetPad_) ratchetPos_ = -1;  // the ratchet lasts as long as its pad is held; playback goes on from there
+  // fewer than two pads left: the loop stays (latched, MLR style) and so does a loop that waits for its grid; a single pad in the row
+  // jumps and ends it, RESYNC / SYNC ALL end it too
+}
+
+void Playhead::armRatchet(int target) {
+  // a jump just played: if the pad that asked for it is still down, holding it ratchets
+  if (ratchetOn_ && heldCount() >= 1 && ((held_ >> lastPad_) & 1u) && !engaged_) { ratchetPos_ = (int16_t)target; ratchetPad_ = lastPad_; }
+  else ratchetPos_ = -1;
 }
 
 void Playhead::closeRecording() {
@@ -127,7 +153,7 @@ void Playhead::resync(uint32_t globalStep) {
   gstep_ = globalStep;
   pos_ = (int16_t)(rev_ ? (target + 1) % length_ : (target + length_ - 1) % length_);  // next step() lands on `target`
   held_ = 0; loopActive_ = false; pendLoop_ = false; pendStart_ = false; pendJump_ = -1; pendClr_ = false;
-  ovr_ = false; holdLeft_ = 0; forceJump_ = true;
+  ovr_ = false; holdLeft_ = 0; forceJump_ = true; engaged_ = false; ratchetPos_ = -1;
   recording_ = false; recActive_ = false; recCount_ = 0; recWait_ = false; recClosing_ = false;
 }
 
@@ -157,8 +183,10 @@ Playhead::StepOut Playhead::step() {
       int lo, hi; rangeOf(loA_, loB_, lo, hi);
       if (pendStart_ || pos_ < lo || pos_ > hi) { applied = true; target = rev_ ? hi : lo; }
     }
-    if (!applied && pendJump_ >= 0) { applied = true; target = pendJump_; if (pendClr_) loopActive_ = false; }
+    if (!applied && pendJump_ >= 0) { applied = true; target = pendJump_; if (pendClr_) loopActive_ = false; armRatchet(target); }
     pendLoop_ = false; pendStart_ = false; pendJump_ = -1; pendClr_ = false;
+    // ratchet: the pad is still down at the next quantise boundary - its position plays again
+    if (!applied && ratcheting()) { applied = true; target = ratchetPos_; }
   }
   if (applied) ovr_ = true;
   else if (held_ == 0) ovr_ = false;
@@ -189,6 +217,8 @@ Playhead::StepOut Playhead::step() {
   }
   if (!has2) pos2 = pos;
   if (!hold && !replay && rate_ == RATE_DOUBLE) { has2 = true; pos2 = succ(pos, lo, hi); }
+  // quantise 1/32: the held pad's position plays twice per step (the second time in the middle of the step)
+  if (!has2 && !hold && ratchetHalf_ && pos == ratchetPos_ && ratcheting()) { has2 = true; pos2 = pos; }
 
   // 3. flags
   StepOut o;
@@ -228,7 +258,7 @@ bool Playhead::applyNow(StepOut& o) {
     int lo, hi; rangeOf(loA_, loB_, lo, hi);
     if (pendStart_ || pos_ < lo || pos_ > hi) target = rev_ ? hi : lo;
   }
-  if (target < 0 && pendJump_ >= 0) { target = pendJump_; if (pendClr_) loopActive_ = false; }
+  if (target < 0 && pendJump_ >= 0) { target = pendJump_; if (pendClr_) loopActive_ = false; armRatchet(target); }
   pendLoop_ = false; pendStart_ = false; pendJump_ = -1; pendClr_ = false;
   if (target < 0) return false;
   if (target >= len) target = len - 1;

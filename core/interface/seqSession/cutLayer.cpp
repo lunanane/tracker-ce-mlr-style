@@ -10,6 +10,7 @@ using namespace seqcut;
 
 namespace
 {
+void settingsChanged();
 uint8_t s_slot[kSlots] = { 0, 1 }; // the track each slot holds (plan 016 A: slot A = pad rows 1-2, slot B = rows 3-4)
 int8_t s_pick = -1;                // slot whose two pad rows are the track picker, -1 = none
 bool s_legend = false;             // the pad legend is shown on the screen
@@ -22,6 +23,24 @@ bool s_init = false;
 uint8_t s_quant = Q_DEFAULT;
 bool s_quantPending = false;
 uint8_t s_blink = 0;
+// Deliberate loops (plan 026): two pads of one slot held for kEngageMs start the loop; a second pad alone is only a jump. Per slot: 0 =
+// idle, 1 = both held, timing, 2 = engaged (the loop was started; further pads extend it at once).
+uint32_t s_now = 0;
+uint8_t s_eState[kSlots] = { 0, 0 };
+uint32_t s_eStart[kSlots] = { 0, 0 };
+
+uint8_t heldStepPads(uint8_t slot)
+{
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < kCutPads; i++)
+        if (s_heldTrack[i] >= 0)
+        {
+            const PadInfo pi = padInfo((uint8_t)(i % kCols), (uint8_t)(i / kCols));
+            if (pi.role == PR_STEP && pi.slot == slot)
+                n++;
+        }
+    return n;
+}
 
 void init()
 {
@@ -96,6 +115,7 @@ void cutAssignSlot(uint8_t slot, uint8_t track)
     if (s_slot[slot ^ 1] == track)
         s_slot[slot ^ 1] = s_slot[slot];
     s_slot[slot] = track;
+    settingsChanged();
 }
 
 void cutPickToggle(uint8_t slot)
@@ -123,6 +143,7 @@ void cutBrToggle()
             seqBrAct(r);
         }
         s_brOn = false;
+        seqBrPreroll(false); // plan 024: nothing is recorded ahead any more (a latched repeat goes on by itself)
         return;
     }
     // MLR pads in the hand are let go first (a held pad would otherwise never see its release), the track picker closes
@@ -131,6 +152,13 @@ void cutBrToggle()
             cutPad((uint8_t)(i % kCols), (uint8_t)(i / kCols), false);
     s_pick = -1;
     s_brOn = true;
+    seqBrPreroll(true); // plan 024: record ahead while the beat repeat pads are shown, so the first press has audio at once
+}
+
+void cutLayerShown(bool shown)
+{
+    init();
+    seqBrPreroll(shown && s_brOn);
 }
 
 namespace
@@ -187,6 +215,14 @@ void cutPad(uint8_t col, uint8_t row, bool down, bool shift)
             post(track, SUB_REC, true, 0); // the take starts with the first pad of the slot
         }
         post(track, SUB_PAD, down, pi.idx);
+        const uint8_t n = heldStepPads(pi.slot);
+        if (n < 2)
+            s_eState[pi.slot] = 0;
+        else if (s_eState[pi.slot] == 0)
+        {
+            s_eState[pi.slot] = 1; // the second pad of the slot went down: the clock for the deliberate loop starts
+            s_eStart[pi.slot] = s_now;
+        }
         return;
     }
     if (!down)
@@ -289,6 +325,7 @@ void cutSyncAll()
     // local state first: the audio side drops held pads and takes with the command, so no per-pad releases are posted for them
     memset(s_heldTrack, -1, sizeof(s_heldTrack));
     s_recTracks = 0;
+    s_eState[0] = s_eState[1] = 0;
     s_syncPending = true;
     trySync();
 }
@@ -298,6 +335,36 @@ void cutUpdate()
     if (!s_init)
         return;
     trySync();
+    for (uint8_t k = 0; k < kSlots; k++)
+    {
+        if (s_eState[k] != 1 || (uint32_t)(s_now - s_eStart[k]) < (uint32_t)kEngageMs)
+            continue;
+        int8_t track = -1;
+        for (uint8_t i = 0; i < kCutPads && track < 0; i++)
+            if (s_heldTrack[i] >= 0 && padInfo((uint8_t)(i % kCols), (uint8_t)(i / kCols)).role == PR_STEP &&
+                padInfo((uint8_t)(i % kCols), (uint8_t)(i / kCols)).slot == k)
+                track = s_heldTrack[i];
+        if (track < 0 || heldStepPads(k) < 2)
+            s_eState[k] = 0;
+        else if (s_nPending == 0 && !s_syncPending && seqEngine.postCut((uint8_t)track, packEngage()))
+            s_eState[k] = 2; // both pads were held long enough: the loop starts (the engine applies it at the quantise grid)
+    }
+}
+
+void cutUpdate(uint32_t nowMs)
+{
+    s_now = nowMs;
+    cutUpdate();
+}
+
+// 0 = no loop is being engaged on the slot, 1..100 = both pads are down, the loop starts at 100 (the screen shows "hold both" and the bar)
+uint8_t cutEngagePercent(uint8_t slot)
+{
+    if (slot >= kSlots || s_eState[slot] != 1)
+        return 0;
+    const uint32_t d = (uint32_t)(s_now - s_eStart[slot]);
+    const uint32_t p = d * 100u / (uint32_t)kEngageMs;
+    return (uint8_t)(p < 1 ? 1 : (p > 100 ? 100 : p));
 }
 
 // Rec is a toggle (plan 008 A): a press arms the take (the first pad on a row starts that row's take), the next press closes all
@@ -312,12 +379,47 @@ bool cutRecHeld() { return s_rec; }
 
 uint8_t cutQuantMode() { return s_quant; }
 
+namespace
+{
+// The page settings that are saved with the project (the beat repeat sidecar, plan 026): a change asks for the write.
+void settingsChanged()
+{
+    seqbr::Ui& ui = seqBrUi();
+    ui.prm.mlrQuant = s_quant;
+    ui.prm.mlrSlotA = s_slot[0];
+    ui.prm.mlrSlotB = s_slot[1];
+    seqbr::Result r = { seqbr::BA_SETTINGS, 0 };
+    seqBrAct(r);
+}
+} // namespace
+
 void cutQuantSet(uint8_t mode)
 {
     init();
     s_quant = (uint8_t)(mode % Q_COUNT);
     s_quantPending = true;
     trySync();
+    settingsChanged();
+}
+
+void cutQuantDial(int dir)
+{
+    init();
+    const uint8_t m = quantDial(s_quant, dir);
+    if (m != s_quant)
+        cutQuantSet(m);
+}
+
+void cutMlrLoad(uint8_t quant, uint8_t slotA, uint8_t slotB)
+{
+    s_quant = (uint8_t)(quant % Q_COUNT);
+    if (slotA < kCutTracks && slotB < kCutTracks && slotA != slotB)
+    {
+        s_slot[0] = slotA;
+        s_slot[1] = slotB;
+    }
+    if (s_init)
+        s_quantPending = true;
 }
 
 void cutQuantCycle() { cutQuantSet(quantNext(s_quant)); }

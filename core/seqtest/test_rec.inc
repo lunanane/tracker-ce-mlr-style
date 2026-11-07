@@ -353,6 +353,7 @@ static void test_mlr_gestures_through_layer()
     tAPad(a, 1, 1, true);
     run.runTo(run.stepsDone * 125 + 40);
     tAPad(a, 3, 1, true);
+    tHoldBoth();
     run.runTo(run.stepsDone * 125 + 1000);
     CHECK(c->view(1).loopLo == 1 && c->view(1).loopHi == 3);
     tAPad(a, 1, 1, false);
@@ -388,9 +389,9 @@ static void test_mlr_quantise_screen_button()
     cutUpdate();
     seqEngine.idleTick();
     CHECK(cutQuantMode() == Q_BEAT && c->quant() == Q_BEAT);
-    CHECK(a.buttonLabel(kScreenButtonQuant, lab) && strcmp(lab, "Q beat") == 0);
+    CHECK(a.buttonLabel(kScreenButtonQuant, lab) && strcmp(lab, "Q 1/4") == 0);
     // a tap cycles: beat -> bar -> off -> step -> beat; the release does nothing; the label shows the value
-    const char* want[4] = { "Q bar", "Q off", "Q step", "Q beat" };
+    const char* want[4] = { "Q 1 bar", "Q off", "Q 1/16", "Q 1/4" };
     const uint8_t mode[4] = { Q_BAR, Q_OFF, Q_STEP, Q_BEAT };
     for (int i = 0; i < 4; i++)
     {
@@ -506,6 +507,7 @@ static void test_mlr_quantise_grid()
         stepOnce(*c, f, g);
         c->apply(0, packArg(SUB_PAD, true, 1));
         c->apply(0, packArg(SUB_PAD, true, 3));
+        c->apply(0, packEngage()); // both pads held long enough
         seqcut::StepPlan p2 = stepOnce(*c, f, g); // g = 2
         seqcut::StepPlan p3 = stepOnce(*c, f, g); // g = 3
         seqcut::StepPlan p4 = stepOnce(*c, f, g); // g = 4: the beat
@@ -569,6 +571,7 @@ static void test_mlr_loop_latches()
     stepOnce(*c, f, g);
     c->apply(0, packArg(SUB_PAD, true, 1)); // columns 1..3 = positions 4..15
     c->apply(0, packArg(SUB_PAD, true, 3));
+    c->apply(0, packEngage()); // both pads held long enough
     c->apply(0, packArg(SUB_PAD, false, 1)); // both up before the boundary: the loop is still wanted
     c->apply(0, packArg(SUB_PAD, false, 3));
     StepPlan p = stepOnce(*c, f, g);
@@ -657,6 +660,7 @@ static void test_mlr_quantise_off_is_at_once()
     c->apply(0, packArg(SUB_PAD, false, 6));
     c->apply(0, packArg(SUB_PAD, true, 1));
     c->apply(0, packArg(SUB_PAD, true, 3));
+    c->apply(0, packEngage());
     CHECK(c->now(0, 16, pl) && pl.pos == 2 && c->view(0).loopLo == 1 && c->view(0).loopHi == 3);
     // step = the next boundary, never in between
     freshCut(f);

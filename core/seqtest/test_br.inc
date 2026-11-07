@@ -134,9 +134,9 @@ static void test_br_pad_map()
             if (col < 8)
                 CHECK(p.cell == BC_FADER && p.index == row && p.step == col + 1);
         }
-    CHECK(cells[BC_FADER] == 32 && cells[BC_PAGE] == 2 && cells[BC_MODE] == 3 && cells[BC_LATCH] == 1 && cells[BC_OFF] == 1 && cells[BC_RESET] == 3);
+    CHECK(cells[BC_FADER] == 32 && cells[BC_PAGE] == 3 && cells[BC_MODE] == 3 && cells[BC_LATCH] == 1 && cells[BC_OFF] == 1 && cells[BC_RESET] == 3);
     // columns 9-12 as documented
-    CHECK(mapPad(8, 0).cell == BC_PAGE && mapPad(8, 0).index == BG_REPEAT && mapPad(8, 1).index == BG_AUTO && mapPad(8, 2).cell == BC_NONE && mapPad(8, 3).cell == BC_NONE);
+    CHECK(mapPad(8, 0).cell == BC_PAGE && mapPad(8, 0).index == BG_REPEAT && mapPad(8, 1).index == BG_AUTO && mapPad(8, 2).cell == BC_PAGE && mapPad(8, 2).index == BG_FILTER && mapPad(8, 3).cell == BC_NONE); // plan 024: page FILTER
     CHECK(mapPad(9, 0).cell == BC_MODE && mapPad(9, 0).index == beatrepeat::MODE_MIX);
     CHECK(mapPad(9, 1).index == beatrepeat::MODE_INSERT && mapPad(9, 2).index == beatrepeat::MODE_GATE && mapPad(9, 3).cell == BC_NONE);
     CHECK(mapPad(10, 0).cell == BC_LATCH && mapPad(10, 1).cell == BC_NONE);
@@ -145,6 +145,7 @@ static void test_br_pad_map()
     // the rows per page
     CHECK(paramOf(BG_REPEAT, 0) == BP_GRIDPAD && paramOf(BG_REPEAT, 1) == BP_GATE && paramOf(BG_REPEAT, 2) == BP_DECAY && paramOf(BG_REPEAT, 3) == BP_PITCH);
     CHECK(paramOf(BG_AUTO, 0) == BP_INTERVAL && paramOf(BG_AUTO, 1) == BP_CHANCE && paramOf(BG_AUTO, 2) == BP_VARIATION && paramOf(BG_AUTO, 3) == BP_AUTOGRID);
+    CHECK(paramOf(BG_FILTER, 0) == BP_MIX && paramOf(BG_FILTER, 1) == BP_BPC && paramOf(BG_FILTER, 2) == BP_BPW && paramOf(BG_FILTER, 3) == BP_NONE);
     CHECK(kindOf(BP_GRIDPAD) == BK_MOMENTARY && kindOf(BP_INTERVAL) == BK_SELECT && kindOf(BP_AUTOGRID) == BK_SELECT && kindOf(BP_DECAY) == BK_BAR);
 }
 
@@ -229,7 +230,7 @@ static void test_br_leds_and_legend()
         CHECK(out[c] == LED_DIM);                                      // idle: no grid pad lit
     CHECK(out[12 + 7] == LED_BRIGHT && out[12 + 6] == LED_MID && out[12] == LED_MID);           // GATE 8: the full bar
     CHECK(out[24] == LED_BRIGHT && out[25] == LED_DIM);                                         // DECAY step 1
-    CHECK(out[8] == LED_BRIGHT && out[12 + 8] == LED_DIM && out[24 + 8] == LED_OFF && out[36 + 8] == LED_OFF);     // page pads
+    CHECK(out[8] == LED_BRIGHT && out[12 + 8] == LED_DIM && out[24 + 8] == LED_DIM && out[36 + 8] == LED_OFF);     // page pads // plan 024: row 3 is the FILTER page pad now
     CHECK(out[9] == LED_BRIGHT && out[12 + 9] == LED_DIM && out[24 + 9] == LED_DIM && out[36 + 9] == LED_OFF);     // mode pads: MIX
     CHECK(out[10] == LED_DIM && out[12 + 10] == LED_OFF);                                                          // latch off
     CHECK(out[11] == LED_DIM);                                                                                      // OFF, nothing to end
@@ -372,7 +373,7 @@ static void test_br_sidecar()
     p.step[BP_VARIATION] = 5;
     p.mode = beatrepeat::MODE_INSERT;
     const size_t n = p.save(buf, sizeof(buf));
-    CHECK(n == (size_t)BrParams::kFileMax && memcmp(buf, "SBRP", 4) == 0 && buf[4] == 1);     // oldest version that fits: 1
+    CHECK(n == (size_t)BrParams::kPayload + seqsidecar::kOverhead && memcmp(buf, "SBRP", 4) == 0 && buf[4] == 1);     // oldest version that fits: 1
     BrParams q;
     bool newer = true;
     CHECK(q.load(buf, n, &newer) && !newer && q == p && q.hash() == p.hash());
@@ -397,7 +398,7 @@ static void test_br_sidecar()
     // a newer file is flagged and never read; a corrupt one and another magic are refused; nothing changes on a failure
     uint8_t nf[32];
     memcpy(nf, buf, n);
-    nf[4] = 2;
+    nf[4] = 4; // newer than the reader (the reader knows versions 1, 2 (plan 026) and 3 (plan 024))
     uint16_t c = seqsidecar::crc16(nf, seqsidecar::kHeader + BrParams::kPayload);
     nf[seqsidecar::kHeader + BrParams::kPayload] = (uint8_t)(c & 255);
     nf[seqsidecar::kHeader + BrParams::kPayload + 1] = (uint8_t)(c >> 8);
@@ -533,6 +534,137 @@ static void test_br_screen_budget_and_bounds()
     }
 }
 
+// ---- plan 024: MIX level + band-pass page (FILTER), master high-pass fields, sidecar version 2, the pre-roll switch --------------------------------------
+static void test_br_024()
+{
+    using namespace seqbr;
+    // values: defaults are what the stage did before (full repeats, no filter)
+    BrParams d;
+    beatrepeat::Settings s = d.settings();
+    CHECK(s.mix == 100 && s.bpHz == 20000 && s.bpTw == 12 && s.hpIdx == 0 && s.hpRes == 0);
+    CHECK(d.isDefault() && d.v3Default());
+    BrParams p;
+    p.step[BP_MIX] = 4;
+    p.step[BP_BPC] = 5;
+    p.step[BP_BPW] = 8;
+    p.hpCut = 8;
+    p.hpRes = 8;
+    s = p.settings();
+    CHECK(s.mix == 43 && s.bpHz == 3200 && s.bpTw == 36 && s.hpIdx == 90 && s.hpRes == 100);
+    CHECK(!p.isDefault() && !p.v3Default());
+    CHECK(hpIdxOf(0) == 0 && hpIdxOf(1) == 13 && hpIdxOf(8) == 90);
+    for (uint8_t st = 2; st <= 8; st++)
+        CHECK(hpIdxOf(st) > hpIdxOf((uint8_t)(st - 1)) && hpIdxOf(st) <= seqfx::kHpMax);
+    for (uint8_t st = 2; st <= 8; st++)
+        CHECK(bpHzOf(st) == 2 * bpHzOf((uint8_t)(st - 1)) || st == 8); // octaves; the last step is open
+    CHECK(bpHzOf(8) >= seqfx::kOpenHz && bpTwOf(1) == seqfx::kBwMin && bpTwOf(8) == seqfx::kBwMax && bpTwOf(3) == seqfx::kBwDefault);
+    char buf[16];
+    valueText(BP_MIX, 1, buf, sizeof(buf));
+    CHECK(strcmp(buf, "0 %") == 0);
+    valueText(BP_MIX, 8, buf, sizeof(buf));
+    CHECK(strcmp(buf, "100 %") == 0);
+    valueText(BP_BPC, 8, buf, sizeof(buf));
+    CHECK(strcmp(buf, "open") == 0);
+    valueText(BP_BPC, 1, buf, sizeof(buf));
+    CHECK(strcmp(buf, "200 Hz") == 0);
+    valueText(BP_BPC, 6, buf, sizeof(buf));
+    CHECK(strcmp(buf, "6.4 kHz") == 0);
+    valueText(BP_BPW, 3, buf, sizeof(buf));
+    CHECK(strcmp(buf, "1.0 oct") == 0);
+    CHECK(strcmp(paramName(BP_MIX), "MIX LEVEL") == 0 && paramName(BP_NONE)[0] == 0 && paramHint(BP_NONE)[0] == 0);
+    // the controller on the FILTER page
+    Ui ui;
+    Result r[2];
+    CHECK(press(ui, 8, 2, true, r) == 0 && ui.page == BG_FILTER);
+    CHECK(press(ui, 3, 0, true, r) == 1 && r[0].act == BA_SETTINGS && ui.prm.step[BP_MIX] == 4 && ui.prm.settings().mix == 43);
+    CHECK(press(ui, 6, 1, true, r) == 1 && ui.prm.settings().bpHz == 12800);
+    CHECK(press(ui, 1, 2, true, r) == 1 && ui.prm.settings().bpTw == 8);
+    CHECK(press(ui, 5, 3, true, r) == 0);                // the unused row does nothing
+    CHECK(press(ui, 11, 3, true, r) == 0);               // ... and has nothing to reset
+    CHECK(press(ui, 11, 1, true, r) == 1 && ui.prm.step[BP_BPC] == 8 && ui.prm.settings().bpHz == 20000); // RESET: open
+    CHECK(press(ui, 11, 0, true, r) == 1 && r[0].act == BA_OFF);                                          // OFF works on every page
+    // LEDs and words of the page
+    uint8_t out[48];
+    fillLeds(ledsOf(ui), false, out);
+    CHECK(out[0] == LED_MID && out[3] == LED_BRIGHT && out[4] == LED_DIM);                 // MIX step 4
+    CHECK(out[12 + 7] == LED_BRIGHT && out[12 + 6] == LED_MID);                            // BP centre open = the full bar
+    CHECK(out[36] == LED_OFF && out[36 + 7] == LED_OFF);                                   // the unused row is dark
+    CHECK(out[24 + 8] == LED_BRIGHT && out[8] == LED_DIM && out[12 + 8] == LED_DIM);       // page pads: FILTER lit
+    CHECK(out[12 + 11] == LED_DIM && out[24 + 11] == LED_MID && out[36 + 11] == LED_DIM);  // RESET lit where BP width is off its default
+    const LedState ls = ledsOf(ui);
+    CHECK(strcmp(legendCell(8, 2, ls).word, "FILT") == 0 && strcmp(legendCell(7, 1, ls).word, "open") == 0 && strcmp(legendCell(0, 2, ls).word, "0.3") == 0);
+    CHECK(strcmp(legendCell(0, 0, ls).word, "0") == 0 && strcmp(legendCell(7, 0, ls).word, "100") == 0 && strcmp(legendCell(3, 3, ls).word, "-") == 0);
+    CHECK(strcmp(pageName(BG_FILTER), "FILTER") == 0);
+    // the sidecar: the oldest version that fits - 1 while the newer fields are at their defaults, 2 when only the MLR settings differ (plan 026),
+    // 3 once a beat repeat / high-pass field differs (plan 024); all of them load
+    uint8_t fb[BrParams::kFileMax3 + 8];
+    BrParams old;
+    old.step[BP_CHANCE] = 6;
+    old.mode = beatrepeat::MODE_GATE;
+    size_t n = old.save(fb, sizeof(fb));
+    CHECK(n == (size_t)BrParams::kPayload + seqsidecar::kOverhead && fb[4] == 1);
+    BrParams ld;
+    CHECK(ld.load(fb, n) && ld == old && ld.step[BP_MIX] == 8 && ld.step[BP_BPC] == 8 && ld.step[BP_BPW] == 3 && ld.hpCut == 0 && ld.hpRes == 1);
+    BrParams m2 = old;
+    m2.mlrQuant = 4;
+    n = m2.save(fb, sizeof(fb));
+    CHECK(n == (size_t)BrParams::kFileMax && fb[4] == 2);
+    BrParams l2;
+    CHECK(l2.load(fb, n) && l2 == m2 && l2.mlrQuant == 4 && l2.step[BP_MIX] == 8 && l2.hpCut == 0);
+    n = p.save(fb, sizeof(fb));
+    CHECK(n == (size_t)BrParams::kFileMax3 && memcmp(fb, "SBRP", 4) == 0 && fb[4] == 3);
+    bool newer = true;
+    BrParams q;
+    CHECK(q.load(fb, n, &newer) && !newer && q == p && q.hash() == p.hash() && q.hpCut == 8 && q.hpRes == 8 && q.step[BP_BPW] == 8);
+    BrParams m3 = p;
+    m3.mlrQuant = 5;
+    m3.mlrSlotA = 3;
+    n = m3.save(fb, sizeof(fb));
+    BrParams l3;
+    CHECK(fb[4] == 3 && l3.load(fb, n) && l3 == m3 && l3.mlrQuant == 5 && l3.mlrSlotA == 3 && l3.hpCut == 8);
+    CHECK(p.save(fb, BrParams::kFileMax3 - 1) == 0);
+    // a version 3 file with a payload of only 11 bytes (the MLR fields): the newer fields stay at their defaults
+    uint8_t pay[16];
+    p.raw(pay);
+    uint8_t fr[48];
+    size_t fn = seqsidecar::frameWrite(fr, sizeof(fr), "SBRP", 3, pay, 11);
+    BrParams sh;
+    CHECK(sh.load(fr, fn) && sh.step[BP_MIX] == 8 && sh.hpCut == 0 && sh.step[BP_DECAY] == p.step[BP_DECAY]);
+    // out of range values fall back one by one
+    pay[11] = 0;
+    pay[12] = 3;
+    pay[13] = 9;
+    pay[14] = 9;
+    pay[15] = 0;
+    fn = seqsidecar::frameWrite(fr, sizeof(fr), "SBRP", 3, pay, 16);
+    BrParams bad;
+    CHECK(bad.load(fr, fn) && bad.step[BP_MIX] == 8 && bad.step[BP_BPC] == 3 && bad.step[BP_BPW] == 3 && bad.hpCut == 0 && bad.hpRes == 1);
+    // a version 1 or 2 file is never read for the version 3 fields, even when it carries more bytes
+    pay[12] = 4;
+    fn = seqsidecar::frameWrite(fr, sizeof(fr), "SBRP", 2, pay, 16);
+    BrParams v2;
+    CHECK(v2.load(fr, fn) && v2.step[BP_BPC] == 8);
+    fn = seqsidecar::frameWrite(fr, sizeof(fr), "SBRP", 1, pay, 16);
+    BrParams v1;
+    CHECK(v1.load(fr, fn) && v1.step[BP_BPC] == 8);
+    // the pre-roll switch of the layer: on with the beat repeat pads shown, off when leaving
+    using namespace seqsession;
+    g_brPre.clear();
+    g_brUi = seqbr::Ui();
+    CutSessionLayer layer;
+    layer.enter(0);
+    CHECK(!g_brPre.empty() && !g_brPre.back());           // MLR shown: nothing recorded ahead
+    layer.button(seqcut::kScreenButtonBeatRpt, true);
+    CHECK(g_brPre.back());                                // BeatRpt: record ahead
+    layer.leave();
+    CHECK(!g_brPre.back());                               // leaving stops it
+    layer.enter(0);
+    CHECK(g_brPre.back());                                // back on the beat repeat pads: on again
+    layer.button(seqcut::kScreenButtonBeatRpt, true);
+    CHECK(!g_brPre.back());                               // back to MLR: off
+    layer.leave();
+}
+
 static void test_br_all()
 {
     test_br_values();
@@ -541,5 +673,6 @@ static void test_br_all()
     test_br_leds_and_legend();
     test_br_layer();
     test_br_sidecar();
+    test_br_024();
     test_br_screen_budget_and_bounds();
 }

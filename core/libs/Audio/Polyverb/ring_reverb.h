@@ -30,6 +30,7 @@
 //
 // No Polyend includes, host-testable (core/seqtest/test_fx.cpp). The caller owns the two buffers.
 #pragma once
+#include "ring_tiles.h"
 #include "seqFxDsp.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -93,9 +94,40 @@ struct SplitRing
 
 #if defined(__arm__)
 #define RINGVERB_INLINE __attribute__((always_inline)) inline
+#define RINGVERB_NOINLINE __attribute__((noinline))
 #else
 #define RINGVERB_INLINE inline
+#define RINGVERB_NOINLINE
 #endif
+
+// plan 027: the cell pointers of the tiled loop: wp = where the stage writes, rp = where it reads, both already moved to this sample
+inline int16_t* ringBase(const SplitRing&) { return nullptr; }
+inline int16_t* ringBase(const PlainRing& r) { return r.p; }
+inline int32_t tileAp(int16_t* wp, const int16_t* rp, int32_t acc, int32_t g)
+{
+    int32_t d = *rp;
+    acc -= (int32_t)(((int64_t)d * g) >> 15);
+    *wp = (int16_t)satw(acc);
+    acc = (int32_t)(((int64_t)acc * g) >> 15) + d;
+    return acc;
+}
+// wobbled read: wobpos has 12 fractional bits and is subtracted from the read place
+// rp = the cell kWobLo below the read place of this sample (the run that holds the wobbled reads)
+constexpr int kWobLo = 57, kWobHi = 120;
+inline int32_t tileApWob(int16_t* wp, const int16_t* rp, int wobpos, int32_t acc, int32_t g)
+{
+    const int back = (wobpos >> 12) - kWobLo;
+    const int frac = wobpos & 0xFFF;
+    int32_t a0 = rp[-back];
+    int32_t a1 = rp[-back - 1];
+    int32_t d = (a0 * (0x1000 - frac) + a1 * frac) >> 12;
+    acc -= (int32_t)(((int64_t)d * g) >> 15);
+    *wp = (int16_t)satw(acc);
+    acc = (int32_t)(((int64_t)acc * g) >> 15) + d;
+    return acc;
+}
+
+struct RingBlock;
 
 template<typename Ring>
 class BasicRingReverb
@@ -161,10 +193,21 @@ class BasicRingReverb
     // In place on interleaved-free int16 blocks: input send -> return (dry share + wet).
     void process(int16_t* left, int16_t* right, int n);
 
+    // plan 027: SRAM for the tiles of the SDRAM ring (about 3000 words are needed for a block of 128; no scratch = the plain loop)
+    void setScratch(int16_t* mem, uint32_t words)
+    {
+        scratch_ = mem;
+        scratchWords_ = words;
+    }
+    void setTiling(bool on) { tileOn_ = on; }
+
     int predelay() const { return predelay_; }
     int fade() const { return fade_; }
 
   private:
+    enum { kTileBlock = 128 };
+    void slowRun(int16_t* left, int16_t* right, int n, const RingBlock& rb, int32_t& inPeak, int32_t& outPeak);
+    int tileChunk(int16_t* left, int16_t* right, int rem, const RingBlock& rb, int32_t& inPeak, int32_t& outPeak);
     uint32_t nextRandom()
     {
         rng_ ^= rng_ << 13;
@@ -195,6 +238,9 @@ class BasicRingReverb
     int shimTarget_ = kShimmerDefault, shimCur_ = kShimmerDefault;
     int shimPos1_ = 0, shimPos2_ = 0;
     uint32_t rng_ = 1;
+    int16_t* scratch_ = nullptr;
+    uint32_t scratchWords_ = 0;
+    bool tileOn_ = true;
     uint32_t quiet_ = 0; // consecutive samples with (almost) no input and no wet output; >= kRingSize: the whole ring is silent
 };
 
@@ -246,26 +292,36 @@ RINGVERB_INLINE int32_t delayStage(const Ring& buf, uint32_t& i, int len, int32_
     return acc;
 }
 
+// Constants of one block that the untiled loop and the tiled loop share (plan 027: the loop is split in chunks)
+struct RingBlock
+{
+    int32_t g;
+    int fade;
+    float color, lfoA1, lfoA2, wobScale, dcA;
+    int32_t shimAmt, inGain, dry, wet;
+};
+
 template<typename Ring>
 RINGVERB_INLINE void BasicRingReverb<Ring>::process(int16_t* left, int16_t* right, int n)
 {
-    const Ring buf = ring_;
-    const int32_t g = apGain_;
-    const int fade = fade_;
-    const float color = color_;
+    RingBlock rb;
+    rb.g = apGain_;
+    rb.fade = fade_;
+    rb.color = color_;
     // LFOs: original rates at 32 kHz 2.9 Hz and 1.27 Hz, rescaled; the DC blocker 0.005 per sample at 32 kHz
-    const float lfoA1 = 2.0f * (9.4f / 32777.0f) * kRateScale;
-    const float lfoA2 = 2.0f * (1.3f * 3.15971f / 32777.0f) * kRateScale;
-    const float kWobble = 0.3f;
-    const float wobScale = 262144.0f / kRateScale; // (wob + 1) * 64 samples of the original, in 12 bit fractions
-    const float dcA = 0.005f * kRateScale;
-    const int32_t shimAmt = shimCur_; // 0 .. 127 (plan 010 A3: was fixed 32)
+    rb.lfoA1 = 2.0f * (9.4f / 32777.0f) * kRateScale;
+    rb.lfoA2 = 2.0f * (1.3f * 3.15971f / 32777.0f) * kRateScale;
+    rb.wobScale = 262144.0f / kRateScale; // (wob + 1) * 64 samples of the original, in 12 bit fractions
+    rb.dcA = 0.005f * kRateScale;
+    rb.shimAmt = shimCur_; // 0 .. 127 (plan 010 A3: was fixed 32)
     if (shimCur_ < shimTarget_)
         shimCur_ = shimCur_ + kShimmerStepPerBlock > shimTarget_ ? shimTarget_ : shimCur_ + kShimmerStepPerBlock;
     else if (shimCur_ > shimTarget_)
         shimCur_ = shimCur_ - kShimmerStepPerBlock < shimTarget_ ? shimTarget_ : shimCur_ - kShimmerStepPerBlock;
-    const int32_t inGain = inGain_;
-    const int32_t dry = dry_, wet = wet_;
+    rb.inGain = inGain_;
+    rb.dry = dry_;
+    rb.wet = wet_;
+    const int32_t dry = dry_;
 
     // silence bypass (as the stock reverb has): no input for a whole ring length and no tail left -> nothing to compute, the
     // return is just the dry share. Costs one pass over the block while the input is quiet.
@@ -289,6 +345,45 @@ RINGVERB_INLINE void BasicRingReverb<Ring>::process(int16_t* left, int16_t* righ
         quiet_ = 0;
     }
     int32_t inPeak = 0, outPeak = 0;
+
+    // plan 027: the block runs in SRAM tiles of the SDRAM ring where it can; a chunk it cannot take (a shimmer jump inside, an odd
+    // pointer, no scratch) runs the plain loop
+    int off = 0;
+    while (off < n)
+    {
+        const int rem = n - off;
+        const int done = tileOn_ ? tileChunk(left + off, right + off, rem, rb, inPeak, outPeak) : -1;
+        if (done > 0)
+        {
+            off += done;
+            continue;
+        }
+        const int cnt = done == 0 ? 1 : rem; // 0: the sample where the shimmer taps jump, then the tiles go on
+        slowRun(left + off, right + off, cnt, rb, inPeak, outPeak);
+        off += cnt;
+    }
+    if (inPeak <= 1 && outPeak <= 1)
+        quiet_ = quiet_ + (uint32_t)n > kRingSize ? kRingSize : quiet_ + (uint32_t)n;
+    else
+        quiet_ = 0;
+}
+
+// The plain loop (the ring in SDRAM, every access single): unchanged arithmetic of v0.4.4, now for `n` samples of a block.
+template<typename Ring>
+RINGVERB_NOINLINE void BasicRingReverb<Ring>::slowRun(int16_t* left, int16_t* right, int n, const RingBlock& rb, int32_t& inPeak,
+                                                    int32_t& outPeak)
+{
+    const Ring buf = ring_;
+    const int32_t g = rb.g;
+    const int fade = rb.fade;
+    const float color = rb.color;
+    const float lfoA1 = rb.lfoA1, lfoA2 = rb.lfoA2;
+    const float kWobble = 0.3f;
+    const float wobScale = rb.wobScale;
+    const float dcA = rb.dcA;
+    const int32_t shimAmt = rb.shimAmt;
+    const int32_t inGain = rb.inGain;
+    const int32_t dry = rb.dry, wet = rb.wet;
 
     for (int s = 0; s < n; s++)
     {
@@ -375,10 +470,218 @@ RINGVERB_INLINE void BasicRingReverb<Ring>::process(int16_t* left, int16_t* righ
         left[s] = (int16_t)satw(((inL * dry) >> 8) + wl);
         right[s] = (int16_t)satw(((inR * dry) >> 8) + wr);
     }
-    if (inPeak <= 1 && outPeak <= 1)
-        quiet_ = quiet_ + (uint32_t)n > kRingSize ? kRingSize : quiet_ + (uint32_t)n;
-    else
-        quiet_ = 0;
+}
+
+// The same loop on SRAM tiles (plan 027). Returns the number of samples done (>= 1), 0 when the next sample is the one where the shimmer
+// taps jump (the caller runs that sample in the plain loop), -1 when the tiles cannot be used for this block. Nothing is changed in the
+// reverb before it is certain that the chunk runs.
+template<typename Ring>
+RINGVERB_NOINLINE int BasicRingReverb<Ring>::tileChunk(int16_t* left, int16_t* right, int rem, const RingBlock& rb, int32_t& inPeak,
+                                                     int32_t& outPeak)
+{
+    int16_t* const ringMem = ringBase(ring_);
+    if (ringMem == nullptr || scratch_ == nullptr || ((uintptr_t)scratch_ & 3u) || ((uintptr_t)ringMem & 3u) || ((uintptr_t)preL_ & 3u) || ((uintptr_t)preR_ & 3u))
+        return -1;
+    // the wobble positions stay inside the windows below as long as the oscillators keep their amplitude
+    if (!(lfoR1_ <= 1.1f && lfoR1_ >= -1.1f && lfoR2_ <= 1.1f && lfoR2_ >= -1.1f))
+        return -1;
+    if (shimStep_ < 1 || shimFade_ < 0 || shimFade_ >= kShimmerFadeLen || shimPos1_ < 0 || shimPos2_ < 0 || shimPos1_ > 20000 ||
+        shimPos2_ > 20000)
+        return -1;
+    // samples before the taps jump to a new random position
+    const int safe = (kShimmerFadeLen - 1 - shimFade_) / shimStep_;
+    if (safe <= 0)
+        return 0;
+    const int L = rem < safe ? (rem < kTileBlock ? rem : kTileBlock) : (safe < kTileBlock ? safe : kTileBlock);
+
+    // offsets (from the ring index of the first sample) of the places the chain touches: stage m writes at kB[m] and reads at kB[m + 1]
+    static const int kB[11] = { 0,
+                                kLenAp1,
+                                kLenAp1 + kLenAp2,
+                                kLenAp1 + kLenAp2 + kLenAp3,
+                                kLenAp1 + kLenAp2 + kLenAp3 + kLenAp4,
+                                kLenAp1 + kLenAp2 + kLenAp3 + kLenAp4 + kLenWob1,
+                                kLenAp1 + kLenAp2 + kLenAp3 + kLenAp4 + kLenWob1 + kLenAp5,
+                                kLenAp1 + kLenAp2 + kLenAp3 + kLenAp4 + kLenWob1 + kLenAp5 + kLenDel1,
+                                kLenAp1 + kLenAp2 + kLenAp3 + kLenAp4 + kLenWob1 + kLenAp5 + kLenDel1 + kLenWob2,
+                                kLenAp1 + kLenAp2 + kLenAp3 + kLenAp4 + kLenWob1 + kLenAp5 + kLenDel1 + kLenWob2 + kLenAp6,
+                                kLoopLength };
+    // the wobble read lies kWobLo .. kWobHi (57 .. 120) samples below the stage's read place for |lfo| <= 1.1 (wobScale 361 262: (1 +- 0.33) * 88.2)
+    const int tap0 = kB[7]; // the shimmer taps are relative to the chain index after the first delay
+
+    TileSet T;
+    T.init(ringMem, pos_, kRingMask);
+    bool ok = true;
+    for (int m = 0; m < 11; m++)
+        ok = ok && T.add(kB[m] - (L - 1), kB[m], true);
+    ok = ok && T.add(kB[5] - kWobHi - 1 - (L - 1), kB[5] - kWobLo, false);
+    ok = ok && T.add(kB[8] - kWobHi - 1 - (L - 1), kB[8] - kWobLo, false);
+    const int t1 = tap0 + shimPos1_, t2 = tap0 + shimPos2_; // offset of the first tap cell at sample 0; the cell moves down 2 per sample
+    ok = ok && T.add(t1 - 2 * (L - 1), t1 + 1, false);
+    ok = ok && T.add(t2 - 2 * (L - 1), t2 + 1, false);
+    if (!ok)
+        return -1;
+
+    // pre-delay line: the write run and the read run (the read index moves between 0 and 2 per sample), per channel
+    const int pd0 = predelay_;
+    const bool preTile = pd0 + 2 * L + 4 < (int)kPreSize; // else the read run would wrap onto the write run: plain accesses
+    const bool preZero = preTile && pd0 == 0 && predelayTarget_ == 0;
+    TileSet PL, PR;
+    if (preTile)
+    {
+        PL.init(preL_, prePos_, kPreMask);
+        PR.init(preR_, prePos_, kPreMask);
+        bool pok = PL.add(0, L - 1, true) && PR.add(0, L - 1, true);
+        if (!preZero)
+            pok = pok && PL.add(-pd0 - 1, -pd0 + 2 * L - 1, false) && PR.add(-pd0 - 1, -pd0 + 2 * L - 1, false);
+        if (!pok)
+            return -1;
+    }
+    int16_t* sc = scratch_;
+    int room = (int)scratchWords_;
+    if (!T.layout(sc, room) || (preTile && (!PL.layout(sc, room) || !PR.layout(sc, room))))
+        return -1;
+
+    T.load();
+    int16_t* P[11];
+    for (int m = 0; m < 11; m++)
+        P[m] = T.ptr(kB[m]);
+    int16_t* wob1 = T.ptr(kB[5] - kWobLo); // the wobbled reads of the two stages
+    int16_t* wob2 = T.ptr(kB[8] - kWobLo);
+    int16_t* tp1 = T.ptr(t1);
+    int16_t* tp2 = T.ptr(t2);
+    int16_t *pwl = nullptr, *pwr = nullptr, *prl = nullptr, *prr = nullptr;
+    if (preTile)
+    {
+        PL.load();
+        PR.load();
+        pwl = PL.ptr(0);
+        pwr = PR.ptr(0);
+        if (!preZero)
+        {
+            prl = PL.ptr(-pd0 - 1) + (pd0 + 1); // the read run at offset 0; the read cell of sample s is prl[s - predelay]
+            prr = PR.ptr(-pd0 - 1) + (pd0 + 1);
+        }
+    }
+
+    const int32_t g = rb.g;
+    const int fade = rb.fade;
+    const float color = rb.color;
+    const float lfoA1 = rb.lfoA1, lfoA2 = rb.lfoA2;
+    const float kWobble = 0.3f;
+    const float wobScale = rb.wobScale;
+    const float dcA = rb.dcA;
+    const int32_t shimAmt = rb.shimAmt;
+    const int32_t inGain = rb.inGain;
+    const int32_t dry = rb.dry, wet = rb.wet;
+
+    for (int s = 0; s < L; s++)
+    {
+        int32_t inL = left[s], inR = right[s];
+        inPeak |= (inL < 0 ? -inL : inL) | (inR < 0 ? -inR : inR);
+        int32_t dl, dr;
+        if (preZero)
+        {
+            pwl[s] = (int16_t)inL; // no pre-delay: the cell read back is the one just written
+            pwr[s] = (int16_t)inR;
+            dl = inL;
+            dr = inR;
+        }
+        else if (preTile)
+        {
+            pwl[s] = (int16_t)inL;
+            pwr[s] = (int16_t)inR;
+            if (predelay_ < predelayTarget_)
+                predelay_++;
+            else if (predelay_ > predelayTarget_)
+                predelay_--;
+            dl = prl[s - predelay_];
+            dr = prr[s - predelay_];
+        }
+        else
+        {
+            preL_[prePos_] = (int16_t)inL;
+            preR_[prePos_] = (int16_t)inR;
+            if (predelay_ < predelayTarget_)
+                predelay_++;
+            else if (predelay_ > predelayTarget_)
+                predelay_--;
+            uint32_t rp = (prePos_ - (uint32_t)predelay_) & kPreMask;
+            dl = preL_[rp];
+            dr = preR_[rp];
+        }
+        prePos_ = (prePos_ + 1) & kPreMask;
+
+        // modulation
+        lfoR1_ -= lfoA1 * lfoI1_;
+        lfoI1_ += lfoA1 * lfoR1_;
+        lfoR2_ -= lfoA2 * lfoI2_;
+        lfoI2_ += lfoA2 * lfoR2_;
+        const int apWob = (int)((lfoR1_ * kWobble + 1.0f) * wobScale);
+        const int delWob = (int)((lfoR2_ * kWobble + 1.0f) * wobScale);
+
+        int32_t outl = 0, outr = 0;
+
+        // input diffusion, right channel injected between the second and the third all-pass
+        int32_t acc = (int32_t)(((int64_t)dl * inGain) >> 16);
+        acc = tileAp(P[0] - s, P[1] - s, acc, g);
+        acc = tileAp(P[1] - s, P[2] - s, acc, g);
+        acc += (int32_t)(((int64_t)dr * inGain) >> 16);
+        acc = tileAp(P[2] - s, P[3] - s, acc, g);
+        acc = tileAp(P[3] - s, P[4] - s, acc, g);
+        const int32_t reinject = acc;
+        acc += fb1_;
+        acc = tileApWob(P[4] - s, wob1 - s, apWob, acc, g);
+        acc = tileAp(P[5] - s, P[6] - s, acc, g);
+        P[6][-s] = (int16_t)satw(acc);
+        acc = P[7][-s];
+
+        // shimmer (the taps do not jump inside this chunk)
+        shimFade_ += shimStep_;
+        {
+            int32_t s1l = tp1[-2 * s], s1r = tp2[-2 * s];
+            int32_t s2l = tp1[-2 * s + 1], s2r = tp2[-2 * s + 1];
+            int32_t shl = (s1l + s2l) >> 1, shr = (s1r + s2r) >> 1;
+            int32_t shimo = (shl * ((kShimmerFadeLen - 1) - shimFade_) + shr * shimFade_) >> 15;
+            shimo = ((shimo * shimAmt) >> 8) >> 1;
+            acc += shimo;
+            outl = shimo;
+            outr = shimo;
+            shimPos1_--;
+            shimPos2_--;
+        }
+
+        // first leg: low-pass + DC blocker -> left output
+        lpf_ += ((float)((acc * fade) >> 8) - lpf_) * color;
+        dc_ += (lpf_ - dc_) * dcA;
+        acc = (int32_t)(lpf_ - dc_);
+        outl += acc;
+
+        // second leg -> right output
+        acc += reinject;
+        acc = tileApWob(P[7] - s, wob2 - s, delWob, acc, g);
+        acc = tileAp(P[8] - s, P[9] - s, acc, g);
+        P[9][-s] = (int16_t)satw(acc);
+        acc = P[10][-s];
+        lpf2_ += ((float)((acc * fade) >> 8) - lpf2_) * color;
+        acc = (int32_t)lpf2_;
+        outr += acc;
+
+        pos_ = (pos_ - 1) & kRingMask;
+        fb1_ = (acc * fade) >> 8;
+
+        const int32_t wl = (outl * wet) >> 8, wr = (outr * wet) >> 8;
+        outPeak |= (wl < 0 ? -wl : wl) | (wr < 0 ? -wr : wr);
+        left[s] = (int16_t)satw(((inL * dry) >> 8) + wl);
+        right[s] = (int16_t)satw(((inR * dry) >> 8) + wr);
+    }
+    T.store();
+    if (preTile)
+    {
+        PL.store();
+        PR.store();
+    }
+    return L;
 }
 
 }  // namespace ringverb

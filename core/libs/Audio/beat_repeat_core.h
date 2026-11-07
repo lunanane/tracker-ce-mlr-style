@@ -12,6 +12,11 @@
 //     -24 st, a resampled read - the repeat still lasts one grid, so it plays only the start of the slice: the rhythm stays on the grid).
 //   * Modes: MIX (repeats on top of the running audio, the default), INSERT (the audio is muted while repeats sound), GATE (the audio is
 //     muted while the effect is enabled - chance > 0 or a pad held or a repeat running - including while the slice is captured).
+//   * Plan 024 PRE-ROLL: while the beat repeat page is open (command C_PRE) the audio of the master bus is written into the ring all the time
+//     (circular). A pad then starts the repeats at the NEXT grid boundary with the grid cell that has just ended (it is already in the ring),
+//     so the first repeat sounds at most one grid after the press instead of after a capture. Not enough history (just opened, a repeat
+//     just ended): the capture of plan 021. MIX level of the repeats, and a band-pass on them (the delay's filter code and range). The
+//     master HIGH-PASS (MasterHp) is the same stage's second job: bypassed (cutoff 0) = zero cost.
 //   * Click free: every repeat has a 32 frame fade in / out, the audio gain moves by 1/64 per frame, a repeat cut by the next slice
 //     start or by the end of the event fades out over 32 frames. If the tempo drops, the slice is shorter than its grid: its last
 //     frame (already faded to 0) is held until the next slice start.
@@ -19,6 +24,7 @@
 #include <math.h>
 #include <stdint.h>
 #include <string.h>
+#include "seqFxLogic.h" // plan 024: the delay band-pass (seqfx::FilterControl, bandMix, bwToQ) and the high-pass mapping, reused
 
 namespace beatrepeat {
 
@@ -107,6 +113,62 @@ struct Settings
     uint8_t pitchDecay = 0; // PITCH DECAY 0..100
     uint8_t decay = 0;      // DECAY 0..100
     uint8_t mode = MODE_MIX;
+    uint8_t mix = 100;      // plan 024: level of the repeats in MIX mode, 0..100 % (INSERT / GATE: full)
+    uint16_t bpHz = 20000;  // plan 024: band-pass centre in Hz (delay range 100..20000, >= 19000 = open = off)
+    uint8_t bpTw = 12;      // band-pass width in 1/12 octave (4 .. 36)
+    uint8_t hpIdx = 0;      // plan 024: master high-pass, seqfx::hpHz index (0 = off, 1 .. 90)
+    uint8_t hpRes = 0;      // master high-pass resonance 0..100 % (Q 0.707 .. 5.7)
+};
+
+// Master high-pass (plan 024): the delay's state variable filter (seqFxDsp.h) on the stereo master bus, cutoff and resonance smoothed
+// per block, bypass crossfade; idx 0 = off: nothing is computed once the crossfade has ended.
+inline float hpQ(uint8_t res) { return 0.7071f + 0.05f * (float)(res > 100 ? 100 : res); }
+class MasterHp
+{
+  public:
+    void set(uint8_t idx, uint8_t res)
+    {
+        idx_ = idx > seqfx::kHpMax ? (uint8_t)seqfx::kHpMax : idx;
+        fc_.targetMix = idx_ ? 1.0f : 0.0f;
+        if (idx_)
+        {
+            fc_.targetOct = log2f(seqfx::hpHz(idx_));
+            fc_.targetQ = hpQ(res);
+        }
+    }
+    // false: nothing to do for this block (off and settled)
+    bool active() const { return idx_ != 0 || fc_.mix() != 0.0f; }
+    void process(int16_t* l, int16_t* r, int n)
+    {
+        fc_.blockUpdate();
+        const float m0 = fc_.prevMix(), m1 = fc_.mix();
+        if (m0 == 0.0f && m1 == 0.0f)
+        {
+            sl_.clear();
+            sr_.clear();
+            return;
+        }
+        const seqfx::SvfCoef& c = fc_.coef();
+        for (int i = 0; i < n; i++)
+        {
+            const float m = seqfx::mixAt(m0, m1, i, n);
+            const float xl = (float)l[i], xr = (float)r[i];
+            l[i] = sat(xl + m * (seqfx::highpass(sl_, c, xl) - xl));
+            r[i] = sat(xr + m * (seqfx::highpass(sr_, c, xr) - xr));
+        }
+        seqfx::svfFlush(sl_);
+        seqfx::svfFlush(sr_);
+    }
+
+  private:
+    static int16_t sat(float v)
+    {
+        v += v >= 0.0f ? 0.5f : -0.5f;
+        return v > 32767.0f ? (int16_t)32767 : (v < -32768.0f ? (int16_t)-32768 : (int16_t)v);
+    }
+    uint8_t idx_ = 0;
+    seqfx::FilterControl fc_;
+    seqfx::SvfState sl_, sr_;
 };
 
 struct Clock
@@ -139,6 +201,7 @@ struct Voice
     float pos = 0, ratio = 1, gain = 1, fadeMul = 1;
     bool forced = false;
     uint32_t j = 0, len = 0;
+    uint32_t base = 0; // ring frame of the slice start (the ring is circular since plan 024)
     float lastL = 0, lastR = 0;
 };
 
@@ -163,17 +226,26 @@ class Core
         fired_ = false;
         qHead_ = qTail_ = 0;
         wr_ = capLen_ = 0;
+        pw_ = hist_ = capBase_ = sliceBase_ = 0;
+        pre_ = false;
         rep_ = 0;
         evTicks_ = 0;
         tk_ = 0;
         fr_ = 0;
     }
     void seed(uint32_t s) { rng_ = s ? s : 1u; }
-    void setSettings(const Settings& s) { s_ = s; }
+    void setSettings(const Settings& s)
+    {
+        s_ = s;
+        bp_.targetOct = log2f((float)(s.bpHz < 20 ? 20 : s.bpHz));
+        bp_.targetQ = seqfx::bwToQ(seqfx::bwOctaves(s.bpTw));
+        bp_.targetMix = seqfx::bandMix((float)s.bpHz);
+        hp_.set(s.hpIdx, s.hpRes);
+    }
     const Settings& settings() const { return s_; }
 
     // ---- main loop -> audio: commands in a small single producer / single consumer ring (applied at the start of the next block) ----
-    enum Cmd : uint8_t { C_DOWN = 1, C_UP = 2, C_LATCH = 3, C_UNLATCH = 4, C_DISENGAGE = 5, C_PANIC = 6 };
+    enum Cmd : uint8_t { C_DOWN = 1, C_UP = 2, C_LATCH = 3, C_UNLATCH = 4, C_DISENGAGE = 5, C_PANIC = 6, C_PRE = 7 /* arg 1 = pre-roll on, 0 = off */ };
     bool post(uint8_t cmd, uint8_t arg = 0)
     {
         const uint8_t h = qHead_, n = (uint8_t)((h + 1) & (kQ - 1));
@@ -188,7 +260,7 @@ class Core
     // nothing to do for the audio: the wrapper passes the blocks through untouched (exact bypass)
     bool bypassable() const
     {
-        return state_ == S_IDLE && !v_[0].on && !v_[1].on && dry_ == 1.0f && s_.chance == 0 && qHead_ == qTail_ && !padHeld_;
+        return state_ == S_IDLE && !v_[0].on && !v_[1].on && dry_ == 1.0f && s_.chance == 0 && qHead_ == qTail_ && !padHeld_ && !pre_;
     }
     void noteBypass() { needRebase_ = true; }
 
@@ -198,6 +270,16 @@ class Core
         const float bpm = clampBpm(clk.bpm);
         bpm_ = bpm;
         drain();
+        // band-pass of the repeats: stepped once per block, the mix is ramped over the block (seqFxDsp.h FilterControl)
+        bp_.blockUpdate();
+        const float bpPrev = bp_.prevMix(), bpCur = bp_.mix();
+        const bool bpActive = bpPrev != 0.0f || bpCur != 0.0f;
+        if (!bpActive)
+        {
+            bsl_.clear();
+            bsr_.clear();
+        }
+        const float mixT = s_.mode == MODE_MIX ? (float)s_.mix * 0.01f : 1.0f;
         const float tpf = bpm * (float)kTicksPerBeat / (60.0f * kFs); // ticks per frame
         if (needRebase_)
         {
@@ -238,16 +320,35 @@ class Core
                 onTick(bpm);
             }
             const float l = (float)inL[i], r = (float)inR[i];
+            // plan 024: the ring is written while capturing, and all the time while the page is open (pre-roll) unless a repeat reads it
             if (state_ == S_CAPTURE && wr_ < cap_)
             {
-                ring_[2 * wr_] = inL[i];
-                ring_[2 * wr_ + 1] = inR[i];
+                put(inL[i], inR[i]);
                 wr_++;
             }
+            else if (pre_ && state_ != S_REPEAT && state_ != S_CAPTURE && !v_[0].on && !v_[1].on)
+                put(inL[i], inR[i]);
+            else
+                hist_ = 0;
             float rl = 0.0f, rr = 0.0f;
             for (int v = 0; v < 2; v++)
                 if (v_[v].on)
                     render(v_[v], rl, rr);
+            if (bpActive)
+            {
+                // the delay's band-pass on the repeats, crossfaded in and out per sample over the block
+                const float m = seqfx::mixAt(bpPrev, bpCur, i, n);
+                rl += m * (seqfx::bandpass(bsl_, bp_.coef(), rl) - rl);
+                rr += m * (seqfx::bandpass(bsr_, bp_.coef(), rr) - rr);
+            }
+            if (mixG_ != mixT)
+            {
+                mixG_ += mixG_ < mixT ? kMixStep : -kMixStep;
+                if (fabsf(mixT - mixG_) < kMixStep)
+                    mixG_ = mixT;
+            }
+            rl *= mixG_;
+            rr *= mixG_;
             // the audio gain
             float target = 1.0f;
             if (s_.mode == MODE_INSERT)
@@ -286,6 +387,10 @@ class Core
     uint16_t repeatIndex() const { return rep_; }
     float dryGain() const { return dry_; }
     const int16_t* ring() const { return ring_; }
+    uint32_t sliceBase() const { return sliceBase_; } // ring frame of the captured slice (circular since plan 024)
+    bool preroll() const { return pre_; }
+    uint32_t history() const { return hist_; }        // frames the pre-roll has behind the write position
+    MasterHp& hp() { return hp_; }                    // the master high-pass (the wrapper runs it after process)
     uint32_t capacity() const { return cap_; }
     uint8_t eventGrid() const { return gridId_; }
     Status status() const
@@ -359,6 +464,10 @@ class Core
                     padHeld_ = false;
                     latch_ = false;
                     break;
+                case C_PRE:
+                    pre_ = arg != 0;
+                    hist_ = 0;
+                    break;
                 default: break;
             }
         }
@@ -402,8 +511,38 @@ class Core
         else
             v.forced = true;
     }
+    // one frame into the circular ring
+    void put(int16_t l, int16_t r)
+    {
+        ring_[2 * pw_] = l;
+        ring_[2 * pw_ + 1] = r;
+        if (++pw_ >= cap_)
+            pw_ = 0;
+        if (hist_ < cap_)
+            hist_++;
+    }
+    // the cell of the grid that has just ended is in the ring already: the repeats start at once (plan 024)
+    bool startFromPreroll()
+    {
+        const uint32_t len = (uint32_t)((float)gridT_ * framesPerTick(bpm_) + 0.5f);
+        if (!pre_ || len < 16 || len > cap_ - 64 || hist_ < len)
+            return false;
+        sliceBase_ = pw_ >= len ? pw_ - len : pw_ + cap_ - len;
+        capLen_ = len;
+        captures_++;
+        state_ = S_REPEAT;
+        evTicks_ = 0;
+        rep_ = 0;
+        hist_ = 0;
+        startVoice(0);
+        rep_ = 1;
+        return true;
+    }
     void beginCapture()
     {
+        if (!pre_)
+            pw_ = 0; // plain capture (the page is closed): from the start of the ring as before
+        capBase_ = pw_;
         state_ = S_CAPTURE;
         wr_ = 0;
         evTicks_ = 0;
@@ -423,6 +562,7 @@ class Core
         }
         Voice nv;
         nv.on = true;
+        nv.base = sliceBase_;
         nv.pos = 0.0f;
         nv.j = 0;
         nv.len = capLen_ < 1 ? 1u : capLen_;
@@ -461,13 +601,14 @@ class Core
                     const uint32_t gt = gateTicks(s_.gate), two = 2u * gridT_;
                     evTotal_ = gt > two ? gt : two;
                     padEvent_ = false;
-                    beginCapture();
+                    if (!startFromPreroll())
+                        beginCapture();
                 }
             }
         }
         else if (state_ == S_PENDING)
         {
-            if (tk_ >= 0 && (tk_ % (int32_t)gridT_) == 0)
+            if (tk_ >= 0 && (tk_ % (int32_t)gridT_) == 0 && !startFromPreroll())
                 beginCapture();
         }
         else // CAPTURE / REPEAT
@@ -483,6 +624,7 @@ class Core
                 if (state_ == S_CAPTURE)
                 {
                     capLen_ = wr_;
+                    sliceBase_ = capBase_;
                     captures_++;
                     state_ = S_REPEAT;
                     rep_ = 0;
@@ -505,11 +647,15 @@ class Core
                 i0 = v.len - 1;
                 f = 0.0f;
             }
-            const int16_t* p = ring_ + 2 * i0;
+            uint32_t pa = v.base + i0;
+            if (pa >= cap_)
+                pa -= cap_;
+            const int16_t* p = ring_ + 2 * pa;
             if (f > 0.0f)
             {
-                l = (float)p[0] + ((float)p[2] - (float)p[0]) * f;
-                r = (float)p[1] + ((float)p[3] - (float)p[1]) * f;
+                const int16_t* q = ring_ + 2 * (pa + 1 >= cap_ ? 0u : pa + 1);
+                l = (float)p[0] + ((float)q[0] - (float)p[0]) * f;
+                r = (float)p[1] + ((float)q[1] - (float)p[1]) * f;
             }
             else
             {
@@ -562,6 +708,13 @@ class Core
     uint16_t gridT_ = 48;
     uint32_t evTicks_ = 0, evTotal_ = 0;
     uint32_t wr_ = 0, capLen_ = 0, captures_ = 0;
+    uint32_t pw_ = 0, hist_ = 0, capBase_ = 0, sliceBase_ = 0; // plan 024: circular write position, frames of history, slice starts
+    bool pre_ = false;
+    float mixG_ = 1.0f;
+    MasterHp hp_;
+    seqfx::FilterControl bp_;
+    seqfx::SvfState bsl_, bsr_;
+    static constexpr float kMixStep = 1.0f / 256.0f;
     uint16_t rep_ = 0;
     int32_t tk_ = 0;
     float fr_ = 0.0f, dry_ = 1.0f, bpm_ = 120.0f;

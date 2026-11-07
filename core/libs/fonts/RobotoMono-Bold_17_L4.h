@@ -10,4 +10,4 @@
 
 #include "NewDisplay/CompressionRLE.h"
 
-extern const CompressedData Roboto_Mono_Bold_17_L4_compressed[4884];
+extern const CompressedData Roboto_Mono_Bold_17_L4_compressed[6467];

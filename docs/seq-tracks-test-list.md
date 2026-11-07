@@ -1063,3 +1063,16 @@ and thinning bounds. Nothing below is device-tested yet. Replaces the rows "Leav
 | Project with CUT used (rows cut, recorded loop), save and re-open | CUT is not saved: all rows stock after loading; `seqtracks.bin` is only written when a sequencer type is set. |
 | Song page: play the song of a known project (v0.2.3 intentional change) | **Not** stock: each slot loops until its scene is flagged play next (section 9e). Flag every pattern of the song and it plays like the stock song (last slot loops instead of wrapping to slot 1). Editing the playlist, Add / Delete slot, copy / paste, Play / Stop, tempo and the stock loop toggle behave as stock. |
 | v0.3 (fonts): open **every** page (Pattern, Song, Master, Params, Sample pages, File, Project, Config, Play mode, Session CLIPS, Perform faders, lane view, popups) | All text renders in the original font, nothing blank or garbled. Config > Display font now lists only **Original** (the alternative "New" Liberation Sans set was removed, about 39.7 KB of flash). A config that stored the former "New" font (1) loads and shows the original font; a config that stored an SD .ptfont font (index 2 or higher before) still selects the same font after the first start of this version (stored index is shifted down once, config structure version 11). Custom .ptfont files on the SD card still appear in the list and load. |
+
+## Plan 026 - MLR engage, ratchet, jog quantise (v0.4.5)
+
+| # | Action | Expect |
+|---|---|---|
+| 26a | Jam: tap pads of one slot, overlap two fingers | always jumps, never a loop |
+| 26b | Hold two pads of one slot | a "hold both" bar fills in about 0.35 s, then the loop starts; releasing both keeps it, one pad ends it |
+| 26c | Hold two pads, lift one early | no loop |
+| 26d | Jog on the MLR page | header and button 5 show off, 1/32 .. 1 bar, stops at both ends |
+| 26e | Hold one pad (1/16, 1/4, 1/32) | its position retriggers at the quantise rate, label RATCHET; release continues forward; quantise off = no ratchet |
+| 26f | Leave a pad of section 1 down, let the page scroll to section 2, press another pad | acts on section 2 |
+| 26g | Save and reload | quantise and slot tracks are restored |
+| 26h | Look at the slot settings | 4 x 2 block, same order as the pads |

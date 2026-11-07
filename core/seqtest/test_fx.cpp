@@ -1006,6 +1006,89 @@ static void test_ring_split_equals_plain()
     CHECK(a[5] == 11 && c[5] == 22);
 }
 
+// plan 027: the SRAM tiles of the ring (ring_tiles.h) change nothing: output, ring memory, pre-delay memory and every state value are
+// identical to the plain loop, over many blocks with a moving predelay, shimmer, loud and quiet input, parameters changing in flight,
+// shimmer jumps inside blocks and the ring index wrapping
+static void test_ring_tiles_equal_plain()
+{
+    for (int variant = 0; variant < 3; variant++)
+    {
+        std::vector<int16_t> r1(ringverb::kRingSize, 0), r2(ringverb::kRingSize, 0);
+        std::vector<int16_t> p1(2 * ringverb::kPreSize, 0), p2(2 * ringverb::kPreSize, 0);
+        std::vector<int16_t> scratch(8192, 0x5a5a);
+        ringverb::RingReverb a, b;
+        a.init(ringverb::PlainRing{ r1.data() }, p1.data());
+        b.init(ringverb::PlainRing{ r2.data() }, p2.data());
+        a.setTiling(false);
+        b.setScratch(scratch.data(), (uint32_t)scratch.size());
+        b.setTiling(true);
+        srand(100 + variant);
+        bool same = true;
+        std::vector<int16_t> l1(128), rr1(128), l2(128), rr2(128);
+        const int blocks = 3500; // 10 s: the shimmer positions jump a few times
+        for (int blk = 0; blk < blocks; blk++)
+        {
+            if (blk % 150 == 0)
+            {
+                const int fade = 60 + rand() % 190;
+                const int pre = variant == 0 ? 0 : (variant == 1 ? rand() % 4096 : (rand() % 2 ? rand() % 300 : 3800 + rand() % 296));
+                const int apg = 8000 + rand() % 16000;
+                const float col = 0.2f + 0.7f * (float)(rand() % 100) / 100.0f;
+                a.setParams(fade, col, apg, pre);
+                b.setParams(fade, col, apg, pre);
+                const int sh = rand() % 128;
+                a.setShimmer(sh);
+                b.setShimmer(sh);
+            }
+            const int amp = (blk / 400) % 3 == 0 ? 30000 : ((blk / 400) % 3 == 1 ? 600 : 0);
+            for (int i = 0; i < 128; i++)
+            {
+                l1[i] = l2[i] = amp ? (int16_t)((rand() % (2 * amp + 1)) - amp) : 0;
+                rr1[i] = rr2[i] = amp ? (int16_t)((rand() % (2 * amp + 1)) - amp) : 0;
+            }
+            a.process(l1.data(), rr1.data(), 128);
+            b.process(l2.data(), rr2.data(), 128);
+            if (memcmp(l1.data(), l2.data(), 256) || memcmp(rr1.data(), rr2.data(), 256))
+                same = false;
+            if (blk % 50 == 0 && (memcmp(r1.data(), r2.data(), r1.size() * 2) || memcmp(p1.data(), p2.data(), p1.size() * 2)))
+                same = false;
+            if (!same)
+            {
+                printf("  tiles differ at variant %d block %d\n", variant, blk);
+                break;
+            }
+        }
+        CHECK(same);
+        CHECK(memcmp(r1.data(), r2.data(), r1.size() * 2) == 0 && memcmp(p1.data(), p2.data(), p1.size() * 2) == 0);
+        CHECK(a.shimmer() == b.shimmer() && a.predelay() == b.predelay());
+    }
+    // a scratch that is too small, or none, runs the plain loop (same output)
+    {
+        std::vector<int16_t> r1(ringverb::kRingSize, 0), r2(ringverb::kRingSize, 0);
+        std::vector<int16_t> p1(2 * ringverb::kPreSize, 0), p2(2 * ringverb::kPreSize, 0);
+        std::vector<int16_t> scratch(200, 0);
+        ringverb::RingReverb a, b;
+        a.init(ringverb::PlainRing{ r1.data() }, p1.data());
+        b.init(ringverb::PlainRing{ r2.data() }, p2.data());
+        b.setScratch(scratch.data(), (uint32_t)scratch.size());
+        srand(5);
+        bool same = true;
+        std::vector<int16_t> l1(128), rr1(128), l2(128), rr2(128);
+        for (int blk = 0; blk < 300; blk++)
+        {
+            for (int i = 0; i < 128; i++)
+            {
+                l1[i] = l2[i] = (int16_t)((rand() % 20001) - 10000);
+                rr1[i] = rr2[i] = (int16_t)((rand() % 20001) - 10000);
+            }
+            a.process(l1.data(), rr1.data(), 128);
+            b.process(l2.data(), rr2.data(), 128);
+            same = same && !memcmp(l1.data(), l2.data(), 256) && !memcmp(rr1.data(), rr2.data(), 256);
+        }
+        CHECK(same);
+    }
+}
+
 static void test_ring_silence_bypass()
 {
     std::vector<int16_t> ring, pre;
@@ -1425,6 +1508,7 @@ int main()
     test_ring_geometry();
     test_ring_silence_bypass();
     test_ring_split_equals_plain();
+    test_ring_tiles_equal_plain();
     test_ring_allpass_equals_original();
     test_ring_silence_and_decay();
     test_ring_stability();

@@ -18,7 +18,9 @@ constexpr uint32_t kRed = 0xE0383E;
 inline uint32_t slotColor(int k) { return k == 0 ? seqpal::kNote : seqpal::kFx1; }
 inline int laneTop(int k) { return kMlrLaneTop + k * kMlrLaneStride; }
 
-// The names of the eight extra pads of a slot (2 columns x 4 rows, in the order of the pads: STOP REV / RATE RSYNC / GRID SECT / REC MUTE)
+// The names of the eight extra pads of a slot: 4 columns x 2 rows, the same arrangement as the pads (cols 9-12 of its two rows):
+//   STOP  REV   RATE  RSYNC
+//   GRID  SECT  REC   MUTE
 template <class C> void extras(C& c, const SlotInfo& s, int k, bool texts)
 {
     const int top = laneTop(k);
@@ -32,16 +34,16 @@ template <class C> void extras(C& c, const SlotInfo& s, int k, bool texts)
     for (int i = 0; i < 8; i++)
     {
         const LegendCell cell = legendCell((uint8_t)(kPosCols + i % 4), (uint8_t)(i / 4), sl);
-        const int x = kMlrBlockX + (i & 1) * 49, y = top + 4 + (i >> 1) * 38;
+        const int x = kMlrBlockX + (i & 3) * kMlrCellPitch, y = top + 4 + (i >> 2) * kMlrCellPitchY;
         if (!texts)
         {
             c.color(cell.on ? seqpal::mix(slotColor(k), seqpal::kBg, 150) : seqpal::kCellEmpty);
-            c.rect(x, y, x + 47, y + 34);
+            c.rect(x, y, x + kMlrCellW, y + kMlrCellH);
         }
         else
         {
             c.color(cell.on ? 0xFFFFFF : seqpal::kText);
-            c.text(x + 23, y + 17, 5, TX_CENTERX | TX_CENTERY, cell.word);
+            c.text(x + kMlrCellW / 2, y + kMlrCellH / 2, 5, TX_CENTERX | TX_CENTERY, cell.word);
         }
     }
 }
@@ -66,7 +68,7 @@ template <class C> void lane(C& c, const SlotInfo& s, int k)
             const int hi = w.hi > w2.hi ? w.hi : w2.hi, lo = w.lo < w2.lo ? w.lo : w2.lo;
             int y0 = mid - (hi * 54) / 127, y1 = mid - (lo * 54) / 127;
             if (y1 <= y0) y1 = y0 + 1;
-            c.rect(kMlrLaneX + j * 4, y0, kMlrLaneX + j * 4 + 7, y1);
+            c.rect(kMlrLaneX + (j * kMlrLaneW) / kWaveCols, y0, kMlrLaneX + ((j + 2) * kMlrLaneW) / kWaveCols - 1, y1);
         }
     }
     // inactive pads (behind the end of the pattern)
@@ -131,6 +133,17 @@ template <class C> void lane(C& c, const SlotInfo& s, int k)
         }
     }
     extras(c, s, k, false);
+    // plan 026: two pads are held and the loop is about to start: a bar fills while the pads stay down (the text comes with the others)
+    if (s.engage)
+    {
+        const int bx = kMlrLaneX + 106, by = top + 66, bw = 300;
+        c.color(seqpal::kBg);
+        c.rect(bx - 8, by - 8, bx + bw + 8, by + 62);
+        c.color(seqpal::kGridHi);
+        c.rect(bx, by + 34, bx + bw, by + 46);
+        c.color(seqpal::kInstr);
+        c.rect(bx, by + 34, bx + (bw * (s.engage > 100 ? 100 : s.engage)) / 100, by + 46);
+    }
 
     // all texts last: every text ends the rectangle batch of the display list
     c.color(seqpal::kText);
@@ -166,13 +179,18 @@ template <class C> void lane(C& c, const SlotInfo& s, int k)
     c.text(10, top + 34, 5, TX_LEFT, buf);
     snprintf(buf, sizeof(buf), "sec %d/%d%s", s.sec + 1, s.nsec < 1 ? 1 : s.nsec, (s.flags2 & V2_HOLD) ? " H" : "");
     c.text(10, top + 52, 5, TX_LEFT, buf);
-    const char* st = (s.flags & VF_STOPPED) ? "STOP" : ((s.flags & VF_REC) ? "REC" : ((s.flags & VF_RECORDED) ? "REPLAY" : (s.loopLo <= s.loopHi ? "LOOP" : ((s.flags & VF_ACTIVE) ? "OFF GRID" : ""))));
+    const char* st = (s.flags & VF_STOPPED) ? "STOP" : ((s.flags & VF_REC) ? "REC" : ((s.flags & VF_RECORDED) ? "REPLAY" : (s.loopLo <= s.loopHi ? "LOOP" : ((s.flags & VF_RATCHET) ? "RATCHET" : ((s.flags & VF_ACTIVE) ? "OFF GRID" : "")))));
     if (st[0]) c.text(10, top + 72, 5, TX_LEFT, st);
     if (s.muted) c.text(10, top + 90, 5, TX_LEFT, "MUTED");
     const uint8_t rate = viewRate(View{ 0, 1, 0, s.flags, 0, 0, 0, 0 });
     if ((s.flags & VF_REVERSE) || rate != 1)
         c.text(10, top + 108, 5, TX_LEFT, (s.flags & VF_REVERSE) ? (rate == 0 ? "REV 1/2" : (rate == 2 ? "REV 2x" : "REV")) : (rate == 0 ? "1/2 speed" : "2x speed"));
     extras(c, s, k, true);
+    if (s.engage)
+    {
+        c.color(0xFFFFFF);
+        c.text(kMlrLaneX + 256, top + 84, 4, TX_CENTERX | TX_CENTERY, "hold both");
+    }
 }
 
 // The pad legend: the 12 x 4 pads as cells with their words; states highlighted. Slot names at the left.
@@ -251,6 +269,11 @@ template <class C> void drawMlr(C& c, const MlrModel& m)
         snprintf(buf, sizeof(buf), "A: T%d %s    B: T%d %s", m.slot[0].track + 1, gridName((m.slot[0].flags2 & V2_GRID8) ? GRID_8 : GRID_4),
                  m.slot[1].track + 1, gridName((m.slot[1].flags2 & V2_GRID8) ? GRID_8 : GRID_4));
         c.text(m.legend ? 270 : 150, mid, 5, TX_CENTERY, buf);
+        if (!m.legend)
+        {
+            snprintf(buf, sizeof(buf), "Q %s  (jog)", quantName(m.quant));
+            c.text(470, mid, 5, TX_CENTERY, buf);
+        }
     }
     if (m.legend)
     {

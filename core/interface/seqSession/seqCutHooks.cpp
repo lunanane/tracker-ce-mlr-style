@@ -3,6 +3,7 @@
 #include "seqHooks.h"
 
 #include "cutLayer.h"
+#include "elapsedMillis.h"
 #include "seqMlr.h"
 
 // Transport Stop = panic (plan 005 M6): held MLR pads and open takes end, SYNC ALL drops every jam, loop, recorded loop, reverse,
@@ -16,6 +17,12 @@ void seqPanicCut()
 // queue is retried here until it is accepted.
 void seqCutUpdate()
 {
-    cutUpdate();
+    static elapsedMillis clock; // never reset: the time base of the deliberate two-pad loop (plan 026)
+    cutUpdate((uint32_t)clock);
     seqmlr::update(); // cue cache wants + section waveform (throttled)
+}
+
+void seqCutLoadSettings(uint8_t quant, uint8_t slotA, uint8_t slotB)
+{
+    cutMlrLoad(quant, slotA, slotB);
 }

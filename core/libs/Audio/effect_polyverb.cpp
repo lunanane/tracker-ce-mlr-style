@@ -26,7 +26,7 @@ static constexpr float kBlockCycles = 180000000.0f * AUDIO_BLOCK_SAMPLES / 44100
 #if defined(PLATFORM_IMX)
 static __NOINIT(EXTERNAL_RAM) int16_t ringPreMemory[2 * ringverb::kPreSize];
 #else
-static __NOINIT(EXTERNAL_RAM) int16_t ringReverbMemory[ringverb::kRingSize + 2 * ringverb::kPreSize];
+alignas(4) static __NOINIT(EXTERNAL_RAM) int16_t ringReverbMemory[ringverb::kRingSize + 2 * ringverb::kPreSize]; // 4 byte aligned: word copies of the tiles
 #endif
 #ifdef PLATFORM_IMX
 static uint16_t internalRamReverbBuff[16384] __attribute__((section(".noinit")));
@@ -34,7 +34,7 @@ static uint16_t internalRamReverbBuff[16384] __attribute__((section(".noinit")))
 // plan 009 P#1: the delay lines of the stock reverb live in internal SRAM (.bss, zeroed at start): 29 uncached SDRAM accesses per sample
 // become single-cycle ones. 32 768 + 22 080 bytes. The old SDRAM array externalRamReverbBuff (Tracker.cpp) is no longer used here.
 static uint16_t internalRamReverbBuff[Reverb::kBuffer1Words];
-static uint16_t sramReverbBuff2[Reverb::kBuffer2Words];
+alignas(4) static uint16_t sramReverbBuff2[Reverb::kBuffer2Words];
 #endif
 
 AudioEffectPolyverb::AudioEffectPolyverb()
@@ -53,6 +53,9 @@ AudioEffectPolyverb::AudioEffectPolyverb()
     ring.init(ringverb::SplitRing{ (int16_t*)buffer, (int16_t*)buffer2 }, ringPreMemory);
 #else
     ring.init(ringverb::PlainRing{ ringReverbMemory }, ringReverbMemory + ringverb::kRingSize);
+    // plan 027: the SRAM delay lines of the stock reverb are idle while this type runs (they are cleared when the type is entered, see
+    // clearStep): the ring reverb uses sramReverbBuff2 for its tiles (ring_tiles.h), the SDRAM accesses become word bursts
+    ring.setScratch((int16_t*)sramReverbBuff2, Reverb::kBuffer2Words);
 #endif
     *(volatile uint32_t*)0xE000EDFC |= (1u << 24); // DEMCR.TRCENA
     *(volatile uint32_t*)0xE0001000 |= 1u;         // DWT_CTRL.CYCCNTENA

@@ -2,13 +2,20 @@
 
 void decompress(const CompressedData* compressed, int compressed_size, uint8_t* decompressed)
 {
-    int index = 0;
-    for (int i = 0; i < compressed_size; i++)
+    int i = 0;
+    while (i < compressed_size)
     {
-        for (int j = 0; j < compressed[i].count; j++)
+        const uint8_t h = compressed[i++];
+        if (h & 0x80)
         {
-            decompressed[index] = compressed[i].value;
-            index++;
+            for (int n = (h & 0x7F) + 1; n > 0; n--)
+                *decompressed++ = compressed[i++];
+        }
+        else
+        {
+            const uint8_t v = compressed[i++];
+            for (int n = h + 1; n > 0; n--)
+                *decompressed++ = v;
         }
     }
 }

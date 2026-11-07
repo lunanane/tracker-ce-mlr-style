@@ -1,6 +1,7 @@
 #ifndef AUDIOENGINE_VOICESTREAMMANAGER_H_
 #define AUDIOENGINE_VOICESTREAMMANAGER_H_
 
+#include <string.h>
 #include "Platform.h"
 #include "config.h"
 #include "mtStructs.h"
@@ -88,6 +89,56 @@ class VoiceStreamManager
             }
         }
         return getSample(voiceIdx, channel, absFrame, preCacheBase, preCacheFrames);
+    }
+
+    // plan 027: one run of `count` frames from absFrame, copied from the ring into SRAM (the ring is uncached SDRAM: a single read
+    // costs about 20 cycles, a word burst a few). Only when every frame is what getSampleFast would return from the ring (voice active,
+    // fade-in over, the whole run inside the valid window); false otherwise and nothing is copied.
+    bool copyRingRun(int voiceIdx, int channel, uint32_t absFrame, uint32_t count, int16_t* dst) const
+    {
+        if ((uint32_t)voiceIdx >= (uint32_t)kVoiceCount || count == 0 || count > kRingFrames / 2)
+            return false;
+        const VoiceStreamState& v = voices[voiceIdx];
+        if (!v.active || v.fadeInCounter < 32)
+            return false;
+        const uint32_t vStart = v.validStartFrame;
+        const uint32_t vEnd = v.validEndFrame;
+        if (absFrame < vStart || absFrame + count > vEnd || absFrame + count < absFrame)
+            return false;
+        const int16_t* src = ring_[voiceIdx][(channel > 0 && v.isStereo) ? 1 : 0];
+        uint32_t i = absFrame & kRingMask;
+        uint32_t left = count;
+        while (left)
+        {
+            uint32_t n = kRingFrames - i < left ? kRingFrames - i : left;
+            // a leading odd frame, then word copies, then a trailing odd frame (the ring is 4 byte aligned)
+            const int16_t* sp = src + i;
+            int16_t* dp = dst + (count - left);
+            uint32_t k = n;
+            if ((i & 1u) && k)
+            {
+                *dp++ = *sp++;
+                k--;
+            }
+            const uint32_t w = k & ~1u;
+            if (w)
+            {
+                if (((uintptr_t)dp & 3u) == 0)
+                    memcpy(dp, sp, w * sizeof(int16_t));
+                else
+                    for (uint32_t q = 0; q < w; q++)
+                        dp[q] = sp[q];
+                dp += w;
+                sp += w;
+                k -= w;
+            }
+            if (k)
+                *dp = *sp;
+            left -= n;
+            i = (i + n) & kRingMask;
+        }
+        // the voice may have been restarted while we copied (the generation of the ring changed): re-check the window
+        return v.active && absFrame >= v.validStartFrame && absFrame + count <= v.validEndFrame;
     }
 
     // Per-instrument EXTERNAL_RAM metadata accessors

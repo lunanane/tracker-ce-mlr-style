@@ -1,5 +1,6 @@
 // Sequencer tracks mod (plan 021) - PolyForm Noncommercial 1.0.0 (see seqgen/LICENSE.md)
 #include "seqBeatRepeat.h"
+#include "seqHooks.h"
 #include "seqSidecar.h"
 #include "seqModLogic.h"
 #include "seqTracksLogic.h"
@@ -120,6 +121,16 @@ void seqBrAct(const seqbr::Result& r)
 #endif
 }
 
+void seqBrPreroll(bool on)
+{
+#ifdef FEATURE_BEAT_REPEAT
+    wire();
+    stage()->core().post(beatrepeat::Core::C_PRE, on ? 1 : 0);
+#else
+    (void)on;
+#endif
+}
+
 void seqBrPanic()
 {
     s_ui.panic();
@@ -184,7 +195,7 @@ void seqBrFillModel(seqbr::BrModel* m)
             const uint32_t n = stage()->core().captured();
             s_waveOk = n >= 16;
             if (s_waveOk)
-                seqbr::foldWave(stage()->core().ring(), n, s_lo, s_hi);
+                seqbr::foldWave(stage()->core().ring(), n, s_lo, s_hi, stage()->core().sliceBase(), stage()->core().capacity());
         }
         m->waveOk = s_waveOk ? 1 : 0;
         if (s_waveOk)
@@ -249,6 +260,7 @@ void seqBrLoadWorkspace()
     s_wsWritePending = false;
     s_dirty.dirty = false;
     seqBrPush();
+    seqCutLoadSettings(s_ui.prm.mlrQuant, s_ui.prm.mlrSlotA, s_ui.prm.mlrSlotB); // plan 026: the MLR page settings of the project
 }
 
 void seqBrSaveWorkspace()

@@ -512,3 +512,80 @@ TEST(playhead_grid_back_to_even_split_and_serialize_16) {
   uint8_t buf[Playhead::kSerialSize]; CHECK_EQ(p.serialize(buf, sizeof(buf)), (size_t)Playhead::kSerialSize);
   Playhead q; CHECK(q.deserialize(buf, sizeof(buf))); CHECK_EQ(q.columns(), 16);
 }
+
+// ---- plan 026: deliberate loops, ratchet, stale holds ----
+TEST(playhead_gate_second_pad_is_a_jump_until_engage) {
+  Playhead p; p.setLength(64); p.setGrid(4); p.setDeliberate(true);
+  steps(p, 2);
+  p.press(2); Playhead::StepOut o = stp(p); CHECK_EQ(o.pos, 8);
+  p.press(5);  // the roll: while pad 2 is down
+  CHECK(!p.engaged());
+  o = stp(p); CHECK_EQ(o.pos, 20); CHECK(o.jumped); CHECK(!p.looping());   // instant jump to the new pad, no loop
+  CHECK(p.engage()); CHECK(p.engaged());
+  o = stp(p); CHECK_EQ(o.pos, 8); CHECK(p.looping()); CHECK_EQ(p.loopLo(), 2); CHECK_EQ(p.loopHi(), 5);  // loop from the first pad
+  p.release(2); p.release(5);
+  CHECK(!p.engaged()); CHECK(p.looping());                                  // latched
+  for (int i = 0; i < 40; ++i) { int q = stp(p).pos; CHECK(q >= 8 && q <= 23); }
+  // with the gate off the second pad makes the loop at once (the earlier behaviour)
+  Playhead u; u.setLength(64); u.setGrid(4);
+  steps(u, 2); u.press(2); u.press(5); stp(u); CHECK(u.looping());
+}
+
+TEST(playhead_engage_needs_two_pads) {
+  Playhead p; p.setLength(64); p.setGrid(4); p.setDeliberate(true);
+  CHECK(!p.engage());
+  p.press(3); CHECK(!p.engage()); CHECK(!p.engaged());
+  p.press(4); CHECK(p.engage());
+  p.release(3); CHECK(!p.engaged());   // one pad left: the hands are no longer building a loop (the loop itself stays latched)
+  p.release(4); CHECK(!p.engaged());
+}
+
+TEST(playhead_ratchet_retriggers_the_held_pad_at_the_quantise_rate) {
+  Playhead p; p.setLength(64); p.setGrid(4); p.setDeliberate(true); p.setRatchet(true, false);
+  steps(p, 3);
+  p.press(5);
+  Playhead::StepOut o = stp(p); CHECK_EQ(o.pos, 20); CHECK(o.jumped);
+  for (int i = 0; i < 5; ++i) { o = stp(p); CHECK_EQ(o.pos, 20); CHECK(o.jumped); CHECK(p.ratcheting()); }
+  p.release(5);
+  o = stp(p); CHECK_EQ(o.pos, 21); CHECK(!o.jumped); CHECK(!p.ratcheting());   // normal playback from there
+  // quantise 4: the pad's beat repeats
+  Playhead q; q.setLength(64); q.setGrid(4); q.setDeliberate(true); q.setRatchet(true, false); q.setQuantise(4);
+  q.press(5);
+  int first = -1, n = 0, seen[10];
+  for (int i = 0; i < 20 && n < 10; ++i) { int pos = stp(q).pos; if (first < 0 && pos == 20) first = i; if (first >= 0) seen[n++] = pos; }
+  CHECK_EQ(n, 10);
+  for (int i = 0; i < n; ++i) CHECK_EQ(seen[i], 20 + i % 4);
+  // off: no ratchet, a held pad plays on
+  Playhead r; r.setLength(64); r.setGrid(4); r.setDeliberate(true); r.setRatchet(false, false);
+  r.press(5); stp(r); CHECK_EQ(stp(r).pos, 21); CHECK_EQ(stp(r).pos, 22);
+}
+
+TEST(playhead_ratchet_half_step_plays_the_position_twice) {
+  Playhead p; p.setLength(64); p.setGrid(4); p.setDeliberate(true); p.setRatchet(true, true);
+  p.press(5);
+  Playhead::StepOut o = stp(p); CHECK_EQ(o.pos, 20); CHECK(o.has2); CHECK_EQ(o.pos2, 20); CHECK(o.jumped2);
+  o = stp(p); CHECK_EQ(o.pos, 20); CHECK(o.has2); CHECK_EQ(o.pos2, 20); CHECK(o.jumped); CHECK(o.jumped2);
+  p.release(5);
+  o = stp(p); CHECK_EQ(o.pos, 21); CHECK(!o.has2);
+}
+
+TEST(playhead_applynow_arms_the_ratchet_too) {
+  Playhead p; p.setLength(64); p.setGrid(4); p.setDeliberate(true); p.setRatchet(true, true); p.setImmediate(true);
+  steps(p, 2);
+  p.press(5);
+  Playhead::StepOut o;
+  CHECK(p.applyNow(o)); CHECK_EQ(o.pos, 20); CHECK(p.ratcheting());
+  o = stp(p); CHECK_EQ(o.pos, 20); CHECK(o.has2);
+}
+
+TEST(playhead_stale_hold_from_another_section_is_forgotten) {
+  Playhead p; p.setLength(192); p.setGrid(4);
+  steps(p, 10);
+  p.press(2);                       // a pad of section 0 that is never let go
+  steps(p, 80);                     // the playhead is in section 1 now
+  CHECK_EQ(p.shownBase(), 64);
+  p.press(5);
+  Playhead::StepOut o = stp(p);
+  CHECK_EQ(o.pos, 64 + 20);         // acts on the section the screen shows, not on the old one
+  CHECK(!p.looping());
+}

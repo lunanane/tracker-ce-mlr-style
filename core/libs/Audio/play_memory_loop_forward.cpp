@@ -185,6 +185,35 @@ AUDIO_CORE_RAM audio_block_t* AudioPlayMemory::updateLoopForwardNormal()
             interpolationDif = ks.dif;
             kernelDone = true;
         }
+        // plan 027: a streamed voice whose block lies inside the ring (no loop wrap, no cue cache, no glide, nothing clamped) copies the
+        // window of the block from the SDRAM ring to SRAM once and runs the same register kernel on it: the same samples as the per-sample
+        // reads of readSampleAtRel, without two uncached reads and a dozen member loads per sample
+        if (!kernelDone && currentIsStreamed && constrainsInSamples.pitchSmoothing == 0 && voiceIndex >= 0 && castPitchControl >= 0 &&
+            castPitchControl <= 3 && iPitchCounter >= 0 && (uint32_t)iPitchCounter >= currentSliceCacheFrames)
+        {
+            const int32_t span = AUDIO_BLOCK_SAMPLES * (castPitchControl + 1) + 2; // frames the block can touch from iPitchCounter
+            const uint32_t absFirst = pointsInSamples.start + (uint32_t)iPitchCounter;
+            if (iPitchCounter + span < loopEndPoint && (int32_t)length > iPitchCounter + span && absFirst >= currentPreCacheFrames &&
+                absFirst + (uint32_t)span < currentSampleLength)
+            {
+                alignas(4) static int16_t window[AUDIO_BLOCK_SAMPLES * 4 + 8];
+                int16_t* const win = window + (absFirst & 1u); // same parity as the ring index: the copy runs in words
+                if (voiceStreamManager.copyRingRun((uint8_t)voiceIndex, (uint8_t)channel, absFirst, (uint32_t)span, win))
+                {
+                    pmkernel::Fwd ks = { iPitchCounter, currentFractionPitchCounter, playing, currentSampelValue, interpolationDif };
+                    // win[k] is frame iPitchCounter + k: the kernel indexes by iPitchCounter
+                    pmkernel::renderForward<true>(ks, win - iPitchCounter, out, AUDIO_BLOCK_SAMPLES, (int32_t)length, 0, loopEndPoint,
+                                                   constrainsInSamples.loopPoint1, castPitchControl, currentFractionPitchControl,
+                                                   interpolationCondition != 0);
+                    iPitchCounter = ks.ipc;
+                    currentFractionPitchCounter = ks.frac;
+                    playing = ks.playing;
+                    currentSampelValue = ks.sample;
+                    interpolationDif = ks.dif;
+                    kernelDone = true;
+                }
+            }
+        }
         for (int i = 0; !kernelDone && i < AUDIO_BLOCK_SAMPLES; i++)
         {
             if ((int32_t)length > iPitchCounter)

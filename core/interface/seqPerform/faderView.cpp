@@ -95,18 +95,21 @@ uint32_t statusColor(const Pal& p, uint8_t status)
     }
 }
 
-const char* chipName(uint8_t i)
+const char* chipName(uint8_t i, bool master)
 {
     static const char* const n[PAGE_COUNT] = { "FX 1-4", "FX 5-8", "FX 9-12", "PING", "REV" };
-    return n[i];
+    static const char* const m[4] = { "REVERB", "DELAY", "HIGH-PASS", "BEAT RPT" };
+    return master ? m[i] : n[i];
 }
 
-void chipPos(uint8_t i, int16_t& x, int16_t& w)
+void chipPos(uint8_t i, int16_t& x, int16_t& w, bool master)
 {
     static const int16_t xs[PAGE_COUNT] = { 6, 88, 170, 274, 342 };
     static const int16_t ws[PAGE_COUNT] = { 78, 78, 84, 62, 52 };
-    x = xs[i];
-    w = ws[i];
+    static const int16_t mx[4] = { 6, 96, 186, 296 };
+    static const int16_t mw[4] = { 86, 86, 106, 100 };
+    x = master ? mx[i] : xs[i];
+    w = master ? mw[i] : ws[i];
 }
 
 } // namespace
@@ -123,10 +126,11 @@ void cSeqFaderView::update()
     API_BEGIN(RECTS);
 
     // page chips: the pads of columns 9 and 10; the active page filled, a dot where something is dialled in
-    for (uint8_t i = 0; i < PAGE_COUNT; i++)
+    const uint8_t chips = view->master ? 4 : PAGE_COUNT;
+    for (uint8_t i = 0; i < chips; i++)
     {
         int16_t x, w;
-        chipPos(i, x, w);
+        chipPos(i, x, w, view->master != 0);
         bool active = view->page == i;
         fill(active ? p.bright : p.panel, 255, x, kChipY, w, kChipH);
         if (view->pageMask & (1u << i))
@@ -182,12 +186,13 @@ void cSeqFaderView::update2()
     const Pal p = palette();
     API_SAVE_CONTEXT();
 
-    for (uint8_t i = 0; i < PAGE_COUNT; i++)
+    const uint8_t chips = view->master ? 4 : PAGE_COUNT;
+    for (uint8_t i = 0; i < chips; i++)
     {
         int16_t x, w;
-        chipPos(i, x, w);
+        chipPos(i, x, w, view->master != 0);
         bool active = view->page == i;
-        drawText(active ? p.panel : p.bright, active ? 255 : 170, x + w / 2, kChipY + kChipH / 2, F14B, OPT_CENTERX, chipName(i), w - 4);
+        drawText(active ? p.panel : p.bright, active ? 255 : 170, x + w / 2, kChipY + kChipH / 2, F14B, OPT_CENTERX, chipName(i, view->master != 0), w - 4);
     }
     // tracks the FX and sends affect (the 8 buttons under the screen select them)
     drawText(view->noTracks ? p.warn : p.bright, view->noTracks ? 255 : 200, 794, kChipY + kChipH / 2, F14, OPT_RIGHTX, view->tracks, 380);
@@ -209,8 +214,8 @@ void cSeqFaderView::update2()
         drawText(b.status == RS_OFF ? p.bright : sc, b.status == RS_OFF ? 150 : 255, 36, y0 + 38, F17, 0, b.value, 178);
         drawText(p.bright, 150, 36, y0 + 62, F12, 0, b.note, 580);
 
-        drawText(b.latched ? p.panel : p.bright, b.canLatch ? 255 : 70, kSideX + 39, y0 + 21, F12, OPT_CENTERX, "LATCH", 76);
-        drawText(p.bright, b.engaged ? 255 : 110, kSideX + 86 + 39, y0 + 21, F12, OPT_CENTERX, "DISENGAGE", 76);
+        drawText(b.latched ? p.panel : p.bright, b.canLatch ? 255 : 70, kSideX + 39, y0 + 21, F12, OPT_CENTERX, b.lat[0] ? b.lat : "LATCH", 76);
+        drawText(p.bright, b.engaged ? 255 : 110, kSideX + 86 + 39, y0 + 21, F12, OPT_CENTERX, b.dis[0] ? b.dis : "DISENGAGE", 76);
         drawText(b.status == RS_OFF ? p.bright : sc, b.status == RS_OFF ? 140 : 255, kSideX + 82, y0 + 54, F14B, OPT_CENTERX, b.state, 160);
     }
 

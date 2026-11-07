@@ -19,6 +19,8 @@ struct strFaderBand
     uint8_t canLatch;
     uint8_t latched;
     uint8_t engaged;
+    char lat[8];    // plan 024: word of the pad column 11 cell ("" = LATCH)
+    char dis[12];   // word of the pad column 12 cell ("" = DISENGAGE)
 };
 
 struct strFaderView
@@ -26,6 +28,7 @@ struct strFaderView
     uint8_t page;       // seqperf::Page
     uint8_t pageMask;   // pages with something dialled in (dot on the chip)
     uint8_t noTracks;   // no track selected: FX are inaudible (warning colour)
+    uint8_t master;     // plan 024: 1 = the Master fader pages (4 page chips: REVERB DELAY HIGH-PASS BEAT RPT, page = seqmf::Page)
     char tracks[40];    // "affects 1-4 7"
     char summary[96];   // group line: "PING   time 500 ms   fb 50   filter 20000 Hz   ping-pong ON   sync off"
     strFaderBand band[4];

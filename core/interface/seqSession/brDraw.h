@@ -67,9 +67,10 @@ template <class C> void drawBeatRepeat(C& c, const BrModel& m)
     // ---- header
     c.color(seqpal::kTitle);
     c.text(12, (kHeaderY0 + kHeaderY1) / 2, 4, TX_CENTERY, "BEAT REPEAT");
-    chip(c, 178, 74, "REPEAT", m.page == BG_REPEAT, seqpal::kNote);
-    chip(c, 256, 56, "AUTO", m.page == BG_AUTO, seqpal::kInstr);
-    chip(c, 322, 78, modeName(m.mode), true, m.mode == beatrepeat::MODE_MIX ? seqpal::kFx2 : (m.mode == beatrepeat::MODE_INSERT ? seqpal::kFx1 : seqpal::kInstr));
+    chip(c, 150, 66, "REPEAT", m.page == BG_REPEAT, seqpal::kNote);
+    chip(c, 218, 48, "AUTO", m.page == BG_AUTO, seqpal::kInstr);
+    chip(c, 268, 56, "FILTER", m.page == BG_FILTER, seqpal::kFx1);
+    chip(c, 326, 74, modeName(m.mode), true, m.mode == beatrepeat::MODE_MIX ? seqpal::kFx2 : (m.mode == beatrepeat::MODE_INSERT ? seqpal::kFx1 : seqpal::kInstr));
     const char* st = m.state == beatrepeat::S_PENDING ? "waiting" : (m.state == beatrepeat::S_CAPTURE ? "capturing" : (m.state == beatrepeat::S_REPEAT ? "REPEAT" : "idle"));
     if (m.state == beatrepeat::S_IDLE)
         snprintf(buf, sizeof(buf), "%s", st);
@@ -99,6 +100,8 @@ template <class C> void drawBeatRepeat(C& c, const BrModel& m)
         const uint32_t col = rowColor(row);
         c.color(seqpal::kCellEmpty);
         c.rect(6, y0, 794, y0 + kBandH);
+        if (kind == BK_NONE)
+            continue; // plan 024: the fourth row of the FILTER page is unused
         c.color(col);
         c.rect(6, y0, 10, y0 + kBandH);
         for (int i = 0; i < 8; i++)
@@ -165,6 +168,8 @@ template <class C> void drawBeatRepeat(C& c, const BrModel& m)
         const Kind kind = kindOf(par);
         const int y0 = kBandTop + row * kBandStride;
         const uint32_t col = rowColor(row);
+        if (kind == BK_NONE)
+            continue;
         c.color(col);
         c.text(18, y0 + 12, 4, TX_LEFT, paramName(par));
         char v[16];
@@ -249,7 +254,7 @@ template <class C> void drawBrLegend(C& c, const BrModel& m)
         c.text(8, y0 + row * (ch + 4) + 8, 5, TX_LEFT, paramName(par));
     }
     c.color(seqpal::kText);
-    c.text(12, y0 + 4 * (ch + 4) + 6, 5, TX_LEFT, "pads 9-10: page REPEAT / AUTO, output MIX / REPL(ACE) / GATE    11: LATCH    12: OFF, RESET the row");
+    c.text(12, y0 + 4 * (ch + 4) + 6, 5, TX_LEFT, "pads 9-10: page REPEAT / AUTO / FILTER, output MIX / REPL(ACE) / GATE    11: LATCH    12: OFF, RESET the row");
     c.text(12, y0 + 4 * (ch + 4) + 26, 5, TX_LEFT, "REPEAT: hold a grid pad = repeat at that grid, jam between pads. Stop ends any repeat. BeatRpt = back to MLR.");
 }
 

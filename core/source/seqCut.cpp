@@ -20,7 +20,7 @@ static View noView()
     return v;
 }
 
-Cut::Cut() : activeMask_(0), holdMask_(0), stopMask_(0), snapMask_(0), handMask_(0), quant_(Q_STEP), secMode_(false)
+Cut::Cut() : activeMask_(0), holdMask_(0), stopMask_(0), snapMask_(0), handMask_(0), quant_(Q_STEP), secMode_(false), gate_(false)
 {
     memset(gridMode_, 0, sizeof(gridMode_));
     memset(holdSec_, 0xFF, sizeof(holdSec_));
@@ -34,6 +34,14 @@ Cut::Cut() : activeMask_(0), holdMask_(0), stopMask_(0), snapMask_(0), handMask_
         rt_[i].view = noView();
         views_[i] = noView();
     }
+}
+
+// The playhead settings that follow the jump quantise: gestures at once (off) or at the half step too (1/32), the ratchet.
+void Cut::applyQuant(Playhead& p)
+{
+    p.setImmediate(quant_ == Q_OFF || quant_ == Q_32);
+    p.setRatchet(gate_ && quant_ != Q_OFF, quant_ == Q_32);
+    p.setDeliberate(gate_);
 }
 
 void Cut::setHold(uint8_t t, bool h)
@@ -69,7 +77,7 @@ void Cut::activate(uint8_t t)
     int pos = hooks_.trackPos ? hooks_.trackPos(hooks_.user, t) : 0;
     p.setLength(steps);
     p.setQuantise(quantStepsFor(quant_, steps)); // queued jumps / loops wait for the grid (plan 008 A)
-    p.setImmediate(quant_ == Q_OFF);
+    applyQuant(p);
     p.restart((uint32_t)(pos + 1)); // the track continues where it is (and the grid counter with it)
     if (secMode_) p.setHoldSection(holdSec_[t]);
     stock_[t] = (int16_t)pos;
@@ -109,7 +117,7 @@ void Cut::publish(uint8_t t)
         v.loopLo = (uint8_t)p.loopLo(); // a loop stays after the pads are up
         v.loopHi = (uint8_t)p.loopHi();
     }
-    else if (n >= 2)
+    else if (n >= 2 && (!gate_ || p.engaged()))
     {
         v.loopLo = (uint8_t)lo; // two pads are down and the loop waits for its grid
         v.loopHi = (uint8_t)hi;
@@ -120,6 +128,7 @@ void Cut::publish(uint8_t t)
     if (p.recording()) f |= VF_REC;
     if (p.recorded()) f |= VF_RECORDED;
     f |= (uint8_t)((p.rate() & 3) << VF_RATE_SHIFT);
+    if (p.ratcheting()) f |= VF_RATCHET;
     v.flags = f;
     r.view = v;
     views_[t] = v;
@@ -209,9 +218,16 @@ void Cut::apply(uint8_t t, uint8_t arg)
             for (uint8_t i = 0; i < kCutTracks; i++)
                 if ((activeMask_ >> i) & 1u)
                 {
+                {
                     ph_[i].setQuantise(quantStepsFor(quant_, ph_[i].length()));
-                    ph_[i].setImmediate(quant_ == Q_OFF);
+                    applyQuant(ph_[i]);
                 }
+                }
+            return;
+        }
+        if (argIsEngage(arg))
+        {
+            if (t < kCutTracks && ((activeMask_ >> t) & 1u) && ph_[t].engage()) publish(t); // the held pads become a loop at the next grid point
             return;
         }
         if (argIsGrid(arg) || argIsHold(arg))
@@ -446,7 +462,7 @@ bool Cut::mid(uint8_t t, int steps, StepPlan& out, bool frozen)
 bool Cut::now(uint8_t t, int steps, StepPlan& out, bool frozen)
 {
     memset(&out, 0, sizeof(out));
-    if (frozen || quant_ != Q_OFF || t >= kCutTracks || !((activeMask_ >> t) & 1u) || steps < 1) return false;
+    if (frozen || (quant_ != Q_OFF && quant_ != Q_32) || t >= kCutTracks || !((activeMask_ >> t) & 1u) || steps < 1) return false;
     Rt& r = rt_[t];
     if (r.stopped) return false;
     Playhead& p = ph_[t];

@@ -27,7 +27,8 @@ AUDIO_CORE_RAM void AudioEffectBeatRepeat::update(void)
 {
     audio_block_t* l = receiveWritable(0);
     audio_block_t* r = receiveWritable(1);
-    if (core_.bypassable())
+    const bool hpOn = core_.hp().active();
+    if (core_.bypassable() && !hpOn)
     {
         // exact bypass: the blocks go on as they are (a missing block stays missing - the limiter treats it as silence)
         core_.noteBypass();
@@ -68,7 +69,12 @@ AUDIO_CORE_RAM void AudioEffectBeatRepeat::update(void)
     if (clockFn)
         clockFn(clk);
     const uint32_t t0 = cycleCounter();
-    core_.process(clk, l->data, r->data, l->data, r->data, AUDIO_BLOCK_SAMPLES);
+    if (!core_.bypassable())
+        core_.process(clk, l->data, r->data, l->data, r->data, AUDIO_BLOCK_SAMPLES);
+    else
+        core_.noteBypass();
+    if (hpOn)
+        core_.hp().process(l->data, r->data, AUDIO_BLOCK_SAMPLES); // plan 024: master high-pass (bypassed = not called)
     const float pct = (float)(cycleCounter() - t0) * (100.0f / kBlockCycles);
     cpu += (pct - cpu) * (1.0f / 32.0f);
     transmit(l, 0);
