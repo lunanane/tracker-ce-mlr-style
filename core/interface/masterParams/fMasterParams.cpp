@@ -14,6 +14,8 @@
 #include "masterParams/ampView.h"
 #include "masterParams/masterFaders.h"
 #include "seqBeatRepeat.h"
+#include "seqMasterRec.h"
+#include "core/interfacePopups.h"
 #include "mtGainLevelLogarithmicTab.h"
 
 #include "Platform.h"
@@ -95,6 +97,7 @@ static void functSoloMuteLineIn(uint8_t state);
 static void functSoloMuteDelayReverb(uint8_t state);
 static void functAmpView(uint8_t state);
 static void functFaders(uint8_t state);
+static void functMasterRec(uint8_t state);
 static void functFaderButton(uint8_t button, uint8_t state);
 static void functFaderPads(uint8_t pad, uint8_t state, int16_t velo);
 #ifdef FEATURE_SYNTH
@@ -193,6 +196,8 @@ void cMasterParams::update()
 
     if ((displayType == displayMode::masterValues) && isReverbScreen)
         showReverbCpu(); // every 50 ms
+
+    refreshRecInfo(); // plan 030 A
 
     if (displayType == displayMode::mixer && !keyboardManager.getState())
     {
@@ -1278,6 +1283,7 @@ void cMasterParams::switchToMixerDelayReverb()
 #ifdef FEATURE_PLINKY
     ip->setButtonObj(interfaceButton7, buttonPress, functAmpView); // plan 013 M
     ip->setButtonObj(interfaceButton6, buttonPress, functFaders); // plan 024
+    ip->setButtonObj(interfaceButton5, buttonPress, functMasterRec); // plan 030 A
 #endif
     ip->setButtonObj(interfaceButtonShift, functSoloMuteDelayReverb);
 
@@ -2115,6 +2121,62 @@ static void functFaders(uint8_t state)
 {
     (void)state; // registered for buttonPress only
     MP->fadersButton();
+}
+
+static void functMasterRec(uint8_t state)
+{
+    (void)state; // registered for buttonPress only
+    MP->recButton();
+}
+
+void cMasterParams::recButton()
+{
+    if (displayType != displayMode::mixerDelayReverb || masterFaders.visible() || keyboardManager.getState())
+        return;
+    if (seqmasterrec::active())
+    {
+        const seqrec::Err e = seqmasterrec::stop();
+        if (e != seqrec::E_NONE)
+            mtPopups.show(0, seqrec::errText(e));
+    }
+    else
+    {
+        const seqrec::Err e = seqmasterrec::start();
+        if (e != seqrec::E_NONE)
+            mtPopups.show(0, seqrec::errText(e));
+    }
+    showMixerDelayReverbScreen(); // the label, its colour and the title bar
+}
+
+void cMasterParams::refreshRecInfo()
+{
+    static bool shown = false;
+    if (displayType != displayMode::mixerDelayReverb || masterFaders.visible() || ampView.visible() || keyboardManager.getState())
+    {
+        shown = false;
+        return;
+    }
+    static char text[40];
+    static char last[40];
+    const bool on = seqmasterrec::active();
+    if (on != shown) // started / stopped (also by an error or a power-down) since the screen was built
+    {
+        shown = on;
+        last[0] = 0;
+        showMixerDelayReverbScreen();
+        return;
+    }
+    if (!on)
+        return;
+    char t[12], z[14];
+    seqrec::fmtTime(t, sizeof(t), seqmasterrec::session().seconds());
+    seqrec::fmtSize(z, sizeof(z), seqmasterrec::session().fileBytes());
+    snprintf(text, sizeof(text), "REC %s   %s", t, z);
+    if (strcmp(text, last) != 0)
+    {
+        strcpy(last, text);
+        titleBar->setRightLabel(text);
+    }
 }
 
 static void functFaderButton(uint8_t button, uint8_t state)

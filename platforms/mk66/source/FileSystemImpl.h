@@ -48,6 +48,8 @@ class FileSystemImpl final : public FileSystem
     virtual bool pollAsyncRead(bool* outSuccess = nullptr) override;
     virtual bool waitAsyncRead() override;
     virtual bool isAsyncReadBusy() override;
+    virtual bool syncFile(FileHandle fileHandle) override;
+    virtual bool getFreeBytes(uint64_t& out) override;
 
     virtual int createInstrumentsList(const char* path,
                                       char** list,

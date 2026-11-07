@@ -3,6 +3,7 @@
 #ifdef FEATURE_PLINKY
 #include "seqPlinky.h"
 #endif
+#include "seqMasterRec.h"
 #include <string.h>
 
 namespace seqcpu {
@@ -82,6 +83,13 @@ int buildText(char* out, int cap)
     e.plinkyCpu10 = (int)(seqPlinkyCpu() * 10.0f);
     e.plinkyPeak10 = (int)(seqPlinkyCpuPeak() * 10.0f);
 #endif
+    {
+        const seqrec::Session& rs = seqmasterrec::session();
+        e.recWrites = rs.stats.writes;
+        e.recLongestMs = rs.stats.longestWriteMs;
+        e.recRingPct = seqmasterrec::ring().highPercent();
+        e.recDropped = seqmasterrec::ring().dropped;
+    }
     return format(s, e, out, cap);
 }
 

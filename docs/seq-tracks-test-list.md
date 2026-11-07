@@ -1049,6 +1049,19 @@ and thinning bounds. Nothing below is device-tested yet. Replaces the rows "Leav
 | HR Chord Stabs / Arp Lines / Arp Seq: Latch **Off** | Sound | A root sounds only while its pad is held. On = tap to latch, tap again to stop (as before). |
 | Save, re-open the project | Settings | All values and the Latch settings are back. A project whose Latches are all default saves as before (older mod versions still read it). |
 
+## 11r. Master recording to the SD card (plan 030 A, Original Tracker only)
+Master page = Global Mixer 3/3 (Master, then the page button until "Global Mixer 3/3"). Screen button 6 = **Rec** (idle), **Stop rec** (red) while recording; the title bar shows `REC mm:ss  size`.
+- [ ] Rec: the button turns red and reads "Stop rec", the title bar counts up (time and size). A file `/Recorded/<project>_001.wav` appears (the next free number each time).
+- [ ] Stop transport (Play button) does not stop the recording. Leaving the Master page does not stop it; coming back shows the running time.
+- [ ] Stop rec: the file plays on a computer (16-bit stereo, 44.1 kHz), length = the time shown, no clicks at the 30 s marks (header + sync every 30 s), nothing missing at the start.
+- [ ] Content: what you hear on the headphones / line out (after the limiter); the metronome and the sample preview are NOT in the file.
+- [ ] Export (Project page) and the Sample Recorder (record) refuse while recording ("Stop the master recording first"); Rec refuses while an export renders or the Sample Recorder records.
+- [ ] Card full / removed while recording: a popup says so and the recording stops cleanly (the file up to then is playable).
+- [ ] Config > Info > CPU monitor, last line: "Master rec: N writes, longest write X ms, ring peak P %, dropped blocks D". Soak (15 min) with 8 streamed MLR voices + PolySynth on a slow and a fast card: dropped blocks must stay 0, ring peak ideally below 75 %, no ring misses / clicks in the streamed voices, no governor cuts. Write the longest write ms and ring peak of each card into the report.
+- [ ] USB MIDI still works during and after a recording (note in/out, clock).
+- [ ] Power button during a recording: the file is closed (playable up to the sleep).
+- [ ] Sample pool is 256 KB smaller (7.25 MB resident, shown on the Project / import memory bars); an old project that used more than that loses its last samples on load (memory check) - note it.
+
 ## 12. Stock behaviour (never enter Play mode, Session or the fader page)
 | Press | Expected |
 |---|---|

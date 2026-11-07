@@ -51,3 +51,28 @@ Flash: A + B together > the current margin → flash savings first (%f printf ~8
   owner has it implemented in another fork, look at that first.
 - Provisional (lead): /Recorded/ folder, limiter tap (no metronome/preview), header 44100 Hz; flash room from the
   %f printf conversion (no visible change) if needed.
+
+## As built - part A (branch v046-masterrec, Original Tracker only)
+**Tap.** `MasterTap` (an `AudioStream` sink with two inputs, `seqMasterRec.cpp`, update in `AUDIO_CORE_RAM`) is connected to both limiter outputs (`connectOutputToExportQueue`), so the metronome and the sample preview are not in the file. Per block it packs 128 frames
+(L low half, R high half) into a ring with one 32-bit store per frame (null block = silence); while not recording it only releases the two blocks. **Ring** `seqrec::Ring` (`seqMasterRecLogic.h`): 192 KB raw storage in EXTERNAL_RAM
+(`__NOINIT`, no constructor, `check_sdram_ctors.sh` ok), 384 blocks = 1.114 s, capacity = size - 1 block; a block that does not fit is dropped and counted; the high-water mark is tracked. `SAMPLE_MEMORY_SIZE` 45 -> 44 units (-256 KB; EXTERNAL_RAM net -64 KB: 99.70 % -> 99.31 %;
+the resident sample pool is 7.25 MB now, an older project that used more than that is cut by the load memory check).
+**Writer.** `seqmasterrec::update()` runs in `TrackerImpl::update` right after the first `engine.updateSdStream()`; only while recording. One 16 KB chunk per pass at most; `shouldWrite`: needs >= 16 KB, **forced when the ring is > 75 % full**, otherwise
+not while `FileSystem::isAsyncReadBusy()` (a stream refill is in flight) and not within 6 ms of the last write. (VoiceStreamManager is untouched; the SD driver itself waits for a running async read before a blocking write, so the busy check is politeness, not safety.)
+The WAV header (16-bit stereo, **44100 Hz** as decided; the codec really runs at 44 117.6 Hz, 0.04 % slow) is written at the start with 0 bytes, rewritten + `f_sync` every 30 s and on stop (seek 0, write 44 B, sync, seek back: the seek walks the FAT chain, so a long file adds a
+few ms per rewrite; it is counted in "longest write"). File `/Recorded/<project>_<nnn>.wav` (folder created; nnn = first free 001..999; characters illegal in FAT replaced by `_`); the start is refused with < 8 MB free (`f_getfree`, may take
+a moment on a big card: the first call scans the FAT unless FSINFO is valid). Errors (short write = card full / removed, 4 GB file limit with an 8 MB margin) stop cleanly: tap off, header + close, a popup with the reason. Stop flushes the ring (<= 12 chunks).
+Sleep (power button) stops and closes the file. New `FileSystem::syncFile` / `getFreeBytes` (defaults in the base class so the IMX file system still builds; MK66 implements them with `f_sync` / `f_getfree`).
+**Exclusive** with the export (`startExport`, `startExportSelection`, `cFileManager::exportSound*` refuse, with a popup in the UI) and the Sample Recorder (record start refuses); Rec refuses while either runs. Transport Stop does not stop the recording.
+**UI.** Global Mixer 3/3, screen button 6 (between the empty 5 and Faders 7): "Rec" / "Stop rec" in the red-fill label colours (`performActiveTrackLabelsColors`, see `docs/seq-ui-colours.md`); the right label of the title bar shows `REC mm:ss  size` while recording
+(set when the text changes, checked every 50 ms by the Master page). No long-press, no hotkey. A REC indicator on other modules was **not** added (the title bar of every module would need a hook: not cheap).
+**CPU monitor.** New last line: `Master rec: N writes   longest write X ms   ring peak P%   dropped blocks D` (values of the running / last recording).
+**Tests.** `core/seqtest/test_masterrec.cpp` (6099 checks): header bytes, ring interleave / wrap / full / drop count / silence, file names + sanitising + numbering, scheduler truth table, session in simulated time with a fake card (65 s plain: 0 dropped, ring high-water 8 %, file
+byte-identical to what the audio produced; **a 250 ms write stall every 7th write for 120 s: 0 dropped, high-water 31 %; the card busy all the time and the first forced write stalling 250 ms: 0 dropped, high-water 97 %**; a 1.3 s stall does drop and is counted), errors
+(no card, no space, create failed, short write, 4 GB limit, restart), exclusivity codes, time / size text. `make rec-preview` (Pillow) draws `rec_idle.png` / `rec_on.png` (a schematic of Global Mixer 3/3 using the real label / title strings). The seqcpu monitor test is unchanged (the extra
+line fits the display budget). No existing check was changed.
+**Image.** FLASH 1 016 800 -> 1 022 020 B (+5.2 KB), RAM 238 736 -> 239 024 B, image end 0xF9564 -> 0xFA9D4 (margin 10 908 -> 5 676 B; clean build; the `%f` printf conversion was not needed), `check_sdram_ctors.sh` ok. Nothing on the audio ISR / SD path is -Os (seqMasterRec.cpp is -O2; the UI is -Os like the rest of the Master page).
+**Margin worry.** The worst simulated case (streams keep the card busy, the first forced write takes 250 ms) peaks at 97 % of the ring: about 30 ms of headroom. A 300 ms stall at the wrong moment would drop blocks (counted in the monitor). If the soak shows "dropped" > 0, lower the forced
+threshold (kForceNum 3/4 -> 5/8) before enlarging the ring.
+**Not done / needs the device.** Everything on hardware: real write times on a slow / fast card, the 15 min soak with 8 streamed MLR voices + PolySynth (dropped blocks, ring misses, governor), `f_getfree` time on a large card, USB MIDI during a recording (no USB code touched),
+the real label / title bar look (the preview is a schematic), the sleep path. Part B (USB audio) not started.

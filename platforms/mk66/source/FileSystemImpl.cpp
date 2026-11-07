@@ -326,6 +326,16 @@ bool FileSystemImpl::isAsyncReadBusy()
     return SD_IsAsyncBusy(&g_sd);
 }
 
+bool FileSystemImpl::syncFile(FileHandle fileHandle)
+{
+    return fileHandle != nullptr && ((SdFile*)fileHandle)->sync();
+}
+
+bool FileSystemImpl::getFreeBytes(uint64_t& out)
+{
+    return SD.freeBytes(out);
+}
+
 void FileSystemImpl::endFile(FileHandle fileHandle)
 {
     assert(fileHandle != nullptr);

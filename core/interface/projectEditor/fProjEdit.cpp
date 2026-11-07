@@ -1,5 +1,6 @@
 #include "mtSliceDetector.h"
 #include "seqHooks.h"
+#include "seqMasterRec.h"
 #include <mtAudioExport.h>
 #include <mtRandomNameGenerator.h>
 
@@ -1384,6 +1385,11 @@ bool cProjectEditor::checkClockConfig(uint8_t source)
 
 void cProjectEditor::startExport(uint8_t source)
 {
+    if (seqmasterrec::blocksOthers()) // plan 030 A: the master recording and the export exclude each other
+    {
+        mtPopups.show(0, "Stop the master recording", "first (Global Mixer 3/3)");
+        return;
+    }
     if (seqEndPerformFxForExport()) // v0.3.1 M1: the export renders the song as written
         mtPopups.show(0, "Perform FX ended for export");
     if (newFileManager.exportSound(source))

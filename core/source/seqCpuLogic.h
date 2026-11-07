@@ -91,6 +91,7 @@ struct Extra
 {
     int plinkyCap, plinkyVoices;      // governor cap and sounding voices (-1: no PolySynth)
     int plinkyCpu10, plinkyPeak10;    // the engine's own readout in 0.1 %
+    uint32_t recWrites, recLongestMs, recRingPct, recDropped; // plan 030 A: master recording (last / running recording)
 };
 
 // tenths of percent of the block budget
@@ -167,7 +168,8 @@ inline int format(const Snap& s, const Extra& e, char* out, int cap)
         ms10(s.rdCycles[R_CUE]) % 10u, s.rdCalls[R_WAVE], ms10(s.rdCycles[R_WAVE]) / 10u, ms10(s.rdCycles[R_WAVE]) % 10u);
     SEQCPU_ADD("   stream fill %u (%u.%u ms)   other %u (%u.%u ms)\n", s.rdCalls[R_SYNC], ms10(s.rdCycles[R_SYNC]) / 10u,
         ms10(s.rdCycles[R_SYNC]) % 10u, s.rdCalls[R_OTHER], ms10(s.rdCycles[R_OTHER]) / 10u, ms10(s.rdCycles[R_OTHER]) % 10u);
-    SEQCPU_ADD("MLR jumps on streamed voices: %u   ring restarts %u   reused %u   from cue %u", s.jumps, s.restarts, s.reuses, s.cueHits);
+    SEQCPU_ADD("MLR jumps on streamed voices: %u   ring restarts %u   reused %u   from cue %u\n", s.jumps, s.restarts, s.reuses, s.cueHits);
+    SEQCPU_ADD("Master rec: %u writes   longest write %u ms   ring peak %u%%   dropped blocks %u", e.recWrites, e.recLongestMs, e.recRingPct, e.recDropped);
 #undef SEQCPU_ADD
     return n;
 }

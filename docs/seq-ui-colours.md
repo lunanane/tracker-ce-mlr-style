@@ -9,7 +9,7 @@ this table it is neutral grey or white.
 | Stored value (project data) | blue (FX2 key, dimmed) | project-value fill of the fader bars, the value bars of the settings page (stock cyan) |
 | Live / dialled in / playing (OK) | green | dialled or live fader rows, notes and steps in the legends, page-chip dot, Camelot "match" |
 | Engaged / latched / mode | orange | LATCH cell lit, mode and hold pads in the legends, Camelot "near" |
-| Danger / record / disengage | red | DISENGAGE pad with something to take off, REC bar, Action pads, "no tracks selected", Camelot "clash" |
+| Danger / record / disengage | red | DISENGAGE pad with something to take off, REC bar, the Rec screen button of Global Mixer 3/3 while the master recording runs, Action pads, "no tracks selected", Camelot "clash" |
 | Off / disabled / unused | grey, dimmed (no fill, no label when unusable) | unusable rows, LATCH on a row that cannot latch, silent track levels |
 | Track identity | the four Tracker key colours (teal, yellow, purple, blue), tracks 5-8 lightened | amp view lines and level labels |
 | Slot identity | A = Note teal, B = FX1 purple | MLR lanes, labels and lit pads |
