@@ -231,10 +231,24 @@ AUDIO_CORE_RAM bool AudioEffectShortDelay::process(int16_t input[],
     const uint32_t time = timeInSamples;
     const uint32_t warm = validSamples < time ? time - validSamples : 0; // the first `warm` samples of this block read a line not yet written
 
+    // plan 027: the lines are in SDRAM (single accesses cost 10 .. 20 cycles each). A block reads one run of the line `time` samples back and
+    // writes one run at the head, so both runs go through SRAM copies (word bursts) when they cannot touch each other.
+    const bool tiled = sampleCount <= kTileMax && time >= (uint32_t)sampleCount + 4 && time + (uint32_t)sampleCount + 4 <= MAX_DELAYLINE_LENGTH &&
+                       (((uintptr_t)pingpongDelaylineLeft | (uintptr_t)pingpongDelaylineRight | (uintptr_t)monoDelayline) & 3u) == 0;
     if (pingpong)
-        runLines<true>(input, outputLeft, outputRight, sampleCount, time, warm, filterOn, mixPrev, mixCur, bp);
+    {
+        if (tiled)
+            runLines<true, true>(input, outputLeft, outputRight, sampleCount, time, warm, filterOn, mixPrev, mixCur, bp);
+        else
+            runLines<true, false>(input, outputLeft, outputRight, sampleCount, time, warm, filterOn, mixPrev, mixCur, bp);
+    }
     else
-        runLines<false>(input, outputLeft, outputRight, sampleCount, time, warm, filterOn, mixPrev, mixCur, bp);
+    {
+        if (tiled)
+            runLines<false, true>(input, outputLeft, outputRight, sampleCount, time, warm, filterOn, mixPrev, mixCur, bp);
+        else
+            runLines<false, false>(input, outputLeft, outputRight, sampleCount, time, warm, filterOn, mixPrev, mixCur, bp);
+    }
 
     validSamples = validSamples + sampleCount < MAX_DELAYLINE_LENGTH ? validSamples + sampleCount : MAX_DELAYLINE_LENGTH;
 
@@ -250,7 +264,25 @@ AUDIO_CORE_RAM bool AudioEffectShortDelay::process(int16_t input[],
 
 // One block of the heard lines. PP = ping-pong (left + right lines), otherwise the mono line. Same arithmetic as before plan 009 P#4,
 // per heard line; the lines that are not heard are neither read nor written.
-template<bool PP>
+// A run of `len` samples of a line from index `a` (wraps at the end of the line), copied to / from SRAM. a and len are even.
+static AUDIO_CORE_RAM void delayRun(int16_t* sram, int16_t* line, uint32_t a, uint32_t len, bool toSram)
+{
+    const uint32_t first = a + len <= MAX_DELAYLINE_LENGTH ? len : MAX_DELAYLINE_LENGTH - a;
+    if (toSram)
+    {
+        memcpy(sram, line + a, first * sizeof(int16_t));
+        if (first < len)
+            memcpy(sram + first, line, (len - first) * sizeof(int16_t));
+    }
+    else
+    {
+        memcpy(line + a, sram, first * sizeof(int16_t));
+        if (first < len)
+            memcpy(line, sram + first, (len - first) * sizeof(int16_t));
+    }
+}
+
+template<bool PP, bool TL>
 AUDIO_CORE_RAM void AudioEffectShortDelay::runLines(const int16_t* input,
                                                 int16_t* outputLeft,
                                                 int16_t* outputRight,
@@ -262,9 +294,38 @@ AUDIO_CORE_RAM void AudioEffectShortDelay::runLines(const int16_t* input,
                                                 float mixCur,
                                                 const seqfx::SvfCoef& bp)
 {
-    int16_t* const lineLeft = pingpongDelaylineLeft;
-    int16_t* const lineRight = pingpongDelaylineRight;
-    int16_t* const lineMono = monoDelayline;
+    int16_t* const lineLeft0 = pingpongDelaylineLeft;
+    int16_t* const lineRight0 = pingpongDelaylineRight;
+    int16_t* const lineMono0 = monoDelayline;
+    // plan 027 (TL): SRAM copies of the read run (index sample + readOff) and the write run (sample + writeOff) of each heard line
+    alignas(4) int16_t rdA[TL ? kTileMax + 4 : 1], rdB[(TL && PP) ? kTileMax + 4 : 1], wrA[TL ? kTileMax + 4 : 1], wrB[(TL && PP) ? kTileMax + 4 : 1];
+    uint32_t rdStart = 0, wrStart = 0, rdLen = 0, wrLen = 0;
+    if (TL)
+    {
+        rdStart = (headIdx - time) & delaylineLengthMask;
+        wrStart = headIdx & delaylineLengthMask;
+        rdLen = ((rdStart & 1u) + (uint32_t)sampleCount + 1u) & ~1u;
+        wrLen = ((wrStart & 1u) + (uint32_t)sampleCount + 1u) & ~1u;
+        rdStart &= ~1u;
+        wrStart &= ~1u;
+        // PP: A = left line, B = right line; mono: A = the mono line
+        delayRun(rdA, PP ? lineLeft0 : lineMono0, rdStart, rdLen, true);
+        delayRun(wrA, PP ? lineLeft0 : lineMono0, wrStart, wrLen, true);
+        if (PP)
+        {
+            delayRun(rdB, lineRight0, rdStart, rdLen, true);
+            delayRun(wrB, lineRight0, wrStart, wrLen, true);
+        }
+    }
+    const uint32_t rdOff = TL ? (((headIdx - time) & delaylineLengthMask) & 1u) : 0u;
+    const uint32_t wrOff = TL ? ((headIdx & delaylineLengthMask) & 1u) : 0u;
+    // the lines the loop reads / writes through (an index per sample: the line index, or the offset into the SRAM copy)
+    int16_t* const rdLeft = TL ? rdA : lineLeft0;
+    int16_t* const rdRight = TL ? rdB : lineRight0;
+    int16_t* const rdMono = TL ? rdA : lineMono0;
+    int16_t* const wrLeft = TL ? wrA : lineLeft0;
+    int16_t* const wrRight = TL ? wrB : lineRight0;
+    int16_t* const wrMono = TL ? wrA : lineMono0;
     const int32_t fb = feedback;
     uint32_t head = headIdx;
     uint32_t silent = silentSamplesCount;
@@ -272,15 +333,15 @@ AUDIO_CORE_RAM void AudioEffectShortDelay::runLines(const int16_t* input,
 
     for (int sample = 0; sample < sampleCount; sample++)
     {
-        const uint32_t delayedSampleIdx = (head - time) & delaylineLengthMask;
+        const uint32_t delayedSampleIdx = TL ? (uint32_t)sample + rdOff : ((head - time) & delaylineLengthMask);
         const bool cold = (uint32_t)sample < warm;
         int32_t filteredSampleRight = 0;
         int32_t filteredSampleLeft = 0;
         int32_t filteredSampleMono = 0;
         if (PP)
         {
-            int16_t delayedSampleRight = cold ? 0 : lineRight[delayedSampleIdx];
-            int16_t delayedSampleLeft = cold ? 0 : lineLeft[delayedSampleIdx];
+            int16_t delayedSampleRight = cold ? 0 : rdRight[delayedSampleIdx];
+            int16_t delayedSampleLeft = cold ? 0 : rdLeft[delayedSampleIdx];
             filteredSampleRight = delayedSampleRight;
             filteredSampleLeft = delayedSampleLeft;
             if (filterOn)
@@ -296,7 +357,7 @@ AUDIO_CORE_RAM void AudioEffectShortDelay::runLines(const int16_t* input,
         }
         else
         {
-            int16_t delayedSampleMono = cold ? 0 : lineMono[delayedSampleIdx];
+            int16_t delayedSampleMono = cold ? 0 : rdMono[delayedSampleIdx];
             filteredSampleMono = delayedSampleMono;
             if (filterOn)
             {
@@ -314,7 +375,8 @@ AUDIO_CORE_RAM void AudioEffectShortDelay::runLines(const int16_t* input,
 
         int32_t inputShifted = ((*input++) << kFeedbackShift);
         bool isSampleSilent;
-        const uint32_t headSampleIdx = head++ & delaylineLengthMask;
+        const uint32_t headSampleIdx = TL ? (uint32_t)sample + wrOff : (head & delaylineLengthMask);
+        head++;
 
         // soft limit instead of the hard 16 bit clip: a loud sustained signal at a high feedback compresses instead of crackling
         if (PP)
@@ -326,8 +388,8 @@ AUDIO_CORE_RAM void AudioEffectShortDelay::runLines(const int16_t* input,
             int16_t saturatedRight = (int16_t)signed_saturate_rshift(
               seqfx::softLimit((newDelayedSampleRight + (newDelayedSampleRight < 0 ? kFeedbackRoundBias : 0)) >> kFeedbackShift), 16, 0);
             isSampleSilent = outL == 0 && outR == 0 && saturatedLeft == 0 && saturatedRight == 0;
-            lineLeft[headSampleIdx] = saturatedLeft;
-            lineRight[headSampleIdx] = saturatedRight;
+            wrLeft[headSampleIdx] = saturatedLeft;
+            wrRight[headSampleIdx] = saturatedRight;
         }
         else
         {
@@ -335,7 +397,7 @@ AUDIO_CORE_RAM void AudioEffectShortDelay::runLines(const int16_t* input,
             int16_t saturatedMono = (int16_t)signed_saturate_rshift(
               seqfx::softLimit((newDelayedSampleMono + (newDelayedSampleMono < 0 ? kFeedbackRoundBias : 0)) >> kFeedbackShift), 16, 0);
             isSampleSilent = outL == 0 && saturatedMono == 0;
-            lineMono[headSampleIdx] = saturatedMono;
+            wrMono[headSampleIdx] = saturatedMono;
         }
 
         if (isSampleSilent)
@@ -349,6 +411,12 @@ AUDIO_CORE_RAM void AudioEffectShortDelay::runLines(const int16_t* input,
         }
     }
 
+    if (TL)
+    {
+        delayRun(wrA, PP ? lineLeft0 : lineMono0, wrStart, wrLen, false);
+        if (PP)
+            delayRun(wrB, lineRight0, wrStart, wrLen, false);
+    }
     headIdx = head;
     silentSamplesCount = silent;
 }
