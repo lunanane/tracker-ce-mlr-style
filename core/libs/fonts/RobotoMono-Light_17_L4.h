@@ -7,4 +7,4 @@
 /*('file properties ', 'format ', 'L4', ' stride ', 5, ' width ', 10, 'height', 22)*/
 #include "NewDisplay/CompressionRLE.h"
 
-extern const CompressedData Roboto_Mono_Light_17_L4_compressed[3553];
+extern const CompressedData Roboto_Mono_Light_17_L4_compressed[4893];
