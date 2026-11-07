@@ -326,12 +326,14 @@ struct Model
     uint8_t track;  // 1..16
     uint8_t sec, idx;
     int8_t v[kMaxParams];
+    char key[12];   // plan 028: the track's key as its Camelot label ("8A Am"), empty = none
     Model() { memset(this, 0, sizeof(*this)); }
 };
 
 struct Palette
 {
     uint32_t bg, panel, bar, text, section, accent, onAccent, fill;
+    uint32_t mark; // colour of the key text (the match colour, plan 028)
 };
 
 enum { kPanelY0 = 30, kPanelY1 = 424, kHeadY = 41, kRowY0 = 56, kRowH = 52, kRowStep = 56, kBoxX0 = 8, kBoxX1 = 792, kCellX0 = 112, kCellStep = 96,
@@ -378,6 +380,11 @@ template <class C> void draw(C& c, const Model& m, const Palette& p)
     snprintf(buf, sizeof buf, "T%d  %s", m.track, seqplay::typeName(m.type));
     c.text(kBoxX0 + 4, kHeadY, 3, 2, buf);
     c.text(kBoxX1, kHeadY, 1, 2 | 4, "Arrows move, jog edits, Del resets");
+    if (m.key[0])
+    {
+        c.color(p.mark);
+        c.text(kBoxX0 + 250, kHeadY, 3, 2, m.key);
+    }
     flat = 0;
     for (int s = 0; s < tb->nSec; s++)
         for (int i = 0; i < tb->sec[s].n; i++, flat++)

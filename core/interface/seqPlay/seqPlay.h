@@ -12,12 +12,13 @@
 #include "seqNotesViewLogic.h"
 #include "seqPlinkyUiLogic.h"
 #include "seqParamsLogic.h"
+#include "seqWheelLogic.h"
 #include "seqRecLogic.h"
 
 // What the overlay control draws (written by the overlay, read by the control on the display refresh).
 struct SeqPlayViewData
 {
-    enum Mode : uint8_t { HIDDEN = 0, LIST = 1, LEGEND = 2, PLINKY = 3, PARAMS = 4 };
+    enum Mode : uint8_t { HIDDEN = 0, LIST = 1, LEGEND = 2, PLINKY = 3, PARAMS = 4, WHEEL = 5 };
     uint8_t mode = HIDDEN;
     uint8_t type = 0; // LEGEND: sequencer type of the selected track
     uint8_t cell = 0; // LIST: strip cell (0..7) the list sits above
@@ -36,6 +37,9 @@ struct SeqPlayViewData
     seqplinky::Setup plSetup;  // LEGEND (Plinky): root / scale / octave / string interval
     uint8_t plMenu = 0;        // LEGEND (Plinky): setup view shown
     seqplinky::Model plinky;   // PLINKY: the parameter overlay
+    seqwheel::Model wheel;     // WHEEL (plan 028): the Camelot wheel, its own control
+    char key[12] = { 0 };      // LEGEND: the track's key as its Camelot label
+    uint8_t keyMark = 0;       // ... and its match mark (seqgen::cam::Mark)
     seqparams::Model prm;      // PARAMS (plan 025): the sequencer settings above the pad legend (second control)
     seqplay::HrSnap hr = {}; // LEGEND (HYPER_RASP types): title, help and cells reported by the script
     uint8_t edge = 0;  // 0 none; 1 / 2: the selected track is on the higher / lower strip page than the one shown (edge marker)
@@ -125,6 +129,18 @@ class SeqPlayOverlay
     uint8_t stripPage_ = 0;
     uint8_t lastTrack_ = 0xFF;
     int8_t control_ = -1;
+    int8_t controlW_ = -1;          // plan 028: third cSeqPlayLegend control, mode WHEEL
+    SeqPlayViewData viewW_;
+    SeqPlayViewData viewWShown_;
+    bool viewWShownValid_ = false;
+    seqgen::cam::Snap camSnap_[seqlogic::kTracks];
+    uint8_t camMark_[seqlogic::kTracks] = { 0 };
+    uint32_t camTime_ = 0;
+    uint8_t trailTrack_ = 0xFF, trailPos_ = seqwheel::kNone;
+    uint8_t trail_[seqwheel::kTrail] = { seqwheel::kNone, seqwheel::kNone, seqwheel::kNone };
+    void updateCam(bool force);
+    void refreshWheel(uint8_t sel);
+    uint32_t stripColors_[8][4];
     int8_t controlP_ = -1;          // plan 025: second cSeqPlayLegend control, mode PARAMS (created after the legend = drawn below it)
     SeqPlayViewData viewP_;
     SeqPlayViewData viewPShown_;

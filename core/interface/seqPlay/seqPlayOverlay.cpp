@@ -55,6 +55,75 @@ void SeqPlayOverlay::createControl()
     propP.data = &viewP_;
     viewPShownValid_ = false;
     controlP_ = display.createControl<cSeqPlayLegend>(&propP);
+    // plan 028: the Camelot wheel, a third control = a display stage of its own
+    strControlProperties propW = prop;
+    viewW_.mode = SeqPlayViewData::HIDDEN;
+    propW.data = &viewW_;
+    viewWShownValid_ = false;
+    controlW_ = display.createControl<cSeqPlayLegend>(&propW);
+}
+
+// plan 028: the keys of all tracks and their match marks, read at most every 100 ms
+void SeqPlayOverlay::updateCam(bool force)
+{
+    const uint32_t now = seqNowMs();
+    if (!force && (uint32_t)(now - camTime_) < 100)
+        return;
+    camTime_ = now;
+    seqEngine.camSnapshot(camSnap_, camMark_);
+}
+
+void SeqPlayOverlay::refreshWheel(uint8_t sel)
+{
+    seqwheel::Model& m = viewW_.wheel;
+    const seqgen::cam::Snap& s = camSnap_[sel];
+    const bool show = active_ && view_.mode == SeqPlayViewData::HIDDEN && view_.notes.show && s.valid;
+    if (show)
+    {
+        m = seqwheel::Model();
+        m.on = 1;
+        m.cur = seqwheel::posOf(s.s);
+        m.mark = camMark_[sel];
+        if (trailTrack_ != sel)
+        {
+            trailTrack_ = sel;
+            for (uint8_t i = 0; i < seqwheel::kTrail; i++)
+                trail_[i] = seqwheel::kNone;
+            trailPos_ = m.cur;
+        }
+        if (m.cur != trailPos_) // the key changed: the old one joins the trail
+        {
+            for (int i = seqwheel::kTrail - 1; i > 0; i--)
+                trail_[i] = trail_[i - 1];
+            trail_[0] = trailPos_;
+            trailPos_ = m.cur;
+        }
+        for (uint8_t i = 0; i < seqwheel::kTrail; i++)
+            m.trail[i] = trail_[i];
+        for (uint8_t t = 0; t < seqlogic::kTracks; t++)
+            if (t != sel && camSnap_[t].valid && camSnap_[t].sounding)
+                m.others |= 1u << seqwheel::posOf(camSnap_[t].s);
+        seqgen::cam::label(m.label, sizeof m.label, s.s);
+        viewW_.mode = SeqPlayViewData::WHEEL;
+    }
+    else
+    {
+        viewW_.mode = SeqPlayViewData::HIDDEN;
+        viewW_.wheel = seqwheel::Model();
+    }
+    if (controlW_ < 0)
+        return;
+    if (viewWShownValid_ && memcmp(&viewW_, &viewWShown_, sizeof(viewW_)) == 0)
+        return;
+    const bool wasHidden = !viewWShownValid_ || viewWShown_.mode == SeqPlayViewData::HIDDEN;
+    viewWShown_ = viewW_;
+    viewWShownValid_ = true;
+    if (viewW_.mode == SeqPlayViewData::HIDDEN)
+        display.setControlHide(controlW_);
+    else if (wasHidden)
+        display.setControlShow(controlW_);
+    display.refreshControl(controlW_);
+    display.synchronizeRefresh();
 }
 
 void SeqPlayOverlay::moduleStart()
@@ -71,6 +140,8 @@ void SeqPlayOverlay::moduleStop()
     budgetHidden_ = false;
     control_ = -1; // the interface destroys the module's controls right after stop()
     controlP_ = -1;
+    controlW_ = -1;
+    viewWShownValid_ = false;
     prmShown_ = false;
     delTaken_ = false;
     viewPShownValid_ = false;
@@ -711,6 +782,10 @@ void SeqPlayOverlay::refreshParams(uint8_t sel)
         m.sec = prmCur_.sec;
         m.idx = prmCur_.idx;
         memcpy(m.v, prmVals_, sizeof(m.v));
+        m.key[0] = 0;
+        if (camSnap_[sel].valid)
+            seqgen::cam::label(m.key, sizeof m.key, camSnap_[sel].s);
+        viewP_.keyMark = camSnap_[sel].sounding ? camMark_[sel] : 0;
     }
     else
     {
@@ -881,6 +956,7 @@ void SeqPlayOverlay::refreshStrip(bool force)
     cPatternEditor& pe = PE();
     const Theme& th = display.getTheme();
     bool any = false;
+    updateCam(false);
     for (uint8_t i = 0; i < 8; i++)
     {
         uint8_t t = seqplay::stripSlotTrack(stripPage_, i);
@@ -896,6 +972,11 @@ void SeqPlayOverlay::refreshStrip(bool force)
         if (t == recTrack)
             c.hint = seqplay::recHintText(hints & seqrec::HINT_OVERFLOW, hints & seqrec::HINT_NEED_MIDI, hints & seqrec::HINT_REDUCED);
         c.msg = (c.selected && msg_) ? msg_ : nullptr;
+        if (camSnap_[t].valid && camSnap_[t].sounding && camMark_[t])
+        {
+            c.mark = camMark_[t];
+            seqgen::cam::label(c.key, sizeof c.key, camSnap_[t].s);
+        }
         c.shiftHint = c.selected && c.type != seqlogic::TYPE_OFF; // v0.3.2: "Shift: pads" where nothing else needs the line
 #ifdef FEATURE_PLINKY
         c.synthHint = c.selected && seqPlinkyTrackUsesVoice(t);
@@ -906,6 +987,9 @@ void SeqPlayOverlay::refreshStrip(bool force)
         uint32_t key = 2166136261u;
         auto mix = [&key](uint32_t v) { key = (key ^ v) * 16777619u; };
         mix(t);
+        mix(c.mark);
+        for (const char* k = c.key; *k; k++)
+            mix((uint8_t)*k);
         mix(c.type | (c.pending << 4) | ((uint32_t)c.takenOver << 12) | ((uint32_t)c.rec << 13) | ((uint32_t)c.launched << 14) |
             ((uint32_t)c.cut << 15) | ((uint32_t)c.selected << 16) | ((uint32_t)(c.msg != nullptr) << 17) |
             ((uint32_t)(c.hint ? c.hint[0] : 0) << 18) | ((uint32_t)c.shiftHint << 26) | ((uint32_t)c.synthHint << 27) | ((uint32_t)(c.synthHint && c.alt) << 28));
@@ -923,6 +1007,12 @@ void SeqPlayOverlay::refreshStrip(bool force)
             case seqplay::TONE_SELECTED: colors = th.highlightedButtonLabelsColors; break;
             case seqplay::TONE_ON: colors = th.activeButtonLabelsColors; break;
             default: colors = th.inactiveButtonLabelsColors; break;
+        }
+        if (c.mark && !c.selected && colors != th.redButtonLabelsColors)
+        {
+            memcpy(stripColors_[i], colors, sizeof stripColors_[i]); // the key text in its match colour
+            stripColors_[i][0] = seqwheel::markColor(th, c.mark, colors[0]);
+            colors = stripColors_[i];
         }
         display.setControlText(pe.label[i], line1_[i]);
         display.setControlText2(pe.label[i], line2_[i]);
@@ -959,6 +1049,7 @@ void SeqPlayOverlay::refreshView()
     if (control_ < 0)
         return;
     uint8_t sel = selected();
+    updateCam(false);
     view_.edge = (active_ && !list_.open) ? seqplay::edgeSide(sel, stripPage_) : 0;
     view_.edgeTrack = (uint8_t)(sel + 1);
 #ifdef FEATURE_PLINKY
@@ -1004,6 +1095,10 @@ void SeqPlayOverlay::refreshView()
     {
         view_.mode = SeqPlayViewData::LEGEND;
         view_.type = seqEngine.type(sel);
+        view_.key[0] = 0;
+        if (camSnap_[sel].valid)
+            seqgen::cam::label(view_.key, sizeof view_.key, camSnap_[sel].s);
+        view_.keyMark = camSnap_[sel].sounding ? camMark_[sel] : 0;
         view_.plSetup = seqEngine.plinkySetup();
         view_.plMenu = seqEngine.plinkyMenu() ? 1 : 0;
         if (view_.type == seqlogic::TYPE_CHORDARP)
@@ -1071,6 +1166,7 @@ void SeqPlayOverlay::refreshView()
         view_.notes = seqnotes::Band(); // the legend, the list and the overlay cover the band
 
     refreshParams(sel);
+    refreshWheel(sel);
 
     if (viewShownValid_ && memcmp(&view_, &viewShown_, sizeof(view_)) == 0)
         return;

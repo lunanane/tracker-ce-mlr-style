@@ -258,6 +258,8 @@ struct StripCell
     const char* msg = nullptr;  // transient message (<= 11 characters)
     bool shiftHint = false;     // v0.3.2: the selected sequencer cell tells how to see the pad map (tap the selected track button) (set by the overlay)
     bool synthHint = false;     // v0.3.2: ... and, in turns, how to open the PolySynth parameters (the track plays the PolySynth instrument)
+    uint8_t mark = 0;           // plan 028: match mark of the track's key (seqgen::cam::Mark), 0 = none
+    char key[8] = { 0 };        // ... and the key ("8A Am")
     bool alt = false;           // which of the two hints is shown now (the overlay flips it every two seconds)
 };
 
@@ -302,6 +304,7 @@ inline void stripLine2(char* out, size_t n, const StripCell& c)
     else if (c.launched) snprintf(out, n, "clip");
     else if (c.cut) snprintf(out, n, "cut");
     else if (type == seqlogic::TYPE_OFF) snprintf(out, n, "pattern");
+    else if (c.mark && !c.selected) snprintf(out, n, "%s %c", c.key, c.mark == 1 ? '=' : c.mark == 2 ? '~' : 'x'); // plan 028: = match, ~ neighbour, x clash
     else if (c.takenOver) snprintf(out, n, "live");
     else if (c.shiftHint && c.synthHint && c.alt && type != seqlogic::TYPE_OFF) snprintf(out, n, "Hold+Instr");
     else if (c.shiftHint && type != seqlogic::TYPE_OFF) snprintf(out, n, "tap: help");
