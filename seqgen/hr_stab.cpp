@@ -414,11 +414,12 @@ void HrStab::legend(int col, int row, HrCell& c) const {
 }
 
 void HrStab::title(char* out, size_t n) const {
-  // "ARP LINES  C# min  cinquillo  add9  1/16  Oct -2  Vel 100  Tran +12  Follow" (Oct, Tran: only when not 0)
+  // "ARP LINES  12A C#m  cinquillo  add9  1/16  Oct -2  Vel 100  Tran +12  Follow" (Oct, Tran: only when not 0)
   int k = hrAppend(out, n, 0, "%s  ", arp() ? "ARP LINES" : "CHORD STABS");
-  if (!latched_) k = hrAppend(out, n, k, "no root");
-  else if (follower()) k = hrAppend(out, n, k, "key %d %s", latched_, quality_ == 1 ? "maj" : "min");
-  else k = hrAppend(out, n, k, "%s %s", hrNoteName(latched_ - 1), quality_ == 1 ? "maj" : "min");
+  cam::Scale ks;  // plan 028: the key as its Camelot position ("8A Am", "8A D DOR")
+  char kl[16];
+  if (!camKey(ks)) k = hrAppend(out, n, k, "no root");
+  else { cam::label(kl, sizeof kl, ks); k = hrAppend(out, n, k, follower() ? "key %s" : "%s", kl); }
   k = hrAppend(out, n, k, "  %s  %s  %s  Vel %d", arp() ? kArp[pattern_ - 1].name : kStab[pattern_ - 1].name, kChordName[chord_ - 1], hrRateName(rate_), (int)vel_);
   if (octave_) k = hrAppend(out, n, k, "  Oct %+d", (int)octave_);
   if (transp_) k = hrAppend(out, n, k, "  Tran %+d", (int)transp_);

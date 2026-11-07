@@ -733,7 +733,11 @@ void HrChordArp::legend(int col, int row, HrCell& c) const {
     else if (x == 6 && y == 1) c.set(HZ_HOLD, "Clear", clearHeld_ != 0);
   } else {
     if (x <= 6) {
-      c.set(HZ_NOTE, hrNoteName(kRoots[y - 1][x - 1] % 12), hasRoot_ && rootX_ == x && rootY_ == y);
+      cam::Scale cs;  // plan 028: the Camelot position of the root pad ("8A Am"); the pad itself is unchanged
+      cam::resolve(cs, kRoots[y - 1][x - 1] % 12, (y & 1) == 0, 0, 0);
+      char lb[8];
+      cam::label(lb, sizeof lb, cs);
+      c.set(HZ_NOTE, lb, hasRoot_ && rootX_ == x && rootY_ == y);
     } else if (x == 7) {
       static const char* const k[4] = {"Maj", "Min", "Dom7", "Sus4"};
       c.set(HZ_PANEL, k[y - 1], y == selK1_ || y == selK2_);
@@ -752,7 +756,13 @@ void HrChordArp::title(char* out, size_t n) const {
   if (octave_) k = hrAppend(out, n, k, "  Oct %+d", (int)octave_);
   if (inv_) k = hrAppend(out, n, k, "  Inv %+d", (int)inv_);
   k = hrAppend(out, n, k, "  Vel %d  %s", (int)baseVel_, latched_ ? "Latch" : "Moment");
-  if (keylock_ == 2) hrAppend(out, n, k, "  Lock");
+  if (keylock_ == 2) {
+    cam::Scale ks;  // plan 028: the locked key as its Camelot position
+    char kl[16];
+    camKey(ks);
+    cam::label(kl, sizeof kl, ks);
+    hrAppend(out, n, k, "  Lock %s", kl);
+  }
 }
 
 const char* HrChordArp::help() const {

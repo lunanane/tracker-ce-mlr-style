@@ -617,7 +617,7 @@ TEST(hr_legend_words_fit_the_cells_and_describe_every_script) {
       for (int col = 0; col < 12; ++col) {
         HrCell c;
         s->legend(col, row, c);
-        CHECK(strlen(c.txt) <= 6);
+        CHECK(strlen(c.txt) <= 7); // plan 028: Camelot root labels ("11A F#m")
         for (const char* p = c.txt; *p; ++p) CHECK(*p >= 32 && *p < 127);
         if (c.txt[0]) { ++words; CHECK(c.zone >= HZ_NOTE && c.zone <= HZ_HOLD); }
         else CHECK_EQ(c.zone, HZ_NONE);

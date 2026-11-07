@@ -390,7 +390,8 @@ void HrArpSeq::legend(int col, int row, HrCell& c) const {
 void HrArpSeq::title(char* out, size_t n) const {
   static const char* const kDir[4] = {"Up", "Down", "UpDn", "Zigzag"};
   char root[12] = "no root", mode[24] = "Chord";
-  if (latched_) snprintf(root, sizeof root, "%s %s", hrNoteName(latched_ - 1), quality_ == 1 ? "major" : "minor");
+  cam::Scale ks;  // plan 028: Camelot position + key
+  if (camKey(ks)) cam::label(root, sizeof root, ks);
   if (cyc_[MODE] == 1) snprintf(mode, sizeof mode, "Arp %s %s", hrRateName(kSpeeds[cyc_[SPEED] - 1]), kDir[cyc_[DIRECTION] - 1]);
   snprintf(out, n, "ARP SEQ  %s  %s  %s  Vel %d  Oct %+d  Steps %d-%d  %s", root, ctype_ ? kTypeName[ctype_ - 1] : "triad", mode, (int)cyc_[GROOVE],
            (int)kOct[cyc_[OCTAVE] - 1], (int)start_, (int)end_, playing_ ? "Playing" : "Stopped");

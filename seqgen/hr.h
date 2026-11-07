@@ -58,12 +58,12 @@ enum HrZone : uint8_t { HZ_NONE = 0, HZ_NOTE = 1, HZ_STEP = 2, HZ_PANEL = 3, HZ_
 struct HrCell {
   uint8_t zone;
   bool on;      // the pad that is active now
-  char txt[8];  // up to 6 characters, ASCII
+  char txt[8];  // up to 7 characters, ASCII (6 for everything but the Camelot labels of plan 028)
   void clear() { zone = HZ_NONE; on = false; for (int i = 0; i < 8; ++i) txt[i] = 0; }
   void set(uint8_t z, const char* t, bool isOn = false) {
     zone = z; on = isOn;
     for (int i = 0; i < 8; ++i) txt[i] = 0;
-    for (int i = 0; i < 6 && t[i]; ++i) txt[i] = t[i];
+    for (int i = 0; i < 7 && t[i]; ++i) txt[i] = t[i];
   }
 };
 
