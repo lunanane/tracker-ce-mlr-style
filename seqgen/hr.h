@@ -75,6 +75,10 @@ class HrScript : public SeqBase {
   virtual bool followsTransport() const { return true; }  // FOLLOWS_TRANSPORT: the Tracker transport calls start() / stop()
   virtual void silence() { stop(); }           // the track changes type / is cleared: end everything this script sounds
   virtual void tick() {}                       // framework_tick (30 ms)
+  // Latch (plan 025): scripts that latch a root on a tap can switch to "hold" (the sound lasts while the pad is held). Default: no setting.
+  virtual bool hasLatch() const { return false; }
+  virtual bool latch() const { return true; }
+  virtual void setLatch(bool on) { (void)on; }
   virtual bool live() const = 0;               // the script is performing (latched / running / sounding): keeps the track taken over
   virtual int getParam(int id) const { (void)id; return 0; }
   virtual void setParam(int id, int v) { (void)id; (void)v; }

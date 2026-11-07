@@ -30,6 +30,9 @@ class HrChordArp : public HrScript {
   void transportStopped() override { hostRunning_ = 0; }  // the Tracker transport stopped: the next 1+2 combo starts the arranger again
   bool followsTransport() const override { return false; }  // no FOLLOWS_TRANSPORT in chord_arp.lua: the tracker has its own play combo
   void silence() override;
+  bool hasLatch() const override { return true; }
+  bool latch() const override { return latched_ != 0; }
+  void setLatch(bool on) override { doParam(P_LATCH, on ? 2 : 1, false); }
   bool live() const override { return hasRoot_ || arpActive_ || nActive_ > 0 || playing_ || nPlayback_ > 0; }
   int getParam(int id) const override;
   void setParam(int id, int v) override;

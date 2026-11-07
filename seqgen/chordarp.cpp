@@ -337,6 +337,15 @@ void ChordArp::pulse() {
 
 void ChordArp::start() { applyBar(); meas_ = 0; }  // arranger resets (bar_c, g_ptr, a_ptr, c_stage) have no counterpart here
 
+void ChordArp::retrigger() {
+  const int r = rv(last_);
+  if (r < 0 || selT_ != 1 || selS_ != 1) return;
+  int16_t p[24];
+  killLive();
+  lgate_ = 0;
+  fl(p, liveAt(r, last_.valid && (last_.x % 2 == 0), p));
+}
+
 void ChordArp::stop() { killLive(); }  // c31 252 leaves a pending gate timer armed (it only calls k_l)
 
 void ChordArp::tick() {
