@@ -69,7 +69,7 @@ def block_cost(uc, addr, size):
     return c
 
 class Counter:
-    def __init__(s): s.fmap = None; s.per = {}; s.cyc = 0; s.ins = 0; s.last_end = None; s.sd = 0
+    def __init__(s): s.fmap = None; s.per = {}; s.cyc = 0; s.ins = 0; s.last_end = None; s.sd = 0; s.sdr = 0; s.sdw = 0
     on = False
     def hook(s, uc, addr, size, ud):
         if not s.on: return
@@ -80,7 +80,10 @@ class Counter:
         if s.last_end is not None and addr != s.last_end: s.cyc += 2  # taken branch refill
         s.last_end = addr + size
     def sdhook(s, uc, access, addr, size, value, ud):
-        if s.on: s.sd += 1
+        if s.on:
+            s.sd += 1
+            if access == UC_MEM_READ: s.sdr += 1
+            else: s.sdw += 1
 
 def make(elf):
     uc = Uc(UC_ARCH_ARM, UC_MODE_THUMB | UC_MODE_MCLASS)
@@ -131,6 +134,7 @@ def bench(elf, sc, warm=4, n=16):
     hs = call(uc, sy, 'hash')
     if PROF:
         for k, c in sorted(ctr.per.items(), key=lambda x: -x[1])[:8]: print('   %8.0f  %s' % (c / n, k))
+    bench.last = (ctr.sdr / n, ctr.sdw / n)
     return ctr.cyc / n, ctr.ins / n, ctr.sd / n, v, hs
 
 if __name__ == '__main__':
@@ -138,4 +142,4 @@ if __name__ == '__main__':
     PROF = len(sys.argv) > 3
     for sc in [int(x) for x in sys.argv[2].split(',')]:
         cyc, ins, sd, v, hs = bench(elf, sc)
-        print('%s sc%d voices %d: %8.0f cyc/block (%.1f%% of 522k), %7.0f instr, %5.0f sdram acc, hash %08x' % (elf, sc, v, cyc, cyc / 5222.4, ins, sd, hs & 0xffffffff))
+        print('%s sc%d voices %d: %8.0f cyc/block (%.1f%% of 522k), %7.0f instr, %5.0f sdram acc (%d R, %d W), hash %08x; with SDRAM stalls (20 R, 10 W): %.1f%%' % (elf, sc, v, cyc, cyc / 5222.4, ins, sd, bench.last[0], bench.last[1], hs & 0xffffffff, (cyc + 20 * bench.last[0] + 10 * bench.last[1]) / 5222.4))

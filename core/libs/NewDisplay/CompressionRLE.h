@@ -3,11 +3,9 @@
 
 #include "stdint.h"
 
-struct CompressedData
-{
-    uint8_t value;
-    uint8_t count;
-};
+// plan 027: the compressed fonts / images are byte streams (was an array of value/count pairs, 12 KB more flash).
+// Header byte h: h >= 0x80: (h & 0x7F) + 1 literal bytes follow; h < 0x80: the next byte is repeated h + 1 times.
+typedef uint8_t CompressedData;
 
 void decompress(const CompressedData* compressed, int compressed_size, uint8_t* decompressed);
 

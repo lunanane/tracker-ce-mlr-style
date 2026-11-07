@@ -48,7 +48,8 @@ class AudioEffectShortDelay : public AudioStream
 
   private:
     // plan 009 P#4: one loop per mode, only the lines that are heard are read / updated (ping-pong: left + right, otherwise mono)
-    template<bool PP>
+    enum { kTileMax = 128 };
+    template<bool PP, bool TL>
     void runLines(const int16_t* input, int16_t* outputLeft, int16_t* outputRight, int sampleCount, uint32_t time, uint32_t warm,
                   bool filterOn, float mixPrev, float mixCur, const seqfx::SvfCoef& bp);
     void skipIdleBlock();
