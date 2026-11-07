@@ -29,6 +29,7 @@ class CutSessionLayer : public SessionLayer
         (void)firstTrack;
         cutInit();
         laneViewShow(true); // the controls exist since the module start (createControls); only shown here (plan 007 B1)
+        cutLayerShown(true);
     }
     void setGroup(uint8_t firstTrack) override
     {
@@ -40,6 +41,7 @@ class CutSessionLayer : public SessionLayer
     void leave() override
     {
         cutReleaseAll();
+        cutLayerShown(false);
         laneViewShow(false); // hidden, never destroyed: a destroyed control with a queued refresh stalls the display queue
     }
     void pad(uint8_t col, uint8_t row, bool down) override { cutPad(col, row, down, down && cutShiftHeld()); } // Shift + RESYNC = SYNC ALL

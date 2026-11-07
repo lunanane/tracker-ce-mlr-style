@@ -8,6 +8,7 @@
 
 seqbr::Ui& seqBrUi();                          // controller state of the layer (page, held pads, latch, the settings)
 void seqBrAct(const seqbr::Result& r);         // an action from the pads: told to the audio side / values pushed (main loop)
+void seqBrPreroll(bool on);                    // plan 024: record ahead while a beat repeat page is open (a press then starts within one grid)
 void seqBrPanic();                             // transport Stop: any repeat ends, latch off, the pads in the hand are forgotten
 bool seqBrStatus(beatrepeat::Status* st);      // state of the stage; false = no stage (host tests, other platforms)
 float seqBrCpuPercent();                       // CPU of the stage in the audio interrupt, % of the block period (0 while idle)

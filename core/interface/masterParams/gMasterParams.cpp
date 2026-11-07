@@ -1,6 +1,7 @@
 #include "ampLogarythmicValues.h"
 #include "mtMasterEnhancer.h"
 #include "masterParams/ampView.h"
+#include "masterParams/masterFaders.h"
 #ifdef FEATURE_SYNTH
 #include "Synth.h"
 #endif
@@ -33,6 +34,7 @@ const char* const saturationListTexts[5] = { "Hard Clip",
 void cMasterParams::initDisplayControls()
 {
     ampView.createControl(); // plan 013 M: first = lowest index = drawn on top of the page
+    masterFaders.createControl(); // plan 024: the Master fader pages, the same
 #ifdef FEATURE_SYNTH
     for (uint8_t trackNo = 0; trackNo < 8 + kSynthParts; trackNo++)
     {
@@ -1592,6 +1594,7 @@ void cMasterParams::showMixerDelayReverbScreen()
     }
 #ifdef FEATURE_PLINKY
     sprintf(mixerLabel[7], "%s", ampView.visible() ? "Close" : "Amp view"); // plan 013 M: screen button 8
+    sprintf(mixerLabel[6], "Faders"); // plan 024: screen button 7
 #endif
 
     if (displayType == displayMode::mixerDelayReverb)
@@ -1707,13 +1710,13 @@ void cMasterParams::showMixerDelayReverbScreen()
 #ifdef FEATURE_SYNTH
     display.setControlHide(blankSpaceCover[0]);
 #else
-    display.setControlSize(blankSpaceCover[0], (800 / 8) * 3 - 4, -1);
+    display.setControlSize(blankSpaceCover[0], (800 / 8) * 2 - 4, -1); // plan 024: places 4-5 are empty, 6 = Faders
 #endif
     display.refreshControl(blankSpaceCover[0]);
 #endif
     // v0.4.3: the bars and names under the opaque amp view are hidden while it is open: their display lists would take the frame's room
     // from the view's lines (the label strip and the title bar stay)
-    if (ampView.visible())
+    if (ampView.visible() || masterFaders.visible())
         hideControlUnderMenu();
 
     display.synchronizeRefresh();

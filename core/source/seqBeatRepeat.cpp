@@ -121,6 +121,16 @@ void seqBrAct(const seqbr::Result& r)
 #endif
 }
 
+void seqBrPreroll(bool on)
+{
+#ifdef FEATURE_BEAT_REPEAT
+    wire();
+    stage()->core().post(beatrepeat::Core::C_PRE, on ? 1 : 0);
+#else
+    (void)on;
+#endif
+}
+
 void seqBrPanic()
 {
     s_ui.panic();
@@ -185,7 +195,7 @@ void seqBrFillModel(seqbr::BrModel* m)
             const uint32_t n = stage()->core().captured();
             s_waveOk = n >= 16;
             if (s_waveOk)
-                seqbr::foldWave(stage()->core().ring(), n, s_lo, s_hi);
+                seqbr::foldWave(stage()->core().ring(), n, s_lo, s_hi, stage()->core().sliceBase(), stage()->core().capacity());
         }
         m->waveOk = s_waveOk ? 1 : 0;
         if (s_waveOk)

@@ -7,8 +7,8 @@ HRSRC = ../../seqgen/hr.cpp ../../seqgen/hr_stab.cpp ../../seqgen/hr_arpseq.cpp 
 GLUE = ../source/seqTracksCore.cpp ../source/seqCut.cpp ../interface/seqSession/cutLayer.cpp
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)
 
-.PHONY: test clean preview amp-preview pitch-preview grid-preview legend-preview
-test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE) build/seq_plinky_tests$(EXE) build/seq_trace_tests$(EXE) build/seq_amp_tests$(EXE) build/seq_warp_tests$(EXE) build/seq_stage_tests$(EXE) build/seq_gridstage_tests$(EXE) build/seq_br_tests$(EXE) build/seq_pitchdevice_tests$(EXE) build/seq_sampmem_tests$(EXE) build/seq_cpumon_tests$(EXE) build/seq_kernel_tests$(EXE)
+.PHONY: test clean preview master-preview amp-preview pitch-preview grid-preview legend-preview
+test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tests$(EXE) build/seq_mod_tests$(EXE) build/seq_play_tests$(EXE) build/seq_fx_tests$(EXE) build/seq_plinky_tests$(EXE) build/seq_trace_tests$(EXE) build/seq_amp_tests$(EXE) build/seq_warp_tests$(EXE) build/seq_stage_tests$(EXE) build/seq_gridstage_tests$(EXE) build/seq_br_tests$(EXE) build/seq_master_tests$(EXE) build/seq_pitchdevice_tests$(EXE) build/seq_sampmem_tests$(EXE) build/seq_cpumon_tests$(EXE) build/seq_kernel_tests$(EXE)
 	build/seq_cpu_tests$(EXE)
 	build/seq_glue_tests$(EXE)
 	build/seq_perform_tests$(EXE)
@@ -23,6 +23,7 @@ test: build/seq_cpu_tests$(EXE) build/seq_glue_tests$(EXE) build/seq_perform_tes
 	build/seq_pitchdevice_tests$(EXE)
 	build/seq_warp_tests$(EXE)
 	build/seq_br_tests$(EXE)
+	build/seq_master_tests$(EXE)
 	build/seq_sampmem_tests$(EXE)
 	build/seq_cpumon_tests$(EXE)
 	build/seq_kernel_tests$(EXE)
@@ -129,7 +130,7 @@ build/seq_warp_tests$(EXE): test_warp.cpp ../libs/Audio/warp_core.h ../source/se
 	$(CXX) $(CXXFLAGS) -O2 -I../libs/Audio test_warp.cpp -o $@
 
 # plan 021: beat repeat DSP core (libs/Audio/beat_repeat_core.h, header only). -O2: the cost line is only meaningful optimised
-build/seq_br_tests$(EXE): test_beatrepeat.cpp ../libs/Audio/beat_repeat_core.h
+build/seq_br_tests$(EXE): test_beatrepeat.cpp test_br024.inc ../libs/Audio/beat_repeat_core.h ../source/seqFxLogic.h ../source/seqFxDsp.h
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -O2 -I../libs/Audio test_beatrepeat.cpp -o $@
 
@@ -151,3 +152,14 @@ build/seq_cpu_tests$(EXE): test_cpu.cpp cpu_delay_tests.inc cpu_reverb_wrap.inc 
 	for f in ref_amplifier ref_monoToStereo; do $(CXX) $(DELAYINC) -Iref/voice $(CXXFLAGS) -std=gnu++11 -c ref/voice/$$f.cpp -o build/$$f.o || exit 1; done
 	$(CXX) $(DELAYINC) -I../AudioEngine/ConstantValues -Iref/limiter $(CXXFLAGS) -std=gnu++11 -c ref/limiter/ref_limiter.cpp -o build/ref_limiter.o
 	$(CXX) $(DELAYINC) $(CXXFLAGS) -std=gnu++11 -Iref/delay -Iref/limiter -Iref/voice test_cpu.cpp build/cpu_reverb_ref.o build/cpu_reverb_new.o build/effect_shortDelay.o build/ref_shortDelay.o build/audio_stream_stub.o build/effect_limiter.o build/ref_limiter.o build/filter_variable.o build/amplifier.o build/monoToStereo.o build/mixer.o build/dspApplyGain.o build/ref_amplifier.o build/ref_monoToStereo.o build/analyze_rms.o -o $@
+
+# plan 024: the Master fader pages (pad map, values, LEDs, screen model, the real faderView.cpp in two display stages against masterstub/)
+build/seq_master_tests$(EXE): test_masterfaders.cpp masterstub/FT812.h masterstub/display.h ../interface/seqPerform/faderView.cpp ../interface/seqPerform/faderView.h ../interface/masterParams/masterFaderView.h ../source/seqMasterFaderLogic.h ../source/seqBeatRepeatLogic.h
+	mkdir -p build
+	$(CXX) -Imasterstub $(CXXFLAGS) -I../interface -I../libs/Audio test_masterfaders.cpp -o $@
+
+# PNG previews of the Master fader pages (plan 024; needs Pillow): the real faderView.cpp draw ops, rasterised by master_preview.py
+master-preview: build/seq_master_tests$(EXE)
+	mkdir -p build/preview
+	SEQ_MASTER_PREVIEW=build/preview build/seq_master_tests$(EXE) > /dev/null
+	python master_preview.py build/preview

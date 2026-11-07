@@ -29,6 +29,8 @@ static bool g_brHaveStatus = false;
 seqbr::Ui& seqBrUi() { return g_brUi; }
 void seqBrAct(const seqbr::Result& r) { g_brActs.push_back(r); }
 void seqBrPanic() { g_brUi.panic(); g_brPanics++; }
+static std::vector<bool> g_brPre;
+void seqBrPreroll(bool on) { g_brPre.push_back(on); }
 bool seqBrStatus(beatrepeat::Status* st) { *st = g_brStatus; return g_brHaveStatus; }
 
 

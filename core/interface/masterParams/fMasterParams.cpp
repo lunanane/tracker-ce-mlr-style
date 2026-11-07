@@ -12,6 +12,8 @@
 
 #include "masterParams/masterParams.h"
 #include "masterParams/ampView.h"
+#include "masterParams/masterFaders.h"
+#include "seqBeatRepeat.h"
 #include "mtGainLevelLogarithmicTab.h"
 
 #include "Platform.h"
@@ -92,6 +94,9 @@ static void functSoloMuteDryMix(uint8_t state);
 static void functSoloMuteLineIn(uint8_t state);
 static void functSoloMuteDelayReverb(uint8_t state);
 static void functAmpView(uint8_t state);
+static void functFaders(uint8_t state);
+static void functFaderButton(uint8_t button, uint8_t state);
+static void functFaderPads(uint8_t pad, uint8_t state, int16_t velo);
 #ifdef FEATURE_SYNTH
 static void functSelectSynth1(uint8_t state);
 static void functSelectSynth2(uint8_t state);
@@ -149,6 +154,13 @@ static elapsedMillis refreshTimer;
 void cMasterParams::update()
 {
     ampView.update(displayType == displayMode::mixerDelayReverb); // plan 013 M: cheap while closed; closes when the page is left
+    if (masterFaders.visible()) // plan 024
+    {
+        if (displayType != displayMode::mixerDelayReverb)
+            closeFaders(false); // another Master screen was chosen: the faders end where they are
+        else
+            masterFaders.update();
+    }
 
     if (displayType == displayMode::mixer && !keyboardManager.getState())
     {
@@ -195,7 +207,7 @@ void cMasterParams::update()
         display.synchronizeRefresh();
     }
     else if (displayType == displayMode::mixerDelayReverb && !keyboardManager.getState() &&
-             !mtMenuPopup.isPopupVisible() && !ampView.visible()) // v0.4.3: the meters are hidden under the open amp view
+             !mtMenuPopup.isPopupVisible() && !ampView.visible() && !masterFaders.visible()) // v0.4.3: the meters are hidden under the open amp view
     {
         for (uint8_t i = 0; i < 2; i++)
         {
@@ -253,7 +265,7 @@ void cMasterParams::update()
     {
         refreshAllTracksMixerVolume();
     }
-    else if (displayType == displayMode::mixerDelayReverb && !keyboardManager.getState() && !ampView.visible())
+    else if (displayType == displayMode::mixerDelayReverb && !keyboardManager.getState() && !ampView.visible() && !masterFaders.visible())
     {
         refreshOtherMixerVolume(); // v0.4.3: kept for when the amp view closes (its bars are hidden under the view)
     }
@@ -346,6 +358,7 @@ void cMasterParams::start(uint32_t options)
 void cMasterParams::stop()
 {
     ampView.forget();
+    masterFaders.forget(); // plan 024
     sequencer.stopManualNotes();
     moduleRefresh = 0;
 }
@@ -1264,6 +1277,7 @@ void cMasterParams::switchToMixerDelayReverb()
 #endif
 #ifdef FEATURE_PLINKY
     ip->setButtonObj(interfaceButton7, buttonPress, functAmpView); // plan 013 M
+    ip->setButtonObj(interfaceButton6, buttonPress, functFaders); // plan 024
 #endif
     ip->setButtonObj(interfaceButtonShift, functSoloMuteDelayReverb);
 
@@ -2094,6 +2108,71 @@ static void functAmpView(uint8_t state)
 {
     (void)state; // registered for buttonPress only
     MP->ampViewButton();
+}
+
+// ---- plan 024: the Master fader pages (masterFaders.cpp) -------------------------------------------------------------------------------
+static void functFaders(uint8_t state)
+{
+    (void)state; // registered for buttonPress only
+    MP->fadersButton();
+}
+
+static void functFaderButton(uint8_t button, uint8_t state)
+{
+    if (state != buttonPress)
+        return;
+    const cMasterFaders::Result r = masterFaders.buttonEvent(button);
+    if (r == cMasterFaders::R_CLOSE)
+        MP->closeFaders(true);
+    else if (r == cMasterFaders::R_RELABEL)
+        MP->showFaderLabels();
+}
+
+static void functFaderPads(uint8_t pad, uint8_t state, int16_t velo)
+{
+    (void)velo;
+    masterFaders.padEvent(pad, state);
+}
+
+void cMasterParams::fadersButton()
+{
+    if (displayType != displayMode::mixerDelayReverb || masterFaders.visible() || keyboardManager.getState())
+        return;
+    if (ampView.visible())
+        ampView.close();
+    hideControlUnderMenu(); // the bars and names under the opaque fader screen: their display lists would take its room
+    masterFaders.open();
+    ip->clearButtonsRange(interfaceButton0, interfaceButton7);
+    for (uint8_t b = interfaceButton0; b <= interfaceButton7; b++)
+        ip->setButtonObj(b, functFaderButton);
+    ip->setPadsGlobal(functFaderPads);
+    showFaderLabels();
+}
+
+void cMasterParams::showFaderLabels()
+{
+    char words[8][10];
+    masterFaders.labels(words);
+    for (uint8_t i = 0; i < 8; i++)
+    {
+        memcpy(mixerLabel[i], words[i], sizeof(mixerLabel[i]));
+        display.setControlColors(label[i], words[i][0] ? display.getTheme().activeLabelsColors : display.getTheme().inactiveLabelsColors);
+        display.setControlValue(label[i], 1);
+        display.setControlText2(label[i], mixerLabel[i]);
+        display.refreshControl(label[i]);
+    }
+    display.synchronizeRefresh();
+}
+
+void cMasterParams::closeFaders(bool restoreUi)
+{
+    if (!masterFaders.visible())
+        return;
+    masterFaders.close();
+    ip->setPadsGlobal(functPads);
+    if (restoreUi)
+        switchToMixerDelayReverb(); // the buttons, labels and bars of Global Mixer 3/3 again
+    lightUpPadBoard();
 }
 
 void cMasterParams::ampViewButton()
