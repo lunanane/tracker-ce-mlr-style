@@ -38,3 +38,5 @@ wheel on screen.
   minor and pentatonics map to their nearest wheel position (document the rule).
 - Saved per track (seqtracks.bin new version, oldest-version rule). The Model:Samples implementation is private and
   not on this PC — built from scratch.
+- Owner 2026-11-07: the A/B scale choice is NOT on the pads — only in the on-screen parameter page (jog / screen
+  buttons). The pad layouts stay as they are.
