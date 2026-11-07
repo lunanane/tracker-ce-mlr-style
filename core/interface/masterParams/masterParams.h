@@ -146,6 +146,9 @@ class cMasterParams : public ModuleBase
     void switchToMixer();
     void switchToMixerDelayReverb();
     void ampViewButton(); // plan 013 M: the "Amp view" screen button of Global Mixer 3/3 (original Tracker)
+    void fadersButton();  // plan 024: the "Faders" screen button of Global Mixer 3/3 opens the Master fader pages
+    void closeFaders(bool restoreUi); // restoreUi: back to Global Mixer 3/3 (buttons, labels); false when the page was left
+    void showFaderLabels();
     void switchToDelayScreen();
     void switchToReverbScreen();
     void switchToLimiterScreen();
