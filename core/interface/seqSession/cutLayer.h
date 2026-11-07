@@ -26,6 +26,7 @@ void cutAssignSlot(uint8_t slot, uint8_t track); // a track belongs to one slot:
 void cutPickToggle(uint8_t slot);    // "Assign slot n" screen button: the slot's two pad rows become the track picker / back
 int8_t cutPickSlot();                // slot being picked for, -1 = none
 void cutBrToggle();                  // "BeatRpt" screen button (plan 021): the pads and the lane screen switch between MLR and the beat repeat controls
+void cutLayerShown(bool shown);      // plan 024: the CUT layer is shown / hidden: the beat repeat pre-roll runs only while the beat repeat pads are visible
 bool cutBrActive();                  // the beat repeat layer is shown (MLR keeps playing underneath)
 void cutLegendToggle();              // "Help" screen button: the pad legend on the lane screen
 bool cutLegendShown();

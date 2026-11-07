@@ -122,7 +122,7 @@ build/seq_warp_tests$(EXE): test_warp.cpp ../libs/Audio/warp_core.h ../source/se
 	$(CXX) $(CXXFLAGS) -O2 -I../libs/Audio test_warp.cpp -o $@
 
 # plan 021: beat repeat DSP core (libs/Audio/beat_repeat_core.h, header only). -O2: the cost line is only meaningful optimised
-build/seq_br_tests$(EXE): test_beatrepeat.cpp ../libs/Audio/beat_repeat_core.h
+build/seq_br_tests$(EXE): test_beatrepeat.cpp test_br024.inc ../libs/Audio/beat_repeat_core.h ../source/seqFxLogic.h ../source/seqFxDsp.h
 	mkdir -p build
 	$(CXX) $(CXXFLAGS) -O2 -I../libs/Audio test_beatrepeat.cpp -o $@
 

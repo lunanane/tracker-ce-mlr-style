@@ -35,21 +35,24 @@ using seqcut::LED_DIM;
 using seqcut::LED_MID;
 using seqcut::LED_BRIGHT;
 
-enum Page : uint8_t { BG_REPEAT = 0, BG_AUTO = 1, BG_COUNT = 2 };
+enum Page : uint8_t { BG_REPEAT = 0, BG_AUTO = 1, BG_FILTER = 2, BG_COUNT = 3 }; // plan 024: FILTER = MIX level + band-pass of the repeats
 
 // The 8 step values (each is 1..8 = the pad that was pressed; the lit bar of a fader)
-enum Param : uint8_t { BP_GRIDPAD = 0, BP_GATE, BP_DECAY, BP_PITCH, BP_INTERVAL, BP_CHANCE, BP_VARIATION, BP_AUTOGRID, BP_COUNT };
-enum Kind : uint8_t { BK_MOMENTARY = 0, BK_BAR, BK_SELECT };
+enum Param : uint8_t { BP_GRIDPAD = 0, BP_GATE, BP_DECAY, BP_PITCH, BP_INTERVAL, BP_CHANCE, BP_VARIATION, BP_AUTOGRID, BP_MIX, BP_BPC, BP_BPW, BP_COUNT, BP_NONE = 0xFF };
+enum Kind : uint8_t { BK_MOMENTARY = 0, BK_BAR, BK_SELECT, BK_NONE };
 
 inline Param paramOf(uint8_t page, uint8_t row)
 {
-    static const Param p[BG_COUNT][4] = { { BP_GRIDPAD, BP_GATE, BP_DECAY, BP_PITCH }, { BP_INTERVAL, BP_CHANCE, BP_VARIATION, BP_AUTOGRID } };
+    static const Param p[BG_COUNT][4] = { { BP_GRIDPAD, BP_GATE, BP_DECAY, BP_PITCH },
+                                          { BP_INTERVAL, BP_CHANCE, BP_VARIATION, BP_AUTOGRID },
+                                          { BP_MIX, BP_BPC, BP_BPW, BP_NONE } };
     return p[page % BG_COUNT][row & 3];
 }
 inline Kind kindOf(Param p)
 {
     switch (p)
     {
+        case BP_NONE: return BK_NONE;
         case BP_GRIDPAD: return BK_MOMENTARY;
         case BP_INTERVAL:
         case BP_AUTOGRID: return BK_SELECT;
@@ -58,18 +61,20 @@ inline Kind kindOf(Param p)
 }
 inline const char* paramName(Param p)
 {
-    static const char* const n[BP_COUNT] = { "GRID", "GATE", "DECAY", "PITCH DECAY", "INTERVAL", "CHANCE", "VARIATION", "AUTO GRID" };
-    return n[p < BP_COUNT ? p : 0];
+    static const char* const n[BP_COUNT] = { "GRID", "GATE", "DECAY", "PITCH DECAY", "INTERVAL", "CHANCE", "VARIATION", "AUTO GRID", "MIX LEVEL", "BP CENTRE", "BP WIDTH" };
+    return p < BP_COUNT ? n[p] : "";
 }
 inline const char* paramHint(Param p)
 {
     static const char* const n[BP_COUNT] = { "hold a pad = repeat at that grid, jam between pads", "how long an automatic repeat lasts",
                                             "level drop per repeat (100 = -6 dB)", "pitch drop per repeat (100 = -3 st)",
                                             "an automatic repeat may start every ...", "chance of a repeat at each interval",
-                                            "chance and size of random grid changes", "grid of the automatic repeats" };
-    return n[p < BP_COUNT ? p : 0];
+                                            "chance and size of random grid changes", "grid of the automatic repeats",
+                                            "level of the repeats on top of the audio (MIX mode)", "band-pass on the repeats (right = open, off)",
+                                            "band-pass width" };
+    return p < BP_COUNT ? n[p] : "";
 }
-inline const char* pageName(uint8_t page) { return page == BG_AUTO ? "AUTO" : "REPEAT"; }
+inline const char* pageName(uint8_t page) { return page == BG_AUTO ? "AUTO" : (page == BG_FILTER ? "FILTER" : "REPEAT"); }
 inline const char* modeName(uint8_t mode)
 {
     return mode == beatrepeat::MODE_INSERT ? "REPLACE" : (mode == beatrepeat::MODE_GATE ? "GATE" : "MIX");
@@ -79,18 +84,35 @@ inline const char* modeName(uint8_t mode)
 inline uint8_t percentOf(uint8_t step) { return (uint8_t)(((step < 1 ? 0 : (step > 8 ? 7 : step - 1)) * 100 + 3) / 7); } // 0 14 29 43 57 71 86 100
 inline uint8_t variationOf(uint8_t step) { return (uint8_t)(((step < 1 ? 0 : (step > 8 ? 7 : step - 1)) * 10 + 3) / 7); } // 0 1 3 4 6 7 9 10
 inline uint8_t clampStep(int s) { return (uint8_t)(s < 1 ? 1 : (s > 8 ? 8 : s)); }
+// plan 024: band-pass centre (Hz, the delay range; step 8 = open = off) and width (1/12 octave, the delay range 4 .. 36), the master high-pass
+// (cutoff step 0 = off, else a seqfx::hpHz index 13 .. 90; resonance 0 .. 100 %)
+inline uint16_t bpHzOf(uint8_t step)
+{
+    static const uint16_t hz[8] = { 200, 400, 800, 1600, 3200, 6400, 12800, 20000 };
+    return hz[clampStep(step) - 1];
+}
+inline uint8_t bpTwOf(uint8_t step)
+{
+    static const uint8_t tw[8] = { 4, 8, 12, 16, 20, 24, 30, 36 };
+    return tw[clampStep(step) - 1];
+}
+inline uint8_t hpIdxOf(uint8_t step) { return step == 0 ? (uint8_t)0 : (uint8_t)(clampStep(step) * 11 + 2); }
 
 // Defaults (the steps): auto grid 1/16, interval 1 bar, chance 0 (off), gate 16/16, variation 0, pitch decay 0, decay 0, mode MIX
 struct BrParams
 {
     uint8_t step[BP_COUNT];
     uint8_t mode;
+    uint8_t hpCut; // plan 024: master high-pass cutoff step 0 = off, 1 .. 8
+    uint8_t hpRes; // resonance step 1 .. 8
     BrParams() { reset(); }
     void reset()
     {
         for (int i = 0; i < BP_COUNT; i++)
             step[i] = defaultStep((Param)i);
         mode = beatrepeat::MODE_MIX;
+        hpCut = 0;
+        hpRes = 1;
     }
     static uint8_t defaultStep(Param p)
     {
@@ -99,6 +121,9 @@ struct BrParams
             case BP_GATE: return 8;
             case BP_INTERVAL: return 6;
             case BP_AUTOGRID: return 3;
+            case BP_MIX:
+            case BP_BPC: return 8; // 100 %, open
+            case BP_BPW: return 3; // 1 octave
             case BP_GRIDPAD: return 0;
             default: return 1;
         }
@@ -108,7 +133,12 @@ struct BrParams
         for (int i = 0; i < BP_COUNT; i++)
             if (step[i] != defaultStep((Param)i))
                 return false;
-        return mode == beatrepeat::MODE_MIX;
+        return mode == beatrepeat::MODE_MIX && hpCut == 0 && hpRes == 1;
+    }
+    // the fields that did not exist in file version 1 are still at their defaults: the file is written as version 1
+    bool isV1() const
+    {
+        return step[BP_MIX] == defaultStep(BP_MIX) && step[BP_BPC] == defaultStep(BP_BPC) && step[BP_BPW] == defaultStep(BP_BPW) && hpCut == 0 && hpRes == 1;
     }
     bool operator==(const BrParams& o) const { return memcmp(this, &o, sizeof(*this)) == 0; }
     beatrepeat::Settings settings() const
@@ -122,15 +152,22 @@ struct BrParams
         s.pitchDecay = percentOf(step[BP_PITCH]);
         s.decay = percentOf(step[BP_DECAY]);
         s.mode = mode < beatrepeat::MODE_COUNT ? mode : (uint8_t)beatrepeat::MODE_MIX;
+        s.mix = percentOf(step[BP_MIX]);
+        s.bpHz = bpHzOf(step[BP_BPC]);
+        s.bpTw = bpTwOf(step[BP_BPW]);
+        s.hpIdx = hpIdxOf(hpCut > 8 ? (uint8_t)0 : hpCut);
+        s.hpRes = percentOf(hpRes);
         return s;
     }
 
-    // ---- sidecar "seqbrpt.bin": frame of seqSidecarLogic.h, magic "SBRP", version 1, payload = the 7 steps + mode (8 bytes) ----
-    // Oldest version that fits: version 1 is the only layout; a later version appends bytes (this reader takes the 8 it knows and
-    // leaves the rest), a newer file than the reader is never rewritten (FRAME_NEWER).
+    // ---- sidecar "seqbrpt.bin": frame of seqSidecarLogic.h, magic "SBRP" ----
+    // Version 1: payload = the 7 steps + mode (8 bytes). Version 2 (plan 024) appends 5 bytes: mix step, band-pass centre step, band-pass
+    // width step, master high-pass cutoff step (0 = off), resonance step. Oldest version that fits: a set whose new fields are all at
+    // their defaults is written as version 1 (older firmware keeps reading it); this reader takes both. A newer file than the reader is
+    // never rewritten (FRAME_NEWER).
     static const char* magic() { return "SBRP"; }
-    enum : uint8_t { kVersion = 1 };
-    enum : size_t { kPayload = 8, kFileMax = kPayload + seqsidecar::kOverhead };
+    enum : uint8_t { kVersion = 2, kVersion1 = 1 };
+    enum : size_t { kPayload = 8, kPayload2 = 13, kFileMax = kPayload + seqsidecar::kOverhead, kFileMax2 = kPayload2 + seqsidecar::kOverhead };
     void raw(uint8_t* p) const
     {
         p[0] = step[BP_AUTOGRID];
@@ -141,20 +178,26 @@ struct BrParams
         p[5] = step[BP_PITCH];
         p[6] = step[BP_DECAY];
         p[7] = mode;
+        p[8] = step[BP_MIX];
+        p[9] = step[BP_BPC];
+        p[10] = step[BP_BPW];
+        p[11] = hpCut;
+        p[12] = hpRes;
     }
     uint16_t hash() const
     {
-        uint8_t b[kPayload];
+        uint8_t b[kPayload2];
         raw(b);
-        return seqsidecar::crc16(b, kPayload);
+        return seqsidecar::crc16(b, kPayload2);
     }
     size_t save(uint8_t* buf, size_t cap) const
     {
-        if (cap < (size_t)kFileMax)
+        const bool v1 = isV1();
+        if (cap < (size_t)(v1 ? kFileMax : kFileMax2))
             return 0;
         uint8_t* p = buf + seqsidecar::kHeader;
         raw(p);
-        return seqsidecar::frameWrite(buf, cap, magic(), kVersion, p, kPayload);
+        return seqsidecar::frameWrite(buf, cap, magic(), v1 ? kVersion1 : kVersion, p, v1 ? kPayload : kPayload2);
     }
     // false: missing / bad frame (nothing changed). *newer: written by a newer mod version (leave the file alone). A short payload keeps
     // the defaults for what is missing; a value out of range falls back to its own default.
@@ -175,6 +218,17 @@ struct BrParams
                 d.step[order[i]] = p[i];
         if (n > 7 && p[7] < beatrepeat::MODE_COUNT)
             d.mode = p[7];
+        if (v >= 2 && n >= kPayload2) // the fields of version 2; a version 1 file keeps their defaults whatever follows its 8 bytes
+        {
+            static const Param order2[3] = { BP_MIX, BP_BPC, BP_BPW };
+            for (size_t i = 0; i < 3; i++)
+                if (p[8 + i] >= 1 && p[8 + i] <= 8)
+                    d.step[order2[i]] = p[8 + i];
+            if (p[11] <= 8)
+                d.hpCut = p[11];
+            if (p[12] >= 1 && p[12] <= 8)
+                d.hpRes = p[12];
+        }
         *this = d;
         return true;
     }
@@ -304,6 +358,8 @@ struct Ui
             case BC_FADER:
             {
                 const Param par = paramOf(page, p.index);
+                if (par == BP_NONE)
+                    return 0;
                 prm.step[par] = p.step;
                 r[0].act = BA_SETTINGS;
                 return 1;
@@ -324,7 +380,7 @@ struct Ui
             case BC_RESET:
             {
                 const Param par = paramOf(page, p.index);
-                if (kindOf(par) == BK_MOMENTARY)
+                if (kindOf(par) == BK_MOMENTARY || par == BP_NONE)
                     return 0;
                 prm.step[par] = BrParams::defaultStep(par);
                 r[0].act = BA_SETTINGS;
@@ -383,6 +439,7 @@ inline void fillLeds(const LedState& s, bool blink, uint8_t out[kCutPads])
             const uint8_t st = (uint8_t)(c + 1);
             switch (kindOf(par))
             {
+                case BK_NONE: break;
                 case BK_MOMENTARY:
                     r[c] = LED_DIM;
                     if (s.state != beatrepeat::S_IDLE && s.eventGrid == c)
@@ -401,7 +458,7 @@ inline void fillLeds(const LedState& s, bool blink, uint8_t out[kCutPads])
         if (row == 0)
             r[11] = s.state != beatrepeat::S_IDLE ? (blink ? LED_BRIGHT : LED_MID) : LED_DIM;
         else
-            r[11] = (kindOf(par) != BK_MOMENTARY && s.step[par] != BrParams::defaultStep(par)) ? LED_MID : LED_DIM;
+            r[11] = (kindOf(par) != BK_MOMENTARY && kindOf(par) != BK_NONE && s.step[par] != BrParams::defaultStep(par)) ? LED_MID : LED_DIM;
     }
 }
 
@@ -426,6 +483,13 @@ inline LegendCell legendCell(uint8_t col, uint8_t row, const LedState& s)
             const Param par = paramOf(s.page, p.index);
             switch (par)
             {
+                case BP_NONE: snprintf(c.word, sizeof(c.word), "-"); c.dim = 1; break; // the unused row of the FILTER page
+                case BP_MIX: snprintf(c.word, sizeof(c.word), "%d", percentOf(p.step)); c.on = p.step <= s.step[par]; break;
+                case BP_BPC:
+                    snprintf(c.word, sizeof(c.word), p.step == 8 ? "open" : "%d", bpHzOf(p.step));
+                    c.on = p.step <= s.step[par];
+                    break;
+                case BP_BPW: snprintf(c.word, sizeof(c.word), "%d.%d", bpTwOf(p.step) / 12, (bpTwOf(p.step) % 12) * 10 / 12); c.on = p.step <= s.step[par]; break;
                 case BP_GRIDPAD:
                     snprintf(c.word, sizeof(c.word), "%s", beatrepeat::gridName((uint8_t)(p.step - 1)));
                     c.on = ((s.heldMask >> (p.step - 1)) & 1u) != 0 || (s.state != beatrepeat::S_IDLE && s.eventGrid == p.step - 1);
@@ -444,7 +508,7 @@ inline LegendCell legendCell(uint8_t col, uint8_t row, const LedState& s)
             }
             break;
         }
-        case BC_PAGE: snprintf(c.word, sizeof(c.word), "%s", p.index == BG_AUTO ? "AUTO" : "REPT"); c.on = s.page == p.index; break;
+        case BC_PAGE: snprintf(c.word, sizeof(c.word), "%s", p.index == BG_AUTO ? "AUTO" : (p.index == BG_FILTER ? "FILT" : "REPT")); c.on = s.page == p.index; break;
         case BC_MODE: snprintf(c.word, sizeof(c.word), "%s", p.index == beatrepeat::MODE_INSERT ? "REPL" : modeName(p.index)); c.on = s.mode == p.index; break;
         case BC_LATCH: snprintf(c.word, sizeof(c.word), "LATCH"); c.on = s.latch != 0; break;
         case BC_OFF: snprintf(c.word, sizeof(c.word), "OFF"); c.on = s.state != beatrepeat::S_IDLE; break;
@@ -483,6 +547,14 @@ inline void valueText(Param p, uint8_t step, char* out, size_t cap)
         case BP_CHANCE: snprintf(out, cap, percentOf(step) ? "%d %%" : "off", percentOf(step)); break;
         case BP_VARIATION: snprintf(out, cap, "%d", variationOf(step)); break;
         case BP_AUTOGRID: snprintf(out, cap, "%s", beatrepeat::gridName((uint8_t)(clampStep(step) - 1))); break;
+        case BP_MIX: snprintf(out, cap, "%d %%", percentOf(step)); break;
+        case BP_BPC:
+            if (clampStep(step) == 8)
+                snprintf(out, cap, "open");
+            else
+                snprintf(out, cap, bpHzOf(step) >= 1000 ? "%d.%d kHz" : "%d Hz", bpHzOf(step) >= 1000 ? bpHzOf(step) / 1000 : bpHzOf(step), (bpHzOf(step) % 1000) / 100);
+            break;
+        case BP_BPW: snprintf(out, cap, "%d.%d oct", bpTwOf(step) / 12, (bpTwOf(step) % 12) * 10 / 12); break;
         default: out[0] = 0; break;
     }
 }
@@ -528,7 +600,7 @@ inline int8_t scale(int v) // 16 bit sample -> -127..127
     return (int8_t)(s > 127 ? 127 : (s < -127 ? -127 : s));
 }
 // Waveform columns of the captured slice from interleaved L R frames (ring): min / max of the left channel per column, -127..127
-inline void foldWave(const int16_t* ring, uint32_t frames, int8_t lo[kBrWave], int8_t hi[kBrWave])
+inline void foldWave(const int16_t* ring, uint32_t frames, int8_t lo[kBrWave], int8_t hi[kBrWave], uint32_t base = 0, uint32_t cap = 0)
 {
     for (int j = 0; j < kBrWave; j++)
     {
@@ -541,7 +613,10 @@ inline void foldWave(const int16_t* ring, uint32_t frames, int8_t lo[kBrWave], i
         int mn = 32767, mx = -32768;
         for (uint32_t i = a; i < b && i < frames; i += stride)
         {
-            const int v = ring[2 * i];
+            uint32_t at = base + i; // plan 024: the ring is circular, the slice starts at `base`
+            if (cap && at >= cap)
+                at -= cap;
+            const int v = ring[2 * at];
             if (v < mn)
                 mn = v;
             if (v > mx)

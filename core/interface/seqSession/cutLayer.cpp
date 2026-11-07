@@ -123,6 +123,7 @@ void cutBrToggle()
             seqBrAct(r);
         }
         s_brOn = false;
+        seqBrPreroll(false); // plan 024: nothing is recorded ahead any more (a latched repeat goes on by itself)
         return;
     }
     // MLR pads in the hand are let go first (a held pad would otherwise never see its release), the track picker closes
@@ -131,6 +132,13 @@ void cutBrToggle()
             cutPad((uint8_t)(i % kCols), (uint8_t)(i / kCols), false);
     s_pick = -1;
     s_brOn = true;
+    seqBrPreroll(true); // plan 024: record ahead while the beat repeat pads are shown, so the first press has audio at once
+}
+
+void cutLayerShown(bool shown)
+{
+    init();
+    seqBrPreroll(shown && s_brOn);
 }
 
 namespace

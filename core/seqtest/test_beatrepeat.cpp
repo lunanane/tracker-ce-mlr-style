@@ -866,6 +866,8 @@ static void test_cost()
     CHECK(us < 500.0); // a loose host bound only
 }
 
+#include "test_br024.inc"
+
 int main()
 {
     test_tables();
@@ -881,6 +883,10 @@ int main()
     test_tempo_change();
     test_clock();
     test_chance_interval_variation();
+    test_preroll();
+    test_mix_level();
+    test_bandpass();
+    test_master_hp();
     test_cost();
     printf("beat repeat tests: %d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
