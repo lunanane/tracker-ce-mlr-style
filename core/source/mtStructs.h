@@ -62,7 +62,7 @@ const float MIN_WAVE_FLOAT = -1.0;
 // T1
 const uint32_t EXTERAL_MEMORY_ADDRESS = 0x70000000;
 const uint32_t TOTAL_EXTERNAL_MEMORY = (16 * 1024 * 1024); // 16 MB
-const uint32_t SAMPLE_MEMORY_SIZE = (44 * 256 * 1024);     // 11 MB (plan 030: was 11,25 MB, 256 KB went to the master recording ring)
+const uint32_t SAMPLE_MEMORY_SIZE = (45 * 256 * 1024);     // 11,25 MB = 133.7469 sec = 2.229 min (plan 048: back to 45 units; the master recording ring lives in the scratch tail)
 #else
 // Tmini / Tplus
 const uint32_t EXTERAL_MEMORY_ADDRESS = 0x80000000;

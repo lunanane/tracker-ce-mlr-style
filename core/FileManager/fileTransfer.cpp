@@ -183,7 +183,8 @@ uint8_t cFileTransfer::loadFileToMemory(const char* file,
 
 uint8_t cFileTransfer::loadSampleToMemory(const char* file,
                                           int16_t* memory,
-                                          uint32_t& outSampleCount)
+                                          uint32_t& outSampleCount,
+                                          uint32_t maxOutSamples)
 {
     if (transferStep == 0)
     {
@@ -238,6 +239,25 @@ uint8_t cFileTransfer::loadSampleToMemory(const char* file,
 
         if (result >= 0)
         {
+            // plan 048: the destination is a fixed slice of the sample pool; refuse instead of writing past it
+            {
+                uint64_t chunkOut = (uint32_t)result / 2u; // no conversion: 16-bit mono as is
+                if (conversionEnabled)
+                {
+                    const uint32_t bps = (sampleHead.bitsPerSample / 8u) * sampleHead.numChannels;
+                    chunkOut = (bps > 0 && sampleHead.sampleRate > 0)
+                                 ? (uint64_t)((uint32_t)result / bps) * 44100u /
+                                     sampleHead.sampleRate
+                                 : 0u;
+                }
+                if (convertedDataSize + chunkOut > maxOutSamples)
+                {
+                    fileSystem->closeFile(transferFile, false);
+                    transferStep = 0;
+                    return fileTransferFileNoValid;
+                }
+            }
+
             if (conversionEnabled)
             {
                 conversionConfig.inputData = externalRamFileManagerBuffL;

@@ -295,11 +295,20 @@ bool cFileManager::loadSampleData(int idx,
                                    : 2);
         }
 
-        // memory usage check
-        if (sampleDataSizeMax > mtProject.max_memory - mtProject.used_memory)
+        // memory usage check (plan 048: saturating, and the sample must end inside the pool: the address
+        // chain is built from the active predecessors, so used_memory alone does not bound the write)
         {
-            sampleLoadStep = 0; // skip loading
-            loadStatus = fileTransferFileNoValid;
+            const intptr_t offBytes = (uint8_t*)mtProject.instrument[idx].sample.address -
+                                      (uint8_t*)externalRamSampleMemory;
+            const bool inPool = offBytes >= 0 && sampmem::fitsPool((uint32_t)offBytes,
+                                                                   sampleDataSizeMax,
+                                                                   SAMPLE_MEMORY_SIZE);
+            if (!inPool ||
+                sampleDataSizeMax > sampmem::poolFree(mtProject.max_memory, mtProject.used_memory))
+            {
+                sampleLoadStep = 0; // skip loading
+                loadStatus = fileTransferFileNoValid;
+            }
         }
     }
 
@@ -340,8 +349,16 @@ bool cFileManager::loadSampleData(int idx,
     }
     else if (sampleLoadStep == 2) // old instrument/sample load
     {
-        loadStatus = fileTransfer.loadSampleToMemory(
-          samplePath, mtProject.instrument[idx].sample.address, currentSampleSamplesCount);
+        // plan 048: bounded by the pool end and the free pool (samples = int16 units)
+        const intptr_t oldOffBytes = (uint8_t*)mtProject.instrument[idx].sample.address -
+                                     (uint8_t*)externalRamSampleMemory;
+        const uint32_t oldRoomBytes =
+          oldOffBytes >= 0 ? sampmem::poolFree(SAMPLE_MEMORY_SIZE, (uint32_t)oldOffBytes) : 0u;
+        const uint32_t oldFreeBytes = sampmem::poolFree(mtProject.max_memory, mtProject.used_memory);
+        loadStatus = fileTransfer.loadSampleToMemory(samplePath,
+                                                     mtProject.instrument[idx].sample.address,
+                                                     currentSampleSamplesCount,
+                                                     std::min(oldRoomBytes, oldFreeBytes) / 2u);
     }
     else if (sampleLoadStep == 3) // save old sample type to new instrument in workspace
     {

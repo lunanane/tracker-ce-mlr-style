@@ -90,6 +90,18 @@ inline Placement decideLoad(uint32_t frames,
     return modeNeedsResident ? Placement::StreamedOneShot : Placement::Streamed;
 }
 
+// Pool bytes still free; never wraps (used may exceed max after a pool shrink or a bad project file).
+inline uint32_t poolFree(uint32_t maxBytes, uint32_t usedBytes)
+{
+    return maxBytes > usedBytes ? maxBytes - usedBytes : 0u;
+}
+
+// A sample of `bytes` placed `offsetBytes` into a pool of `poolBytes` stays inside the pool (no wrap in the sum).
+inline bool fitsPool(uint32_t offsetBytes, uint32_t bytes, uint32_t poolBytes)
+{
+    return offsetBytes <= poolBytes && bytes <= poolBytes - offsetBytes;
+}
+
 // Whether a streamed sample can be made resident (play mode / editor change).
 inline bool canPromote(uint32_t frames, uint32_t channels, uint32_t ramFrames, uint32_t freeBytes)
 {
