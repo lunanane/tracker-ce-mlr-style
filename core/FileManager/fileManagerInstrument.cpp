@@ -8,6 +8,7 @@
 #include "fileTransfer.h"
 #include "instrumentFileValidation.h"
 #include "log.h"
+#include "seqCrash.h" // plan 032
 #include "sampleMemLogic.h"
 #include "mtFileManagerOldVersionRecovery.h"
 #include "util_string.h"
@@ -295,6 +296,8 @@ bool cFileManager::loadSampleData(int idx,
                                    : 2);
         }
 
+        seqcrash::mark(30, idx, sampleDataSizeMax >> 10); // plan 032: sample load begins (KB)
+
         // memory usage check (plan 048: saturating, and the sample must end inside the pool: the address
         // chain is built from the active predecessors, so used_memory alone does not bound the write)
         {
@@ -310,6 +313,7 @@ bool cFileManager::loadSampleData(int idx,
                 loadStatus = fileTransferFileNoValid;
             }
         }
+        seqcrash::mark(31, idx, sampleLoadStep); // plan 032: the step this sample goes on with (0 = skipped)
     }
 
     uint32_t currentSampleSamplesCount = 0;
@@ -391,6 +395,7 @@ bool cFileManager::loadSampleData(int idx,
         }
 
         mtProject.used_memory += currentSampleSamplesCount * 2;
+        seqcrash::mark(33, idx, currentSampleSamplesCount >> 8); // plan 032: loaded ok (samples / 256)
 
         if (newFileManager.isInstrumentStereo(idx))
         {
@@ -408,6 +413,7 @@ bool cFileManager::loadSampleData(int idx,
     else if (loadStatus == fileTransferFileNoExist || loadStatus == fileTransferFileNoValid ||
              loadStatus == fileTransferEnd)
     {
+        seqcrash::mark(34, idx, loadStatus); // plan 032: skipped / not valid
         newFileManager.clearSampleChanged(idx);
         newFileManager.completeLoadedInstrumentStruct(idx, false);
         sampleLoadStep = 0;

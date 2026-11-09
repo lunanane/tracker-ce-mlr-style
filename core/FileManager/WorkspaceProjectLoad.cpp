@@ -4,6 +4,7 @@
 #include "fileManagerDefs.h"
 #include "fileTransfer.h"
 #include "seqSidecar.h"
+#include "seqCrash.h" // plan 032
 
 #if FILEMANAGER_HANDLE_SYNTH == 1
 #include "Synth.h"
@@ -89,6 +90,10 @@ void WorkspaceProjectLoad::update()
         default: stopOperationWithError(fmLoadError); break;
     }
 
+    if (nextStep != operationStep)
+    {
+        seqcrash::mark(20 + (int)nextStep, currentInstrument); // plan 032: 20 init .. 25 finish
+    }
     operationStep = nextStep;
 }
 
@@ -162,11 +167,16 @@ void WorkspaceProjectLoad::loadProjectFromWorkspaceFinish()
                newFileManager.getProjectPathfromProjectFile());
     }
 
+    seqcrash::mark(50);
     sequencer.switchRamPatternsNow();
-    seqSidecarsLoadWorkspace(); // sequencer tracks mod: per-track sequencer state of this project (missing = all Off)
+    seqcrash::mark(51);
+    seqSidecarsLoadWorkspace();
+    seqcrash::mark(52); // sequencer tracks mod: per-track sequencer state of this project (missing = all Off)
     newFileManager.startAudioEngine();
+    seqcrash::mark(53);
 
     newFileManager.getPatternsMetadata()->loadPatternsMetadata();
+    seqcrash::mark(54);
 
 #if FILEMANAGER_HANDLE_SYNTH == 1
     newFileManager.getSynth()->updateToSettings(mtProject.values, true);
@@ -180,7 +190,9 @@ void WorkspaceProjectLoad::loadProjectFromWorkspaceFinish()
     }
 #endif
 
+    seqcrash::mark(55);
     newFileManager.loadProjectValues();
+    seqcrash::mark(56);
 
     if (newFileManager.needImportModFileAfterNewProject())
     {

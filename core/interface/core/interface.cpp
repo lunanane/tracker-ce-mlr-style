@@ -16,6 +16,7 @@
 #include "seqPerform/seqPerform.h"
 #include "seqSession/seqSession.h"
 #include "seqHooks.h"
+#include "seqCrash.h" // plan 032
 #include "seqTracksLogic.h"
 #include "performanceMode/performanceMode.h"
 #include "projectEditor/projectEditor.h"
@@ -164,6 +165,14 @@ void Interface::processOperatingMode()
             if (fileSystem->isSdCardInserted())
             {
                 hideDisplayNoSdCard();
+                if (seqcrash::pending()) // plan 032: log it, then stay here (no project open, no save); a power cycle retries
+                {
+                    showCrashScreen();
+                    operatingMode = mtOperatingModeCrashHalt;
+                    break;
+                }
+                seqcrash::mark(10);
+                seqcrash::arm(true); // armed before the open: a hang inside openStartupProject is caught too
                 openStartupProject();
                 operatingMode = mtOperatingModeShowStartScreen;
             }
@@ -259,6 +268,8 @@ void Interface::processStartScreen()
         if (detectProjectLoadState())
         {
             // koniec ekranu startowego
+            seqcrash::arm(false);
+            seqcrash::mark(12);
             destroyStartScreen();
             hideDisplayNoSdCard();
             operatingMode = mtOperatingModeRun;
@@ -276,6 +287,7 @@ void Interface::processStartScreen()
     }
     else
     {
+        seqcrash::arm(false);
         hideStartScreen();
         showDisplayNoSdCard();
         operatingMode = mtOperatingModeOpenProject;
@@ -336,7 +348,11 @@ void Interface::handlePowerButtonAction(uint8_t state) // 1 = przycisk wcisniety
 {
     if (state) // press
     {
-        if (operatingMode != mtOperatingModeRun && fileSystem->isSdCardInserted())
+        if (operatingMode == mtOperatingModeCrashHalt)
+        {
+            shutdownSaveFlag = 1; // plan 032: nothing is loaded, so never save over the Workspace
+        }
+        else if (operatingMode != mtOperatingModeRun && fileSystem->isSdCardInserted())
         {
             return;
         }
@@ -360,8 +376,14 @@ void Interface::handlePowerButtonAction(uint8_t state) // 1 = przycisk wcisniety
         if (operatingMode != mtOperatingModePowerOffSequence)
             return;
 
-        shutdownSaveFlag = 0;
         lowPower.stopPowerOffSequence();
+        if (crashHalt)
+        {
+            hideDisplayShutdown(); // plan 032: released on the crash screen, back to it
+            operatingMode = mtOperatingModeCrashHalt;
+            return;
+        }
+        shutdownSaveFlag = 0;
         operatingMode = mtOperatingModeRun;
 
         // specjalne zachowanie w zaleznosci od stanu sd

@@ -335,10 +335,17 @@ void MillisTimer::runFromTimer()
 // with libraries using mid-to-high priority interrupts.
 
 extern "C" volatile uint32_t systick_millis_count;
-void systick_isr(void)
+extern "C" void seqcrash_tick(const uint32_t* frame, uint32_t excReturn); // plan 032: software watchdog of the project open (core/source/seqCrash.cpp)
+extern "C" void systick_c(const uint32_t* frame, uint32_t excReturn)
 {
 	systick_millis_count++;
 	MillisTimer::runFromTimer();
+	seqcrash_tick(frame, excReturn);
+}
+// naked: the stacked frame of the interrupted code (MSP or PSP by EXC_RETURN bit 2) goes to systick_c in r0; b keeps lr for the return
+__attribute__((naked)) void systick_isr(void)
+{
+	__asm volatile("mov r1, lr\n\ttst lr, #4\n\tite eq\n\tmrseq r0, msp\n\tmrsne r0, psp\n\tb systick_c\n\t");
 }
 
 
