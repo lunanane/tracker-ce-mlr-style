@@ -116,6 +116,14 @@ class cDisplay
         }
         return sum;
     }
+    // v0.4.7: the same as shownRamBytesExcept (named for the trace views: what the other visible controls take of the 8172 byte frame)
+    uint32_t ramUsedByOthers(int16_t controlIdx) const { return shownRamBytesExcept(controlIdx); }
+    // v0.4.7: accounting of step3 (Config page CPU monitor): bytes appended / visible controls dropped by the budget in the last frame
+    // and the highest of each since start
+    uint32_t frameBytesLast() const { return frameBytesLast_; }
+    uint32_t frameBytesMax() const { return frameBytesMax_; }
+    uint16_t skippedLast() const { return skippedLast_; }
+    uint16_t skippedMax() const { return skippedMax_; }
     void forceAppedStage();
     void processDisplayUpdateImmediate();
     bool isControlsRefreshProcessIdle();
@@ -228,6 +236,8 @@ class cDisplay
 
     uint32_t memoryUsed = 0;
     uint32_t lastMemoryUsed = 0;
+    uint32_t frameBytesLast_ = 0, frameBytesMax_ = 0;
+    uint16_t skippedLast_ = 0, skippedMax_ = 0;
 
     uint8_t fontsCount = displayFontCount;
     int8_t controls_count = 0;

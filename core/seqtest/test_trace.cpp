@@ -12,6 +12,7 @@
 #include "seqPalette.h"
 #include "seqPitchTraceLogic.h"
 #include "seqSessionLogic.h"
+#include "seqTraceStages.h"
 
 static int g_fail = 0, g_checks = 0;
 #define CHECK(c)                                                \
@@ -499,6 +500,29 @@ static void test_pitch_layout_and_size()
     CHECK(c.strips == 8);
     CHECK(c.maxStripPts <= pitchtrace::kMaxPts);
     checkPitchBounds(c);
+    // v0.4.7: the view's budget from what the other visible controls leave of the 8172 B frame (display.cpp step3): never negative or
+    // wrapped, never makes the others + the budget exceed the frame; the curves thin out with the budget and the drawing never grows
+    {
+        int prevBytes = c.bytes;
+        const int others[] = { 2320, 4000, 6000, 7900 };
+        for (int o : others)
+        {
+            const int b = tracestage::frameRoom(o, pitchtrace::kDisplayBudget);
+            CHECK(b >= 0 && b <= pitchtrace::kDisplayBudget);
+            CHECK(o + b <= tracestage::kFrameBytes - tracestage::kFrameSafety || b == 0);
+            pitchtrace::Follower g = f;
+            g.budget = (uint16_t)b;
+            Ctx cb;
+            pitchtrace::draw(cb, g, rg, "PolySynth pitch  (dim line: envelope)", "FX2: close");
+            printf("  pitch trace, others %d: budget %d -> %d bytes\n", o, b, cb.bytes);
+            CHECK(cb.bytes > 0 && cb.bytes <= prevBytes);
+            if (o <= 4000)
+                CHECK(o + cb.bytes < tracestage::kFrameBytes);
+            prevBytes = cb.bytes;
+        }
+        CHECK(tracestage::frameRoom(9000, pitchtrace::kDisplayBudget) == 0 && tracestage::frameRoom(0, 5400) == 5400);
+        CHECK(tracestage::frameRoom(2320, pitchtrace::kDisplayBudget) == pitchtrace::kDisplayBudget); // the usual case is unchanged
+    }
     // the envelope line sits above its pitch line (smaller y) wherever the envelope is > 0 (v0.3.7: the envelope line has every second
     // point of the pitch line, so point i of it belongs to point 2 i + 1 of the pitch line)
     bool above = true;

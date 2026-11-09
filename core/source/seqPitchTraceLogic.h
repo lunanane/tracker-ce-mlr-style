@@ -63,6 +63,7 @@ inline uint32_t lineColor(int inst, int rank) { return seqpal::mix(instColor(ins
 class Follower
 {
   public:
+    uint16_t budget = kDisplayBudget; // v0.4.7: display list bytes the drawing may use (the view sets it from what the other controls leave)
     Follower() { reset(); }
     void reset()
     {
@@ -420,8 +421,12 @@ template <class C> void draw(C& c, const Follower& f, const Range& r, const char
                 vRank[v] += vData[u] && vInst[u] == vInst[v];
     }
     const int scale = act > 4 ? act : 4;
-    const int ptsMax = kMaxPts * 4 / scale < 16 ? 16 : kMaxPts * 4 / scale;
-    const int ptsEnv = npe * 4 / scale < 8 ? 8 : npe * 4 / scale;
+    // v0.4.7: a smaller budget (the other controls leave less of the frame) thins the curves in proportion; the full budget draws as before
+    const int pct = f.budget >= kDisplayBudget ? 100 : f.budget * 100 / kDisplayBudget;
+    const int ptsMaxFull = kMaxPts * 4 / scale * pct / 100;
+    const int ptsEnvFull = npe * 4 / scale * pct / 100;
+    const int ptsMax = ptsMaxFull < (pct < 100 ? 4 : 16) ? (pct < 100 ? 4 : 16) : ptsMaxFull;
+    const int ptsEnv = ptsEnvFull < (pct < 100 ? 3 : 8) ? (pct < 100 ? 3 : 8) : ptsEnvFull;
     for (int v = 0; v < kVoices; v++)
     {
         for (int curve = 0; curve < 2; curve++) // 0 = envelope (behind), 1 = pitch

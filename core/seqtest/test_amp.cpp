@@ -750,6 +750,20 @@ static void test_smooth_and_thin()
     CHECK(frameBudget(2320, 0) == kFrameBytes - kFrameMargin - 2320);
     CHECK(frameBudget(2320, -500) == kFrameBytes - kFrameMargin - 2320 + 500 && frameBudget(2320, 300) == kFrameBytes - kFrameMargin - 2320 - 300);
     CHECK(frameBudget(0, -1500) == kMaxBudget && frameBudget(7000, 0) == kMinBudget);
+    // v0.4.7: traceBudget = frameBudget while the frame has room; below the floor it follows the real frame (never negative, never wrapped)
+    {
+        const int others[] = { 2320, 4000, 6000, 7900, 9000 };
+        for (int o : others)
+        {
+            const int b = traceBudget(o, 0);
+            CHECK(b >= 0 && b <= kMaxBudget);
+            CHECK(o + b <= kFrameBytes - tracestage::kFrameSafety || b == 0);
+            if (frameBudget(o, 0) > kMinBudget || o <= 2320)
+                CHECK(b == frameBudget(o, 0));
+        }
+        CHECK(traceBudget(2320, 0) == frameBudget(2320, 0) && traceBudget(6000, 0) == 8172 - 256 - 6000 && traceBudget(9000, 0) == 0);
+        CHECK(traceBudget(7900, 1500) == 0 && traceBudget(4000, -500) == frameBudget(4000, -500));
+    }
     CHECK(kMaxBudget + 808 <= 2 * (3840 - 12)); // the two display stages take the largest budget for sure (+ the largest strip)
 
     // smoothing levels: many lines on a small budget get smoother lines (a higher level), few lines keep the finest one

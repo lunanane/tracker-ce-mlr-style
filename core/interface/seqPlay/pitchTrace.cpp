@@ -10,6 +10,7 @@
 #include "cr_section_macros.h"
 #include "display.h"
 #include "seqTracks.h"
+#include "seqTraceStages.h"
 #ifdef FEATURE_PLINKY
 #include "PlinkyVoice/plinky_voice.h"
 #include "seqPlinky.h"
@@ -103,6 +104,9 @@ void PitchTraceView::update()
         return;
     lastMs_ = now ? now : 1;
     range_.follow(*follower_);
+    // v0.4.7: the frame holds 8172 B for all visible controls; the curves take what the others leave (control_ is the lowest index and is
+    // dropped first when the sum does not fit)
+    follower_->budget = (uint16_t)tracestage::frameRoom((int)display.ramUsedByOthers(control_), pitchtrace::kDisplayBudget);
     display.refreshControl(control_);
     display.synchronizeRefresh();
 }

@@ -2127,7 +2127,7 @@ void cMasterParams::hideControlUnderMenu()
 {
     if (displayType == displayMode::mixerDelayReverb)
     {
-        for (int idx = 0; idx < 7; idx++)
+        for (int idx = 0; idx < 8; idx++) // v0.4.7: 0..7 (the Amp view button is label[7], not a name label or bar)
         {
             display.setControlHide(trackNameLabel[idx]);
             display.setControlHide(trackVolumeBar[idx]);
