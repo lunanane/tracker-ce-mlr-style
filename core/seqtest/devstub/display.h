@@ -75,6 +75,14 @@ class cDisplay
         for (int i = 0; i < controlsCount; i++) delete controlsTable[i];
         *this = cDisplay();
     }
+    // v0.4.7: what the other visible controls would add to the frame (the real display.h)
+    uint32_t ramUsedByOthers(int h) const
+    {
+        uint32_t sum = 0;
+        for (int i = 0; i < controlsCount; i++)
+            if (i != h && controlsTable[i] && (controlsTable[i]->style & controlStyleShow) && controlsTable[i]->refresh) sum += controlsTable[i]->ramSize;
+        return sum;
+    }
     bool ok(int h) const { return h >= 0 && h < controlsCount && controlsTable[h]; }
     void setControlShow(int h) { if (ok(h)) controlsTable[h]->style |= controlStyleShow; }
     void setControlHide(int h) { if (ok(h)) controlsTable[h]->style &= ~controlStyleShow; }

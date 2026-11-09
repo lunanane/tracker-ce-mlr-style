@@ -32,6 +32,7 @@
 #include <string.h>
 
 #include "seqPalette.h"
+#include "seqTraceStages.h"
 
 namespace ampview
 {
@@ -716,6 +717,16 @@ inline int frameBudget(int others, int corr)
 {
     const int room = kFrameBytes - kFrameMargin - others - corr;
     return room < kMinBudget ? kMinBudget : (room > kMaxBudget ? kMaxBudget : room);
+}
+
+// v0.4.7: the budget the view really draws with. frameBudget never goes below kMinBudget; when the other controls leave less than that
+// of the real frame, the view draws a reduced frame (down to nothing but the strip ends) instead of a list the display drops entirely.
+inline int traceBudget(int others, int corr)
+{
+    const int b = frameBudget(others, corr);
+    const int room = kFrameBytes - tracestage::kFrameSafety - others - corr;
+    const int cap = room < 0 ? 0 : room;
+    return cap < b ? cap : b;
 }
 
 // The lines of a frame at one smoothing level: dense values, strips, ranks; then the lowest threshold that fits `room` (thr = kRankMax keeps

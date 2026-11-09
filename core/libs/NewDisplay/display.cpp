@@ -611,6 +611,8 @@ void cDisplay::step3()
     API_VERTEX_FORMAT(0);
 
     // wczytaj elementy w odwrotnej kolejnosci niz w jakiej byly tworzone
+    uint16_t skipped = 0; // v0.4.7: visible controls the budget dropped (they follow the first one that did not fit)
+    bool full = false;
     for (int8_t i = controlsCount - 1; i >= 0; i--)
     {
         cDisplayControl* p = controlsTable[i];
@@ -621,7 +623,7 @@ void cDisplay::step3()
         if ((p->style & controlStyleShow) && p->refresh)
         {
             uint32_t controlMemoryUsed = p->ramSize;
-            if (controlMemoryUsed + memoryUsed < 8172)
+            if (!full && controlMemoryUsed + memoryUsed < 8172)
             {
                 memoryUsed += controlMemoryUsed;
 
@@ -630,10 +632,18 @@ void cDisplay::step3()
             }
             else
             {
-                break;
+                full = true; // the lower indices stay dropped (they are drawn on top of what is missing); counted for the monitor
+                skipped++;
             }
         }
     }
+
+    frameBytesLast_ = memoryUsed;
+    skippedLast_ = skipped;
+    if (memoryUsed > frameBytesMax_)
+        frameBytesMax_ = memoryUsed;
+    if (skipped > skippedMax_)
+        skippedMax_ = skipped;
 
     API_DISPLAY();
     API_CMD_SWAP();

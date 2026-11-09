@@ -72,8 +72,10 @@ static void test_text_budget()
         s.rdCalls[i] = s.rdCycles[i] = 4000000000u;
     s.rdPeak = 4000000000u;
     Extra e = { 8, 8, 1000, 1000 };
+    e.dispBytes = e.dispMax = 8172; e.dispSkipped = e.dispSkippedMax = 64; // v0.4.7: the display accounting line (the frame is 8172 B, 64 controls at most)
     char buf[1100];
     const int n = format(s, e, buf, sizeof(buf));
+    CHECK(strstr(buf, "Display: frame 8172 B (max 8172)  skipped 64 (max 64)") != nullptr);
     CHECK(n > 0 && n == (int)strlen(buf) && n < (int)sizeof(buf) - 1);
     int lines = 0, fifo = 8, longest = 0;
     const char* p = buf;

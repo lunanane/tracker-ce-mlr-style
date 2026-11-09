@@ -4,6 +4,7 @@
 #include "seqPlinky.h"
 #endif
 #include "seqMasterRec.h"
+#include "display.h"
 #include <string.h>
 
 namespace seqcpu {
@@ -90,6 +91,10 @@ int buildText(char* out, int cap)
         e.recRingPct = seqmasterrec::ring().highPercent();
         e.recDropped = seqmasterrec::ring().dropped;
     }
+    e.dispBytes = display.frameBytesLast();
+    e.dispMax = display.frameBytesMax();
+    e.dispSkipped = display.skippedLast();
+    e.dispSkippedMax = display.skippedMax();
     return format(s, e, out, cap);
 }
 

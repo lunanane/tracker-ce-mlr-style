@@ -240,7 +240,7 @@ void AmpView::update(bool pageOk)
     in.bpm10 = (uint16_t)(sequencer.getCurrentTempo() * 10.0f + 0.5f);
     // the display list of the view takes what the other shown controls (title bar, labels; the mixer page under the panel is hidden while
     // the view is open, cMasterParams::showMixerDelayReverbScreen) leave of the frame; the lines fit it exactly (seqAmpViewLogic.h)
-    follower_->budget = (uint16_t)ampview::frameBudget((int)others, corr_);
+    follower_->budget = (uint16_t)ampview::traceBudget((int)others, corr_);
     display.refreshControl(control_);
     display.synchronizeRefresh();
 }

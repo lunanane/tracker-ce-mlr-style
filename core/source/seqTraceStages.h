@@ -29,6 +29,16 @@ enum
     kOwnBytes = 12      // CMD_DLSTART (display.cpp) + one blend function call of the control per stage (+ VERTEX_FORMAT(0) in the last, v0.4.3)
 };
 
+// v0.4.7: the display list of a trace view lives in the same 8172 byte frame as the other visible controls (display.cpp step3 appends
+// controls from the highest index down and stops at the first that does not fit; the trace control has the lowest index, so it is the
+// one that vanishes). What the view may use: its design budget, less what the others take, less a safety margin; never negative.
+enum { kFrameBytes = 8172, kFrameSafety = 256 };
+inline int frameRoom(int others, int design)
+{
+    const int r = kFrameBytes - kFrameSafety - others;
+    return r < 0 ? 0 : (r > design ? design : r);
+}
+
 // FIFO bytes of the commands the trace context issues (FT812.cpp): one word per DL command, CMD_TEXT 12 + the string with its zero
 // padded to a multiple of 4
 inline int textBytes(const char* s) { return 12 + (((int)strlen(s) + 1 + 3) & ~3); }
