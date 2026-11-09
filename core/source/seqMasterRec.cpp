@@ -14,10 +14,16 @@
 uint32_t seqNowMs(); // seqTracks.h: free-running milliseconds
 extern mtAudioExport exporter;
 extern cSampleRecorder sampleRecorder;
+extern uint8_t externalRamScratchBuff[]; // plan 048: the master recording ring is its tail
 
 namespace seqmasterrec {
 
-__NOINIT(EXTERNAL_RAM) __attribute__((aligned(32))) static uint32_t s_ringBuf[seqrec::kRingBytes / 4];
+// plan 048: the ring lives in the tail of the shared scratch (externalRamScratchBuff), not in its own SDRAM array: that array
+// cost 192 KB of the sample pool (v0.4.7 shrank it 45 -> 44 units and a project near 11.25 MB no longer opened). While a master
+// recording runs the export and the Sample Recorder are blocked (blocksOthers); the other scratch users are below the tail
+// (SD stream 0..320 KB, file browsers a few KB at the start) or capped by PtfxLoader::getMaxScratchSize().
+static_assert((256 + 64) * 1024 + seqrec::kRingBytes <= SHARED_SCRATCH_MEMORY_SIZE, "the master recording ring overlaps the SD stream buffer");
+static uint32_t* ringStorage() { return (uint32_t*)(externalRamScratchBuff + SHARED_SCRATCH_MEMORY_SIZE - seqrec::kRingBytes); }
 
 static seqrec::Ring s_ring;
 static seqrec::Session s_sess;
@@ -90,7 +96,7 @@ AudioStream* tapStream() { return &s_tap; }
 void init(FileSystem* fs)
 {
     s_io.fs = fs;
-    s_ring.init(s_ringBuf, seqrec::kRingBytes);
+    s_ring.init(ringStorage(), seqrec::kRingBytes);
     s_sess.init(&s_ring, &s_io);
 }
 

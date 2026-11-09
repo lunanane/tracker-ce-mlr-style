@@ -4,6 +4,7 @@
 #include "TrackerImpl.h"
 #include "mtAudioEngine.h"
 #include "mtStructs.h"
+#include "seqMasterRecLogic.h" // plan 048: kRingBytes (the master recording ring sits in the scratch tail)
 
 #include <cmath>
 #include <cstring>
@@ -71,7 +72,12 @@ void* PtfxLoader::getScratchBuffer()
 
 uint32_t PtfxLoader::getMaxScratchSize()
 {
+#ifdef PLATFORM_IMX
     return kPtfxScratchTopOffset - kPtfxScratchOffset; // 655,360 bytes (640 KB)
+#else
+    // plan 048: the top 192 KB of the scratch hold the master recording ring: 448 KB (shipped plugins need <= 176 KB)
+    return kPtfxScratchTopOffset - seqrec::kRingBytes - kPtfxScratchOffset;
+#endif
 }
 
 const PtfxHostApi* PtfxLoader::getHostApi()

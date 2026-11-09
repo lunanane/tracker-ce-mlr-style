@@ -67,6 +67,22 @@ int main()
     // a streamed sample costs the same regardless of its length
     CHECK(importResidentBytes(10 * 1000 * 1000, 1) == importResidentBytes(100 * 1000 * 1000, 1));
 
+    // plan 048: pool guards never wrap (the unsigned `max - used` of the old load check did)
+    CHECK(poolFree(100, 40) == 60);
+    CHECK(poolFree(100, 100) == 0);
+    CHECK(poolFree(100, 101) == 0);         // used > max: no free bytes, not 4 GB
+    CHECK(poolFree(0, 0xFFFFFFFFu) == 0);
+    const uint32_t pool = 45u * 256u * 1024u;
+    CHECK(fitsPool(0, pool, pool));         // exactly the whole pool
+    CHECK(!fitsPool(0, pool + 2, pool));
+    CHECK(fitsPool(pool - 1000, 1000, pool));
+    CHECK(!fitsPool(pool - 1000, 1002, pool));
+    CHECK(!fitsPool(pool + 2, 0, pool));    // starts past the end
+    CHECK(!fitsPool(pool - 10, 0xFFFFFFF0u, pool)); // offset + bytes would wrap a 32-bit sum
+    // a project that filled the 45 unit pool (bytes of 11,25 MB) must still load; 44 units would drop its last sample
+    CHECK(fitsPool(11u * 1024u * 1024u, 256u * 1024u, 45u * 256u * 1024u));
+    CHECK(!fitsPool(11u * 1024u * 1024u, 256u * 1024u, 44u * 256u * 1024u));
+
     if (fails)
     {
         printf("sampmem tests: %d FAILED\n", fails);

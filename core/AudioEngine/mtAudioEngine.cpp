@@ -20,6 +20,9 @@
 
 static constexpr int kSdStreamBufferSize = (256 + 64) * 1024;
 extern uint8_t externalRamScratchBuff[];
+#ifndef PLATFORM_IMX
+static_assert(kSdStreamBufferSize + seqrec::kRingBytes <= SHARED_SCRATCH_MEMORY_SIZE, "plan 048: the master recording ring (tail of the scratch) overlaps the SD stream buffer");
+#endif
 static_assert(kSdStreamBufferSize <= SHARED_SCRATCH_MEMORY_SIZE,
               "sdStreamBuffer exceeds shared scratch size");
 
