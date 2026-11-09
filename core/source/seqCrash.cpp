@@ -82,12 +82,13 @@ extern "C" {
 // frame = the stacked R0-R3, R12, LR, PC, xPSR of the faulting code
 __attribute__((used)) void seqcrash_fault_c(const uint32_t* frame) { seqcrash::record(seqcrash::kFault, frame); }
 // called from systick_isr (1 kHz) with the interrupted frame: while armed, a heartbeat that stands still for 10 s is a hang
-void seqcrash_tick(const uint32_t* frame)
+void seqcrash_tick(const uint32_t* frame, uint32_t excReturn)
 {
     using namespace seqcrash;
     if (!s_armed) return;
     if (s_hb != s_seen) { s_seen = s_hb; s_ms = 0; return; }
-    if (++s_ms >= 10000) record(kHang, frame);
+    if (s_ms < 10000) ++s_ms;
+    if (s_ms >= 10000 && (excReturn & 8u)) record(kHang, frame); // only a thread-mode frame: that is where the main loop is stuck
 }
 __attribute__((naked)) void seqcrash_fault_stub(void)
 {

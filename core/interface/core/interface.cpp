@@ -172,8 +172,8 @@ void Interface::processOperatingMode()
                     break;
                 }
                 seqcrash::mark(10);
+                seqcrash::arm(true); // armed before the open: a hang inside openStartupProject is caught too
                 openStartupProject();
-                seqcrash::arm(true);
                 operatingMode = mtOperatingModeShowStartScreen;
             }
             break;
