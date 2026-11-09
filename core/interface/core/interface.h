@@ -69,6 +69,7 @@ class Interface
 
     // interfaceMisc.cpp -----------------------------
     void openStartupProject();
+    void showCrashScreen(); // plan 032
     uint8_t detectProjectLoadState();
     void openNewProject();
 
@@ -162,6 +163,7 @@ class Interface
 
     hControl noSdTextControl = -1;
     hControl descriptionTextBox = -1;
+    bool crashHalt = false; // plan 032: the crash screen is up
     hControl fileTransferLabelControl = -1;
 
     // styl popupu interfejsu

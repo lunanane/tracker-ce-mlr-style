@@ -296,6 +296,7 @@ enum enumMtOperatingMode
     mtOperatingModePowerOffSequence,
     mtOperatingModeSleep,
 
+    mtOperatingModeCrashHalt, // plan 032: a crash record was logged; the last project is not opened on this boot
 };
 
 struct strSpectrumParams

@@ -1,4 +1,5 @@
 #include "seqTracks.h"
+#include "seqCrash.h" // plan 032
 #include "core/interface.h"
 
 #include "projectEditor/projectEditor.h"
@@ -12,6 +13,7 @@
 #include <mtAudioExport.h>
 
 elapsedMillis screenRefreshTimer;
+extern uint8_t externalRamScratchBuff[]; // plan 032: idle at this point (no project open, nothing streams)
 
 // extern cProjectEditor* PE;
 static void functEndFileTransferMode();
@@ -29,10 +31,36 @@ static const char* usbStorageModeDisclaimer = {
 //==================================================================================================
 void Interface::openStartupProject()
 {
-    if (!newFileManager.openProjectFromWorkspace())
+    const bool opened = newFileManager.openProjectFromWorkspace();
+    seqcrash::mark(11, opened);
+    if (!opened)
     {
         openNewProject();
     }
+}
+
+// plan 032: the record of the last run (fault or hang) goes to /crashlog.txt, the screen says so, and the last project is NOT opened.
+// Nothing is saved and the Workspace is not touched; the next power cycle (record cleared) opens it as usual.
+void Interface::showCrashScreen()
+{
+    hideStartScreen();
+    char* buf = (char*)externalRamScratchBuff; // 0..511 log text, 512..639 screen text, 640.. firmware label
+    char* fw = buf + 640;
+    snprintf(fw, 96, "%s %s", interfaceGlobals.currentFirmwareVersion, interfaceGlobals.currentFirmwareBuild ? interfaceGlobals.currentFirmwareBuild : "");
+    seqcrash::report(fileSystem, fw, buf, 512, buf + 512, 128);
+
+    strControlProperties prop;
+    prop.style = controlStyleFont1 | controlStyleShow;
+    prop.colors = display.getTheme().configItemEditorTextLabelColors;
+    prop.value = 3;
+    prop.x = 100;
+    prop.y = 200;
+    prop.w = 600;
+    prop.h = 100;
+    prop.text = buf + 512;
+    descriptionTextBox = display.createControl<cTextBox>(&prop);
+    display.refreshControl(descriptionTextBox);
+    crashHalt = true;
 }
 
 uint8_t Interface::detectProjectLoadState()

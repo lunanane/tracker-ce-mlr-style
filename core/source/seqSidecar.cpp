@@ -6,6 +6,7 @@
 #include "seqBeatRepeat.h"
 #include "seqPlinky.h"
 #include "seqHooks.h"
+#include "seqCrash.h" // plan 032
 #include "seqClipsLogic.h"
 #include "seqTracks.h"
 #include "seqTracksCore.h"
@@ -101,14 +102,21 @@ void projectFilePath(char* out, size_t cap, const char* path, const char* name, 
 // ---------------------------------------------------------------- dispatcher
 void seqSidecarsLoadWorkspace()
 {
+    seqcrash::mark(40); // plan 032: 40 tracks, 41 clips, 42 plinky, 43 beat repeat, 44 warp, 45 fx, 46 faders
     seqTracksLoadWorkspace();
+    seqcrash::mark(41);
     seqClipsLoadWorkspace();
+    seqcrash::mark(42);
 #ifdef FEATURE_PLINKY
     seqPlinkyLoadWorkspace(); // plan 009 S: synth voice values; a project without the file = voice off
 #endif
+    seqcrash::mark(43);
     seqBrLoadWorkspace();     // plan 021: beat repeat settings; a project without the file = defaults
+    seqcrash::mark(44);
     seqWarpLoadWorkspace();   // plan 016 B: per instrument Warp / bars; a project without the file = warp off
+    seqcrash::mark(45);
     seqFxLoadWorkspace();     // plan 007: reverb type / highpass / delay bandpass width; a project without the file = stock sound
+    seqcrash::mark(46);
     seqFaderProjectLoaded(); // perform FX are not saved: nothing stays dialled in across a project load
 }
 

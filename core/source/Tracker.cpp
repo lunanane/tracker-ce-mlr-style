@@ -1,6 +1,7 @@
 #include "Platform.h"
 #include "Profiler.h"
 #include "seqCpu.h" // plan 022 P1
+#include "seqCrash.h" // plan 032
 #include "seqMasterRec.h" // plan 030 A
 #include "TrackerImpl.h"
 #include "mtWavetableEnvelopes.h"
@@ -104,6 +105,8 @@ const char* Tracker::getVersion()
 void TrackerImpl::init(Platform* platform)
 {
     this->platform = platform;
+    seqcrash::begin(); // plan 032: keeps the record of the last crash, clears anything else
+    seqcrash::mark(1);
 
     initWavetableEnvelopes();
 #ifdef FEATURE_PLINKY
@@ -131,6 +134,7 @@ void TrackerImpl::init(Platform* platform)
 #else
     engine.init(platform, nullptr);
 #endif
+    seqcrash::mark(2);
     sequencer.init();
     sequencer.setCrcCalculator(platform->getCrcCalculator());
     padsBacklight.init(500, platform->getLeds());
@@ -140,6 +144,7 @@ void TrackerImpl::init(Platform* platform)
     seqcpu::init(); // plan 022 P1: cycle counter for the CPU monitor
     newFileManager.setCrcCalculator(platform->getCrcCalculator());
 
+    seqcrash::mark(3);
     initConfig(platform);
     // UI init at the end
 #ifdef FEATURE_SYNTH
@@ -148,6 +153,7 @@ void TrackerImpl::init(Platform* platform)
     mtInterface.begin(platform, nullptr);
 #endif
 
+    seqcrash::mark(4);
     bool stereoSampleMode = false;
 #ifdef PLATFORM_IMX
     stereoSampleMode = true;
@@ -160,10 +166,12 @@ void TrackerImpl::init(Platform* platform)
 #endif
 
     interfaceGlobals.devMode = platform->getFileSystem()->exists("/.develop");
+    seqcrash::mark(5);
 }
 
 void TrackerImpl::update()
 {
+    seqcrash::beat(); // plan 032: heartbeat for the hang watch
     if (lowPower.getLowPowerState() == shutdownStateSleep)
     {
         if (seqmasterrec::active())
