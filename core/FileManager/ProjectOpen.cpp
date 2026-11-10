@@ -153,7 +153,7 @@ void ProjectOpen::openProjectInit()
 void ProjectOpen::loadProjectFileFromSd()
 {
     char projectFilePath[PATCH_SIZE];
-    strProjectFile fileManagerProjectBuffer;
+    strProjectFile& fileManagerProjectBuffer = *projectFileScratch(kProjectFileOpen); // v0.4.11: not on the stack
     volatile int pathSize = sizeof(projectFilePath);
 
     snprintf(projectFilePath,

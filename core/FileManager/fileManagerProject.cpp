@@ -14,6 +14,16 @@
 #endif
 
 #include <string.h>
+#include <new>
+#include <cr_section_macros.h>
+
+// v0.4.11: the 2.3 KB project file buffers live in EXTERNAL_RAM raw storage (no constructor at boot), not on the heap or the stack.
+// The open in 0.4.7+ crashed because `new strProjectFile{}` got a null pointer from the full SRAM heap (crash log: memset at 0).
+__NOINIT(EXTERNAL_RAM) alignas(8) static uint8_t s_projectFileRaw[kProjectFileSlots][sizeof(strProjectFile)];
+strProjectFile* projectFileScratch(ProjectFileSlot slot)
+{
+    return new (s_projectFileRaw[slot]) strProjectFile{};
+}
 
 __NOINIT(EXTERNAL_RAM)
 static strRecentFile externalRamRecentProjectsList;
@@ -25,7 +35,7 @@ static strRecentFile externalRamRecentProjectsList;
 void cFileManager::saveProjectFileToWorkspace()
 {
     // sprawdza czy zaktualizowac patternBitmask
-    strProjectFile fileManagerProjectBuffer;
+    strProjectFile& fileManagerProjectBuffer = *projectFileScratch(kProjectFileSave); // v0.4.11: not on the stack
 
     if (writeProjectFileToFileStruct(&mtProject, &fileManagerProjectBuffer))
     {

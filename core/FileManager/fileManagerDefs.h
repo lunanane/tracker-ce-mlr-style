@@ -39,6 +39,10 @@ struct strProjectFile
     uint32_t crc;
 };
 
+// v0.4.11: one EXTERNAL_RAM buffer per user (fileManagerProject.cpp), value-initialised on each call like `strProjectFile{}`
+enum ProjectFileSlot { kProjectFileSave = 0, kProjectFileWorkspaceLoad, kProjectFileOpen, kProjectFileSlots };
+strProjectFile* projectFileScratch(ProjectFileSlot slot);
+
 //----------------------------------------------------------------------------------
 
 enum enFileManagerErrorSource

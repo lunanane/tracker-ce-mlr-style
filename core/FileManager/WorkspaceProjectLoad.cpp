@@ -236,7 +236,7 @@ bool WorkspaceProjectLoad::openProjectFromWorkspace()
 //=================================================================================================
 void WorkspaceProjectLoad::loadProjectFileFromWorkspace()
 {
-    strProjectFile* fileManagerProjectBuffer = new strProjectFile{};
+    strProjectFile* fileManagerProjectBuffer = projectFileScratch(kProjectFileWorkspaceLoad); // v0.4.11: was new (null when the heap is full)
 
     uint8_t loadStatus = fileTransfer.loadFileToMemory(cProjectFileNameInWorkspace,
                                                        (uint8_t*)fileManagerProjectBuffer,
@@ -266,7 +266,6 @@ void WorkspaceProjectLoad::loadProjectFileFromWorkspace()
         stopOperationWithError(fmLoadError);
     }
 
-    delete fileManagerProjectBuffer;
 }
 
 //=================================================================================================
