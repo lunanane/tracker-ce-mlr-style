@@ -9,6 +9,7 @@
 #include "elapsedMillis.h"
 #include "seqTracks.h"
 #include "seqLauncher.h"
+#include "seqPlay/seqPlay.h" // v0.4.12: seqPlayOverlayInit
 #include "seqPlinky.h"
 #include "masterParams/ampView.h" // v0.4.3: the amplitude history runs in every module
 #include "fileManager.h"
@@ -109,6 +110,7 @@ void TrackerImpl::init(Platform* platform)
     seqcrash::mark(1);
 
     initWavetableEnvelopes();
+    seqPlayOverlayInit(); // v0.4.12: Play mode overlay in EXTERNAL_RAM (constructed here, the SDRAM is up)
 #ifdef FEATURE_PLINKY
     seqPlinkyInit(); // v0.3.5: the morph state in EXTERNAL_RAM is constructed here (the SDRAM is up), not by a static constructor
 #endif

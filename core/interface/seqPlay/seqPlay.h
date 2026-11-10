@@ -188,6 +188,7 @@ class SeqPlayOverlay
     char line2_[8][12];
 };
 
-extern SeqPlayOverlay seqPlayOverlay;
+extern SeqPlayOverlay& seqPlayOverlay; // v0.4.12: EXTERNAL_RAM raw storage
+void seqPlayOverlayInit();           // TrackerImpl::init, after the SDRAM is up
 
 #endif /* INTERFACE_SEQPLAY_H_ */

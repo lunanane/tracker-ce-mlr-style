@@ -6,6 +6,8 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <new>
+#include <cr_section_macros.h>
 
 #include "FT812.h"
 #include "core/interfaceDefs.h"
@@ -20,7 +22,15 @@
 #include "seqPlay/pitchTrace.h" // plan 013 V
 #endif
 
-SeqPlayOverlay seqPlayOverlay;
+// v0.4.12: 5.6 KB of SRAM given back to the heap (it ran out: 0.4.11 crashed on a null `new` in createControl). The object is raw
+// EXTERNAL_RAM storage (no static constructor may touch the SDRAM), constructed by seqPlayOverlayInit() from TrackerImpl::init.
+__NOINIT(EXTERNAL_RAM) alignas(8) static uint8_t s_seqPlayOverlayRaw[sizeof(SeqPlayOverlay)];
+SeqPlayOverlay& seqPlayOverlay = *reinterpret_cast<SeqPlayOverlay*>(s_seqPlayOverlayRaw);
+void seqPlayOverlayInit()
+{
+    memset(s_seqPlayOverlayRaw, 0, sizeof(s_seqPlayOverlayRaw)); // a global starts zeroed; keep that for members without an initializer
+    new (s_seqPlayOverlayRaw) SeqPlayOverlay();
+}
 
 namespace {
 cPatternEditor& PE() { return patternEditor; }
