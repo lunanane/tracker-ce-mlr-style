@@ -44,19 +44,19 @@ void Interface::openStartupProject()
 void Interface::showCrashScreen()
 {
     hideStartScreen();
-    char* buf = (char*)externalRamScratchBuff; // 0..511 log text, 512..639 screen text, 640.. firmware label
-    char* fw = buf + 640;
+    char* buf = (char*)externalRamScratchBuff; // 0..511 log text, 512..1151 screen text, 1152.. firmware label (v0.4.10)
+    char* fw = buf + 1152;
     snprintf(fw, 96, "%s %s", interfaceGlobals.currentFirmwareVersion, interfaceGlobals.currentFirmwareBuild ? interfaceGlobals.currentFirmwareBuild : "");
-    seqcrash::report(fileSystem, fw, buf, 512, buf + 512, 128);
+    seqcrash::report(fileSystem, fw, buf, 512, buf + 512, 640);
 
     strControlProperties prop;
     prop.style = controlStyleFont1 | controlStyleShow;
     prop.colors = display.getTheme().configItemEditorTextLabelColors;
     prop.value = 3;
-    prop.x = 100;
-    prop.y = 200;
-    prop.w = 600;
-    prop.h = 100;
+    prop.x = 40;
+    prop.y = 60;
+    prop.w = 720;
+    prop.h = 360;
     prop.text = buf + 512;
     descriptionTextBox = display.createControl<cTextBox>(&prop);
     display.refreshControl(descriptionTextBox);

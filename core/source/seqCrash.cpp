@@ -42,11 +42,19 @@ void report(FileSystem* fs, const char* fw, char* scratch, uint32_t scratchCap, 
         if (std::get<0>(f))
         {
             ok = fs->writeFile(scratch, len, std::get<1>(f)) == (int32_t)len;
+            ok = fs->syncFile(std::get<1>(f)) && ok; // v0.4.10: the write only counts once it is on the card
             fs->closeFile(std::get<1>(f));
         }
     }
-    if (ok) snprintf(msg, msgCap, "Crash logged to crashlog.txt. Power off and on to retry.");
-    else screenFallback(g_rec, msg, msgCap);
+    // v0.4.10: the whole log is always on the screen too (a photo is enough when the file is missing); line breaks become spaces
+    int n = snprintf(msg, msgCap, "%s Power off and on to retry. ", ok ? "Crash logged to crashlog.txt." : "Crash, log NOT saved.");
+    if (n > 0 && (uint32_t)n < msgCap && len && len < msgCap - n)
+    {
+        memcpy(msg + n, scratch, len + 1);
+        for (char* c = msg + n; *c; c++)
+            if (*c == 13 || *c == 10) *c = ' ';
+    }
+    else if (!ok) screenFallback(g_rec, msg, msgCap);
     clear(g_rec); // after this the marks run again and the next power cycle opens the project normally
 }
 
